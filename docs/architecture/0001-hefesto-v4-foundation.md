@@ -24,6 +24,17 @@ afirmações nem tentará provar documentalmente cada frase.
 
 O outline é interno. Não é o objeto submetido à aprovação.
 
+## Fronteira persistida
+
+O diretório persistido pelo `PropertyGraphIndex` é enviado ao Cloud Storage como
+artefato imutável, acompanhado de manifesto com tamanho e SHA-256 de cada
+arquivo. O manifesto é gravado por último, de modo que uma execução interrompida
+não publique um artefato completo inexistente.
+
+O Firestore guarda o Projeto Editorial, seu status e a referência do artefato.
+O corpo do artigo final permanece no Storage; somente URI, contagens e resultado
+da crítica editorial ficam no Firestore.
+
 ## Hermes
 
 O Hermes não fica embutido no Hefesto. O encaixe é uma porta opcional de
@@ -45,4 +56,3 @@ Na dúvida, o componente não é copiado.
 
 API, Cloud Tasks, dispatcher privado, Cloud Run Jobs, Firestore e Storage são
 candidatos à reutilização conceitual. Nenhum deles é transplantado por padrão.
-

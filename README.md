@@ -26,6 +26,7 @@ decisões internas posteriores do redator.
 
 - LlamaIndex para `PropertyGraphIndex`, recuperação e workflows editoriais;
 - Google GenAI sobre Vertex AI, usando ADC;
+- Firestore para o estado compacto do workflow e Cloud Storage para artefatos;
 - nenhuma dependência de Microsoft GraphRAG;
 - nenhuma dependência de Microsoft Amplifier;
 - nenhum requisito de LlamaCloud ou LlamaParse.
@@ -33,6 +34,22 @@ decisões internas posteriores do redator.
 O roteamento de modelos é configurável. A base usa Flash para construção do
 grafo, pesquisa e crítica; Pro para Projeto Editorial, arquitetura narrativa,
 redação e edição.
+
+## Persistência
+
+O grafo é salvo no Cloud Storage como um artefato imutável. Um manifesto escrito
+por último registra caminho, tamanho e SHA-256 de cada arquivo. O Projeto
+Editorial e seu estado de aprovação ficam no Firestore. O Markdown final também
+fica no Storage; o Firestore guarda somente sua URI e metadados.
+
+Projeto GCP, bucket, prefixos e coleções são configuração de implantação. O
+código não contém nomes herdados do V3 e usa Application Default Credentials.
+
+## Hermes
+
+O fluxo inicial trabalha apenas com as fontes já selecionadas. Uma porta
+opcional de descoberta aceita fontes normalizadas do Hermes sem permitir que ele
+se torne redator, finalizador ou dependência interna do Hefesto.
 
 ## Desenvolvimento local
 
