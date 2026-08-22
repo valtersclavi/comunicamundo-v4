@@ -1,4 +1,4 @@
-"""Cloud Run Job entrypoint for planning or production."""
+"""Cloud Run Job entrypoint for planning, approval, or production."""
 
 from __future__ import annotations
 
@@ -84,6 +84,10 @@ async def _run(args: argparse.Namespace) -> None:
             brief=request.brief,
             sources=request.sources,
         )
+    elif args.command == "approve":
+        result = await application.approve_editorial_project(
+            args.editorial_project_id
+        )
     else:
         result = await application.produce_article(args.editorial_project_id)
     print(result.model_dump_json())
@@ -94,6 +98,8 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     plan = subparsers.add_parser("plan", help="build an Editorial Project")
     plan.add_argument("--request", required=True, help="local path or gs:// JSON URI")
+    approve = subparsers.add_parser("approve", help="approve an Editorial Project")
+    approve.add_argument("--editorial-project-id", required=True, type=UUID)
     produce = subparsers.add_parser("produce", help="write an approved project")
     produce.add_argument("--editorial-project-id", required=True, type=UUID)
     return parser
