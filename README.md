@@ -72,3 +72,14 @@ O worker exige `GOOGLE_CLOUD_PROJECT` e `HEFESTO_GCS_BUCKET`. A região vem de
 `GOOGLE_CLOUD_LOCATION` e assume `us-central1` quando omitida. O comando
 `plan` termina depois de persistir a proposta; somente uma nova execução de
 `produce`, após aprovação, restaura o grafo e escreve o artigo.
+
+## Ambiente de prova
+
+Enquanto o produto estiver em construção, o `main` é publicado diretamente no
+projeto GCP único `comunicamundo-v4`. A imagem fica no Artifact Registry
+`comunicamundo-v4`, o worker é o Cloud Run Job `hefesto-v4` e os artefatos usam
+o bucket exclusivo `comunicamundo-v4-hefesto-30524898837`.
+
+O GitHub autentica por Workload Identity Federation restrita ao repositório
+`valtersclavi/comunicamundo-v4` e à branch `main`; nenhuma chave permanente é
+armazenada no repositório.
