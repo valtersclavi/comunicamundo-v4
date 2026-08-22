@@ -58,3 +58,17 @@ python -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 ```
+
+## Worker
+
+A mesma imagem executa um único lado da fronteira de aprovação por vez:
+
+```bash
+comunicamundo-v4-worker plan --request gs://BUCKET/requests/PROJECT.json
+comunicamundo-v4-worker produce --editorial-project-id EDITORIAL_PROJECT_UUID
+```
+
+O worker exige `GOOGLE_CLOUD_PROJECT` e `HEFESTO_GCS_BUCKET`. A região vem de
+`GOOGLE_CLOUD_LOCATION` e assume `us-central1` quando omitida. O comando
+`plan` termina depois de persistir a proposta; somente uma nova execução de
+`produce`, após aprovação, restaura o grafo e escreve o artigo.

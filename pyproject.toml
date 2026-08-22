@@ -16,6 +16,9 @@ dependencies = [
   "pydantic>=2.12,<3",
 ]
 
+[project.scripts]
+comunicamundo-v4-worker = "comunicamundo_v4.hefesto.worker:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest==8.4.2",

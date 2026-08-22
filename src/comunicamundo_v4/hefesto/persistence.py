@@ -306,6 +306,12 @@ class GcpEditorialPersistence:
             )
         return self.repository.save_editorial_project(project, existing.graph_artifact)
 
+    def get_editorial_project(
+        self,
+        editorial_project_id: UUID,
+    ) -> StoredEditorialProject | None:
+        return self.repository.get_editorial_project(editorial_project_id)
+
     def restore_graph(
         self,
         stored: StoredEditorialProject,
