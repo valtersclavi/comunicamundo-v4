@@ -1,0 +1,136 @@
+name: main
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: comunicamundo-v4-main
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: comunicamundo-v4
+  PROJECT_NUMBER: "30524898837"
+  REGION: us-central1
+  REPOSITORY: comunicamundo-v4
+  JOB_NAME: hefesto-v4
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+
+jobs:
+  test-build-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Test the V4 package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install '.[dev]'
+          pytest
+          python -m compileall -q src tests
+
+      - name: Build the worker image
+        run: |
+          set -euo pipefail
+          image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${JOB_NAME}:sha-${GITHUB_SHA}"
+          docker build --tag "${image}" .
+          echo "IMAGE=${image}" >> "${GITHUB_ENV}"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Push the worker image
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker push "${IMAGE}"
+          digest="$(gcloud artifacts docker images describe "${IMAGE}" \
+            --project="${PROJECT_ID}" \
+            --format='value(image_summary.digest)')"
+          test -n "${digest}"
+          echo "PINNED_IMAGE=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${JOB_NAME}@${digest}" >> "${GITHUB_ENV}"
+
+      - name: Deploy the Hefesto V4 job
+        run: |
+          set -euo pipefail
+          gcloud run jobs deploy "${JOB_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --image="${PINNED_IMAGE}" \
+            --service-account="${RUNTIME_SA}" \
+            --args=--help \
+            --cpu=4 \
+            --memory=8Gi \
+            --task-timeout=3600s \
+            --max-retries=0 \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET}" \
+            --quiet
+
+      - name: Run a no-model startup smoke
+        run: |
+          set -euo pipefail
+          execution="$(gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --wait \
+            --format='value(metadata.name)')"
+          test -n "${execution}"
+          echo "EXECUTION=${execution}" >> "${GITHUB_ENV}"
+
+      - name: Verify the deployed boundary
+        run: |
+          set -euo pipefail
+          deployed_image="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          deployed_sa="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.serviceAccountName)')"
+          test "${deployed_image}" = "${PINNED_IMAGE}"
+          test "${deployed_sa}" = "${RUNTIME_SA}"
+
+      - name: Write the result
+        if: always()
+        run: |
+          {
+            echo "# ComunicAmundo V4 main"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Image: \`${PINNED_IMAGE:-NOT_PUSHED}\`"
+            echo "- Job: \`${JOB_NAME}\`"
+            echo "- Startup execution: \`${EXECUTION:-NOT_RUN}\`"
+            echo "- Model invocation: none"
+            echo
+            if [ -n "${EXECUTION:-}" ]; then
+              echo "## V4_MAIN_SMOKE: SUCCESS"
+            else
+              echo "## V4_MAIN_SMOKE: FAILED"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

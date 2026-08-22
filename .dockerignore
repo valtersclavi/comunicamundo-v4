@@ -5,3 +5,4 @@ __pycache__
 *.pyc
 tests
 docs
+gha-creds-*.json
