@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from comunicamundo_v4.hefesto.worker import PlanningJobRequest, _read_request
+from comunicamundo_v4.hefesto.worker import PlanningJobRequest, _parser, _read_request
 
 
 def test_local_planning_request_is_strictly_validated(tmp_path) -> None:
@@ -66,3 +66,18 @@ def test_planning_request_rejects_recipe_fields(tmp_path) -> None:
         PlanningJobRequest.model_validate(
             _read_request(str(request_path), project="unused")
         )
+
+
+def test_approval_command_requires_a_valid_editorial_project_id() -> None:
+    editorial_project_id = uuid4()
+
+    args = _parser().parse_args(
+        [
+            "approve",
+            "--editorial-project-id",
+            str(editorial_project_id),
+        ]
+    )
+
+    assert args.command == "approve"
+    assert args.editorial_project_id == editorial_project_id

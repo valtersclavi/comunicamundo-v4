@@ -56,6 +56,24 @@ class HefestoApplication:
                 graph_directory,
             )
 
+    async def approve_editorial_project(
+        self,
+        editorial_project_id: UUID,
+    ) -> StoredEditorialProject:
+        stored = await asyncio.to_thread(
+            self._persistence.get_editorial_project,
+            editorial_project_id,
+        )
+        if stored is None:
+            raise KeyError(f"editorial project not found: {editorial_project_id}")
+        if stored.editorial_project.status is EditorialProjectStatus.APPROVED:
+            return stored
+        approved = stored.editorial_project.approve()
+        return await asyncio.to_thread(
+            self._persistence.save_editorial_project,
+            approved,
+        )
+
     async def produce_article(self, editorial_project_id: UUID) -> PublishedArticle:
         stored = await asyncio.to_thread(
             self._persistence.get_editorial_project,

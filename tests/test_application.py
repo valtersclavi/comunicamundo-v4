@@ -76,6 +76,10 @@ class Persistence:
     def get_editorial_project(self, editorial_project_id):
         return self.stored
 
+    def save_editorial_project(self, project):
+        self.stored.editorial_project = project
+        return self.stored
+
     def restore_graph(self, stored, destination):
         destination.mkdir(parents=True)
         (destination / "graph.json").write_text("{}", encoding="utf-8")
@@ -117,10 +121,39 @@ async def test_application_stops_and_resumes_across_approval() -> None:
     with pytest.raises(ValueError, match="approved"):
         await application.produce_article(stored.editorial_project.editorial_project_id)
 
-    persistence.stored.editorial_project = stored.editorial_project.approve()
+    approved = await application.approve_editorial_project(
+        stored.editorial_project.editorial_project_id
+    )
+    assert approved.editorial_project.status.value == "approved"
+
     publication = await application.produce_article(
         stored.editorial_project.editorial_project_id
     )
 
     assert publication.quality_score == 91
     assert publication.body_uri == "gs://test/article.md"
+
+
+async def test_approval_is_idempotent() -> None:
+    persistence = Persistence()
+    application = HefestoApplication(runtime=Runtime(), persistence=persistence)
+    stored = await application.plan_project(
+        project_id=uuid4(),
+        brief=_brief(),
+        sources=[
+            NormalizedSource(
+                source_id=uuid4(),
+                text="Conteúdo da fonte.",
+                language="pt",
+            )
+        ],
+    )
+
+    first = await application.approve_editorial_project(
+        stored.editorial_project.editorial_project_id
+    )
+    second = await application.approve_editorial_project(
+        stored.editorial_project.editorial_project_id
+    )
+
+    assert second.editorial_project.approved_at == first.editorial_project.approved_at
