@@ -62,7 +62,10 @@ Perguntas de pesquisa:
 Material recuperado:
 {graph_context}
 
-Responda no idioma {output_language}. Não mencione o processo técnico.
+Entregue um briefing interno em Markdown, no idioma {output_language}, com 400
+a 700 palavras. Organize livremente síntese, ângulos promissores, tensões e
+material concreto, sem transformar as perguntas numa lista de respostas.
+Não repita ideias, não use citações numéricas e não mencione o processo técnico.
 """.strip()
 )
 
