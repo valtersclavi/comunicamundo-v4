@@ -12,7 +12,6 @@ from .contracts import (
     EditorialReview,
     NarrativePlan,
     SubjectResearch,
-    SubjectResearchProposal,
 )
 from .graph import ProjectGraph
 from .prompts import (
@@ -50,8 +49,7 @@ class SubjectResearcher:
     async def _research_subject(self, *, project, graph, subject) -> SubjectResearch:
         graph_context = await graph.context_for_subject(subject, project.brief)
         questions = "\n".join(f"- {question}" for question in subject.research_questions)
-        proposal = await self._llm.astructured_predict(
-            SubjectResearchProposal,
+        synthesis = await self._llm.apredict(
             SUBJECT_RESEARCH_PROMPT,
             theme=project.brief.theme,
             approach=project.brief.approach,
@@ -64,7 +62,7 @@ class SubjectResearcher:
         )
         return SubjectResearch(
             subject_id=subject.subject_id,
-            **proposal.model_dump(),
+            synthesis=synthesis.strip(),
         )
 
 

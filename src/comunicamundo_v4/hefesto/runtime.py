@@ -52,10 +52,15 @@ def build_vertex_runtime(settings: VertexRuntimeSettings) -> HefestoRuntime:
         "location": settings.location,
     }
 
-    def llm(model: str, temperature: float) -> GoogleGenAI:
+    def llm(
+        model: str,
+        temperature: float,
+        max_tokens: int | None = None,
+    ) -> GoogleGenAI:
         return GoogleGenAI(
             model=model,
             temperature=temperature,
+            max_tokens=max_tokens,
             vertexai_config=vertexai_config,
         )
 
@@ -71,7 +76,7 @@ def build_vertex_runtime(settings: VertexRuntimeSettings) -> HefestoRuntime:
             embed_model=embed_model,
         ),
         production_workflow=EditorialProductionWorkflow(
-            research_llm=llm(settings.research_model, 0.2),
+            research_llm=llm(settings.research_model, 0.2, 4096),
             architecture_llm=llm(settings.architecture_model, 0.5),
             writing_llm=llm(settings.writing_model, 0.7),
             critic_llm=llm(settings.critic_model, 0.2),

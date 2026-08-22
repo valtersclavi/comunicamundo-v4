@@ -122,15 +122,6 @@ class SubjectResearch(StrictModel):
     concrete_material: list[str] = Field(default_factory=list, max_length=12)
 
 
-class SubjectResearchProposal(StrictModel):
-    """Model output before the server binds it to an approved subject."""
-
-    synthesis: str = Field(min_length=1)
-    promising_angles: list[str] = Field(default_factory=list, max_length=8)
-    tensions: list[str] = Field(default_factory=list, max_length=8)
-    concrete_material: list[str] = Field(default_factory=list, max_length=12)
-
-
 class NarrativeBeat(StrictModel):
     """One internal movement of the article; never shown for approval."""
 
