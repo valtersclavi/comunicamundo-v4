@@ -88,13 +88,20 @@ A mesma imagem executa um único lado da fronteira de aprovação por vez:
 
 ```bash
 comunicamundo-v4-worker plan --request gs://BUCKET/requests/PROJECT.json
+comunicamundo-v4-worker approve --editorial-project-id EDITORIAL_PROJECT_UUID
 comunicamundo-v4-worker produce --editorial-project-id EDITORIAL_PROJECT_UUID
 ```
 
 O worker exige `GOOGLE_CLOUD_PROJECT` e `HEFESTO_GCS_BUCKET`. A região vem de
 `GOOGLE_CLOUD_LOCATION` e assume `us-central1` quando omitida. O comando
-`plan` termina depois de persistir a proposta; somente uma nova execução de
-`produce`, após aprovação, restaura o grafo e escreve o artigo.
+`plan` termina depois de persistir a proposta; `approve` registra a aprovação;
+somente uma nova execução de `produce`, após aprovação, restaura o grafo e
+escreve o artigo.
+
+No iPad, sem `gcloud` local e sem credenciais GCP no Cursor, essas operações
+saem do GitHub Actions `operate` em `main`, autenticado por WIF. O JSON de
+`plan` precisa já estar no bucket de prova. A inspeção de uma execução é um
+disparo separado e não espera o Job terminar.
 
 ## Ambiente de prova
 

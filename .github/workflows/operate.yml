@@ -1,0 +1,227 @@
+name: operate
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Worker operation or inspect
+        required: true
+        type: choice
+        options:
+          - plan
+          - approve
+          - produce
+          - inspect
+      request_uri:
+        description: gs:// JSON URI for plan only
+        required: false
+        type: string
+        default: ""
+      editorial_project_id:
+        description: Editorial Project UUID for approve or produce only
+        required: false
+        type: string
+        default: ""
+      execution_name:
+        description: Cloud Run Job execution name for inspect only
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: comunicamundo-v4-operate-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: comunicamundo-v4
+  PROJECT_NUMBER: "30524898837"
+  REGION: us-central1
+  REPOSITORY: comunicamundo-v4
+  JOB_NAME: hefesto-v4
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      operation: ${{ steps.prepare.outputs.operation }}
+      mode: ${{ steps.prepare.outputs.mode }}
+      gcloud_args: ${{ steps.prepare.outputs.gcloud_args }}
+      request_uri: ${{ steps.prepare.outputs.request_uri }}
+      editorial_project_id: ${{ steps.prepare.outputs.editorial_project_id }}
+      execution_name: ${{ steps.prepare.outputs.execution_name }}
+
+    steps:
+      - name: Check out the revision
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the V4 package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install '.[dev]'
+
+      - name: Validate inputs and fail closed
+        id: prepare
+        env:
+          OPERATE_OPERATION: ${{ inputs.operation }}
+          OPERATE_REQUEST_URI: ${{ inputs.request_uri }}
+          OPERATE_EDITORIAL_PROJECT_ID: ${{ inputs.editorial_project_id }}
+          OPERATE_EXECUTION_NAME: ${{ inputs.execution_name }}
+        run: |
+          set -euo pipefail
+          python -m comunicamundo_v4.hefesto.operate prepare \
+            --operation "${OPERATE_OPERATION}" \
+            --request-uri "${OPERATE_REQUEST_URI}" \
+            --editorial-project-id "${OPERATE_EDITORIAL_PROJECT_ID}" \
+            --execution-name "${OPERATE_EXECUTION_NAME}" \
+            --github-output "${GITHUB_OUTPUT}" \
+            --summary-file "${RUNNER_TEMP}/operate-prepare.md"
+          cat "${RUNNER_TEMP}/operate-prepare.md" >> "${GITHUB_STEP_SUMMARY}"
+
+  operate:
+    needs: prepare
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PREPARED_OPERATION: ${{ needs.prepare.outputs.operation }}
+      PREPARED_MODE: ${{ needs.prepare.outputs.mode }}
+      PREPARED_GCLOUD_ARGS: ${{ needs.prepare.outputs.gcloud_args }}
+      PREPARED_REQUEST_URI: ${{ needs.prepare.outputs.request_uri }}
+      PREPARED_EDITORIAL_PROJECT_ID: ${{ needs.prepare.outputs.editorial_project_id }}
+      PREPARED_EXECUTION_NAME: ${{ needs.prepare.outputs.execution_name }}
+
+    steps:
+      - name: Check out the revision
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the V4 package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install '.[dev]'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Confirm the proof project
+        run: |
+          set -euo pipefail
+          test "${PROJECT_ID}" = "comunicamundo-v4"
+          test "${JOB_NAME}" = "hefesto-v4"
+          configured="$(gcloud config get-value project)"
+          test "${configured}" = "comunicamundo-v4"
+
+      - name: Validate the plan request object
+        if: needs.prepare.outputs.mode == 'dispatch' && needs.prepare.outputs.operation == 'plan'
+        run: |
+          set -euo pipefail
+          test -n "${PREPARED_REQUEST_URI}"
+          gcloud storage cat "${PREPARED_REQUEST_URI}" --project="${PROJECT_ID}" \
+            > "${RUNNER_TEMP}/plan-request.json"
+          python -m comunicamundo_v4.hefesto.operate validate-plan-request \
+            --request-file "${RUNNER_TEMP}/plan-request.json" \
+            --summary-file "${RUNNER_TEMP}/plan-request.md"
+          cat "${RUNNER_TEMP}/plan-request.md" >> "${GITHUB_STEP_SUMMARY}"
+          rm -f "${RUNNER_TEMP}/plan-request.json"
+
+      - name: Dispatch the Cloud Run Job asynchronously
+        if: needs.prepare.outputs.mode == 'dispatch'
+        run: |
+          set -euo pipefail
+          test -n "${PREPARED_GCLOUD_ARGS}"
+          execution="$(gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --args="${PREPARED_GCLOUD_ARGS}" \
+            --async \
+            --format='value(metadata.name)')"
+          test -n "${execution}"
+          case "${execution}" in
+            hefesto-v4-*) ;;
+            *) echo "unexpected execution name" >&2; exit 1 ;;
+          esac
+          echo "EXECUTION=${execution}" >> "${GITHUB_ENV}"
+
+      - name: Inspect one execution
+        if: needs.prepare.outputs.mode == 'inspect'
+        run: |
+          set -euo pipefail
+          test -n "${PREPARED_EXECUTION_NAME}"
+          gcloud run jobs executions describe "${PREPARED_EXECUTION_NAME}" \
+            --job="${JOB_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format=json > "${RUNNER_TEMP}/execution.json"
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND labels.\"run.googleapis.com/execution_name\"=${PREPARED_EXECUTION_NAME}" \
+            --project="${PROJECT_ID}" \
+            --limit=30 \
+            --freshness=7d \
+            --format='value(textPayload)' \
+            > "${RUNNER_TEMP}/execution.log" || true
+          python -m comunicamundo_v4.hefesto.operate summarize-inspect \
+            --execution-json "${RUNNER_TEMP}/execution.json" \
+            --log-file "${RUNNER_TEMP}/execution.log" \
+            --summary-file "${RUNNER_TEMP}/inspect.md"
+          cat "${RUNNER_TEMP}/inspect.md" >> "${GITHUB_STEP_SUMMARY}"
+          rm -f "${RUNNER_TEMP}/execution.log"
+
+      - name: Write the dispatch result
+        if: needs.prepare.outputs.mode == 'dispatch'
+        run: |
+          set -euo pipefail
+          test -n "${EXECUTION}"
+          {
+            echo
+            echo "# ComunicAmundo V4 operate"
+            echo
+            echo "- Operation: \`${PREPARED_OPERATION}\`"
+            echo "- Mode: \`dispatch\`"
+            echo "- Project: \`${PROJECT_ID}\`"
+            echo "- Job: \`${JOB_NAME}\`"
+            echo "- Region: \`${REGION}\`"
+            echo "- worker_argv: \`${PREPARED_GCLOUD_ARGS}\`"
+            echo "- Execution: \`${EXECUTION}\`"
+            echo "- Model invocation: not awaited by this workflow"
+            echo
+            echo "## OPERATE: DISPATCHED"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  refuse-non-main:
+    needs: prepare
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail closed off main
+        run: |
+          set -euo pipefail
+          echo "WIF and Cloud Run operation are restricted to main." >> "${GITHUB_STEP_SUMMARY}"
+          exit 1

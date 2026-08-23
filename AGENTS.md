@@ -50,10 +50,19 @@ Federation na branch `main`. Não configure ADC nem `GOOGLE_APPLICATION_CREDENTI
 neste ambiente.
 
 O worker exige `GOOGLE_CLOUD_PROJECT` e `HEFESTO_GCS_BUCKET`. A região vem de
-`GOOGLE_CLOUD_LOCATION` e assume `us-central1` quando omitida. Não execute
-`plan`, `approve` ou `produce` reais a menos que a tarefa peça uma prova
-delimitada. Uma prova real deve ser única, observável e sem modelo se o
-objetivo for só startup.
+`GOOGLE_CLOUD_LOCATION` e assume `us-central1` quando omitida.
+
+Do iPad, dispare `.github/workflows/operate.yml` em `main` (Actions → operate):
+
+- `plan`: somente `request_uri` `gs://comunicamundo-v4-hefesto-30524898837/...`
+- `approve` ou `produce`: somente `editorial_project_id`
+- `inspect`: somente `execution_name` no formato `hefesto-v4-...`
+
+`plan`, `approve` e `produce` disparam o Job `hefesto-v4` de forma assíncrona e
+gravam o nome da execução no Step Summary. `inspect` descreve uma execução
+sem esperar. Combinações inválidas falham fechadas. Não execute `plan` ou
+`produce` com modelo a menos que a tarefa peça uma prova delimitada. Uma prova
+de startup deve ser única, observável e sem modelo.
 
 ## Entrega
 
