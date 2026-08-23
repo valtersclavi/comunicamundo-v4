@@ -51,13 +51,36 @@ O fluxo inicial trabalha apenas com as fontes já selecionadas. Uma porta
 opcional de descoberta aceita fontes normalizadas do Hermes sem permitir que ele
 se torne redator, finalizador ou dependência interna do Hefesto.
 
+## Cloud Agent no iPad
+
+O desenvolvimento e a operação do V4 acontecem neste repositório pelo Cursor
+Cloud Agent. O ambiente lê `.cursor/environment.json` e instala o pacote com
+`python3 -m pip install -e '.[dev]'`. As regras permanentes estão em
+`AGENTS.md`.
+
+```bash
+python3 -m pytest
+python3 -m compileall -q src tests
+python3 -m comunicamundo_v4.hefesto.worker --help
+```
+
+Push em `main` dispara o GitHub Actions: testes, imagem e deploy do Job no
+projeto GCP de prova `comunicamundo-v4`, autenticado por Workload Identity
+Federation. Não coloque chaves permanentes do Google no Cursor. Não reutilize
+secrets `STAGING_*`.
+
 ## Desenvolvimento local
+
+Numa máquina com `python3-venv`:
 
 ```bash
 python -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 ```
+
+No Cloud Agent a imagem pode não ter `ensurepip`. Use o install do
+`.cursor/environment.json` e os comandos `python3 -m` acima.
 
 ## Worker
 

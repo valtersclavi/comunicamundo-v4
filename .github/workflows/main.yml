@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,8 +12,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: comunicamundo-v4-main
-  cancel-in-progress: false
+  group: comunicamundo-v4-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PROJECT_ID: comunicamundo-v4
@@ -26,12 +27,12 @@ env:
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
 
 jobs:
-  test-build-deploy:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
 
     steps:
-      - name: Check out main
+      - name: Check out the revision
         uses: actions/checkout@v7
 
       - name: Set up Python
@@ -44,8 +45,18 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install '.[dev]'
-          pytest
+          python -m pytest
           python -m compileall -q src tests
+
+  build-deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
 
       - name: Build the worker image
         run: |
