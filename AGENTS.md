@@ -54,15 +54,21 @@ O worker exige `GOOGLE_CLOUD_PROJECT` e `HEFESTO_GCS_BUCKET`. A região vem de
 
 Do iPad, dispare `.github/workflows/operate.yml` em `main` (Actions → operate):
 
-- `plan`: somente `request_uri` `gs://comunicamundo-v4-hefesto-30524898837/...`
-- `approve` ou `produce`: somente `editorial_project_id`
-- `inspect`: somente `execution_name` no formato `hefesto-v4-...`
+- `plan`: somente `request_uri` `gs://comunicamundo-v4-hefesto-30524898837/...`; cria o grafo e propõe o Eixo Narrativo;
+- `revise-axis`: `narrative_axis_id` + `feedback`;
+- `approve-axis`: somente `narrative_axis_id`; aprova o eixo e cria o Projeto Editorial;
+- `revise-project`: `editorial_project_id` + `feedback`;
+- `approve`: somente `editorial_project_id`;
+- `produce`: somente `editorial_project_id`;
+- `inspect`: somente `execution_name` no formato `hefesto-v4-...`.
 
-`plan`, `approve` e `produce` disparam o Job `hefesto-v4` de forma assíncrona e
-gravam o nome da execução no Step Summary. `inspect` descreve uma execução
-sem esperar. Combinações inválidas falham fechadas. Não execute `plan` ou
-`produce` com modelo a menos que a tarefa peça uma prova delimitada. Uma prova
-de startup deve ser única, observável e sem modelo.
+As combinações inválidas falham fechadas. As operações de worker disparam o Job
+`hefesto-v4` de forma assíncrona e gravam o nome da execução no Step Summary.
+`inspect` descreve uma execução sem esperar. Feedback textual é codificado antes
+de virar argumento do Job e não deve ser repetido no Step Summary.
+
+Não execute operações com modelo a menos que a tarefa peça uma prova delimitada.
+Uma prova de startup deve ser única, observável e sem modelo.
 
 ## Entrega
 

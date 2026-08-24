@@ -34,54 +34,106 @@ class NormalizedSource(StrictModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class EditorialSubjectProposal(StrictModel):
-    """Model-generated subject before server-owned identity is assigned."""
+class NarrativeAxisProposal(StrictModel):
+    """One or two sentences that define the governing editorial reading."""
 
-    title: str = Field(min_length=1)
-    purpose: str = Field(min_length=1)
-    research_questions: list[str] = Field(min_length=1, max_length=8)
+    statement: str = Field(min_length=1, max_length=480)
+
+
+class NarrativeAxisStatus(StrEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+
+
+class NarrativeAxis(StrictModel):
+    """The first user-approved editorial decision, before subjects are chosen."""
+
+    narrative_axis_id: UUID = Field(default_factory=uuid4)
+    project_id: UUID
+    brief: EditorialBrief
+    statement: str = Field(min_length=1, max_length=480)
+    version: int = Field(default=1, ge=1)
+    status: NarrativeAxisStatus = NarrativeAxisStatus.PROPOSED
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    approved_at: datetime | None = None
+
+    def approve(self) -> NarrativeAxis:
+        if self.status is NarrativeAxisStatus.APPROVED:
+            return self
+        now = datetime.now(UTC)
+        return self.model_copy(
+            update={
+                "status": NarrativeAxisStatus.APPROVED,
+                "approved_at": now,
+                "updated_at": now,
+            }
+        )
+
+    def revise(self, statement: str) -> NarrativeAxis:
+        if self.status is NarrativeAxisStatus.APPROVED:
+            raise ValueError("an approved Narrative Axis cannot be revised")
+        payload = self.model_dump()
+        payload.update(
+            {
+                "statement": statement,
+                "version": self.version + 1,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        return NarrativeAxis.model_validate(payload)
+
+
+class EditorialSubjectProposal(StrictModel):
+    """Compact subject proposal before server-owned identity is assigned."""
+
+    title: str = Field(min_length=1, max_length=160)
+    development: str = Field(min_length=1, max_length=480)
     estimated_minutes: int = Field(ge=1, le=120)
 
 
 class EditorialProjectProposal(StrictModel):
-    """Structured output produced by the editorial planner."""
+    """Compact structured output produced after Narrative Axis approval."""
 
-    working_title: str = Field(min_length=1)
-    editorial_promise: str = Field(min_length=1)
+    working_title: str = Field(min_length=1, max_length=200)
     subjects: list[EditorialSubjectProposal] = Field(min_length=1, max_length=20)
 
 
 class EditorialSubject(StrictModel):
-    """A user-visible and independently editable editorial subject."""
+    """A user-visible editorial subject with only the development to approve."""
 
     subject_id: UUID = Field(default_factory=uuid4)
-    title: str = Field(min_length=1)
-    purpose: str = Field(min_length=1)
-    research_questions: list[str] = Field(min_length=1, max_length=8)
+    title: str = Field(min_length=1, max_length=160)
+    development: str = Field(min_length=1, max_length=480)
     estimated_minutes: int = Field(ge=1, le=120)
 
 
 class EditorialProjectStatus(StrEnum):
     PROPOSED = "proposed"
     APPROVED = "approved"
-    REVISION_REQUESTED = "revision_requested"
 
 
 class EditorialProject(StrictModel):
-    """The sole object presented for editorial approval."""
+    """Subjects proposed to realize one already-approved Narrative Axis."""
 
     editorial_project_id: UUID = Field(default_factory=uuid4)
     project_id: UUID
     brief: EditorialBrief
-    working_title: str = Field(min_length=1)
-    editorial_promise: str = Field(min_length=1)
+    narrative_axis: NarrativeAxis
+    working_title: str = Field(min_length=1, max_length=200)
     subjects: list[EditorialSubject] = Field(min_length=1, max_length=20)
+    version: int = Field(default=1, ge=1)
     status: EditorialProjectStatus = EditorialProjectStatus.PROPOSED
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     approved_at: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_duration(self) -> EditorialProject:
+    def validate_project(self) -> EditorialProject:
+        if self.narrative_axis.project_id != self.project_id:
+            raise ValueError("Narrative Axis and Editorial Project project IDs differ")
+        if self.narrative_axis.status is not NarrativeAxisStatus.APPROVED:
+            raise ValueError("Editorial Project requires an approved Narrative Axis")
         allocated = sum(subject.estimated_minutes for subject in self.subjects)
         tolerance = max(1, round(self.brief.duration_minutes * 0.15))
         if abs(allocated - self.brief.duration_minutes) > tolerance:
@@ -91,17 +143,42 @@ class EditorialProject(StrictModel):
         return self
 
     def approve(self) -> EditorialProject:
+        if self.status is EditorialProjectStatus.APPROVED:
+            return self
+        now = datetime.now(UTC)
         return self.model_copy(
             update={
                 "status": EditorialProjectStatus.APPROVED,
-                "approved_at": datetime.now(UTC),
+                "approved_at": now,
+                "updated_at": now,
             }
         )
+
+    def revise(
+        self,
+        *,
+        working_title: str,
+        subjects: list[EditorialSubject],
+    ) -> EditorialProject:
+        if self.status is EditorialProjectStatus.APPROVED:
+            raise ValueError("an approved Editorial Project cannot be revised")
+        payload = self.model_dump()
+        payload.update(
+            {
+                "working_title": working_title,
+                "subjects": [subject.model_dump() for subject in subjects],
+                "version": self.version + 1,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        return EditorialProject.model_validate(payload)
 
 
 class WorkflowStage(StrEnum):
     RECEIVED = "received"
     BUILDING_GRAPH = "building_graph"
+    BUILDING_NARRATIVE_AXIS = "building_narrative_axis"
+    AWAITING_NARRATIVE_AXIS_APPROVAL = "awaiting_narrative_axis_approval"
     BUILDING_EDITORIAL_PROJECT = "building_editorial_project"
     AWAITING_EDITORIAL_APPROVAL = "awaiting_editorial_approval"
     RESEARCHING = "researching"

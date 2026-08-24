@@ -17,7 +17,7 @@ from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.llms import LLM
 from llama_index.core.schema import NodeWithScore
 
-from .contracts import EditorialBrief, EditorialSubject, NormalizedSource
+from .contracts import EditorialBrief, EditorialSubject, NarrativeAxis, NormalizedSource
 from .prompts import GRAPH_PLANNING_QUERY
 
 
@@ -94,14 +94,14 @@ class ProjectGraph:
         self,
         subject: EditorialSubject,
         brief: EditorialBrief,
+        narrative_axis: NarrativeAxis,
     ) -> str:
-        questions = "\n".join(f"- {question}" for question in subject.research_questions)
         query = (
             f"Tema geral: {brief.theme}\n"
-            f"Abordagem: {brief.approach}\n"
+            f"Abordagem/intenção: {brief.approach}\n"
+            f"Eixo Narrativo aprovado: {narrative_axis.statement}\n"
             f"Assunto: {subject.title}\n"
-            f"Função: {subject.purpose}\n"
-            f"Perguntas:\n{questions}"
+            f"Desenvolvimento esperado: {subject.development}"
         )
         retriever: BaseRetriever = self.index.as_retriever(
             include_text=True,
