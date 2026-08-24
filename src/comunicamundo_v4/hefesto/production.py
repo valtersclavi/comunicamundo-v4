@@ -7,12 +7,7 @@ import json
 
 from llama_index.core.llms import LLM
 
-from .contracts import (
-    EditorialProject,
-    EditorialReview,
-    NarrativePlan,
-    SubjectResearch,
-)
+from .contracts import EditorialProject, EditorialReview, NarrativePlan, SubjectResearch
 from .graph import ProjectGraph
 from .prompts import (
     ARTICLE_DRAFT_PROMPT,
@@ -47,23 +42,23 @@ class SubjectResearcher:
         )
 
     async def _research_subject(self, *, project, graph, subject) -> SubjectResearch:
-        graph_context = await graph.context_for_subject(subject, project.brief)
-        questions = "\n".join(f"- {question}" for question in subject.research_questions)
+        graph_context = await graph.context_for_subject(
+            subject,
+            project.brief,
+            project.narrative_axis,
+        )
         synthesis = await self._llm.apredict(
             SUBJECT_RESEARCH_PROMPT,
             theme=project.brief.theme,
             approach=project.brief.approach,
             audience=project.brief.audience or "não especificado",
+            narrative_axis=project.narrative_axis.statement,
             subject_title=subject.title,
-            subject_purpose=subject.purpose,
-            research_questions=questions,
+            subject_development=subject.development,
             graph_context=graph_context,
             output_language=project.brief.output_language,
         )
-        return SubjectResearch(
-            subject_id=subject.subject_id,
-            synthesis=synthesis.strip(),
-        )
+        return SubjectResearch(subject_id=subject.subject_id, synthesis=synthesis.strip())
 
 
 class NarrativeArchitect:
@@ -84,6 +79,7 @@ class NarrativeArchitect:
             duration_minutes=project.brief.duration_minutes,
             output_language=project.brief.output_language,
             audience=project.brief.audience or "não especificado",
+            narrative_axis=project.narrative_axis.statement,
             editorial_project=_json(project),
             subject_research=json.dumps(
                 [item.model_dump(mode="json") for item in research],
@@ -91,9 +87,11 @@ class NarrativeArchitect:
                 indent=2,
             ),
         )
-        approved_subject_ids = {subject.subject_id for subject in project.subjects}
-        planned_subject_ids = {beat.subject_id for beat in plan.beats}
-        if planned_subject_ids != approved_subject_ids:
+        approved_subject_ids = [subject.subject_id for subject in project.subjects]
+        planned_subject_ids = [beat.subject_id for beat in plan.beats]
+        if len(planned_subject_ids) != len(set(planned_subject_ids)):
+            raise ValueError("narrative plan cannot repeat an approved subject")
+        if set(planned_subject_ids) != set(approved_subject_ids):
             raise ValueError("narrative plan must cover every approved subject exactly")
         return plan
 
@@ -116,6 +114,7 @@ class ArticleWriter:
             duration_minutes=project.brief.duration_minutes,
             output_language=project.brief.output_language,
             audience=project.brief.audience or "não especificado",
+            narrative_axis=project.narrative_axis.statement,
             editorial_project=_json(project),
             narrative_plan=_json(narrative_plan),
             subject_research=json.dumps(
@@ -135,6 +134,7 @@ class EditorialCritic:
             EditorialReview,
             EDITORIAL_REVIEW_PROMPT,
             brief=_json(project.brief),
+            narrative_axis=project.narrative_axis.statement,
             editorial_project=_json(project),
             draft=draft,
         )
@@ -155,6 +155,7 @@ class ArticleEditor:
         return await self._llm.apredict(
             ARTICLE_REVISION_PROMPT,
             brief=_json(project.brief),
+            narrative_axis=project.narrative_axis.statement,
             editorial_project=_json(project),
             narrative_plan=_json(narrative_plan),
             review=_json(review),
