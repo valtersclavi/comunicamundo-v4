@@ -4,11 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Worker operation or inspect
+        description: Hefesto operation or inspect
         required: true
         type: choice
         options:
           - plan
+          - revise-axis
+          - approve-axis
+          - revise-project
           - approve
           - produce
           - inspect
@@ -17,8 +20,18 @@ on:
         required: false
         type: string
         default: ""
+      narrative_axis_id:
+        description: Narrative Axis UUID for revise-axis or approve-axis
+        required: false
+        type: string
+        default: ""
       editorial_project_id:
-        description: Editorial Project UUID for approve or produce only
+        description: Editorial Project UUID for revise-project, approve or produce
+        required: false
+        type: string
+        default: ""
+      feedback:
+        description: Natural-language correction for revise-axis or revise-project
         required: false
         type: string
         default: ""
@@ -56,6 +69,7 @@ jobs:
       mode: ${{ steps.prepare.outputs.mode }}
       gcloud_args: ${{ steps.prepare.outputs.gcloud_args }}
       request_uri: ${{ steps.prepare.outputs.request_uri }}
+      narrative_axis_id: ${{ steps.prepare.outputs.narrative_axis_id }}
       editorial_project_id: ${{ steps.prepare.outputs.editorial_project_id }}
       execution_name: ${{ steps.prepare.outputs.execution_name }}
 
@@ -79,14 +93,18 @@ jobs:
         env:
           OPERATE_OPERATION: ${{ inputs.operation }}
           OPERATE_REQUEST_URI: ${{ inputs.request_uri }}
+          OPERATE_NARRATIVE_AXIS_ID: ${{ inputs.narrative_axis_id }}
           OPERATE_EDITORIAL_PROJECT_ID: ${{ inputs.editorial_project_id }}
+          OPERATE_FEEDBACK: ${{ inputs.feedback }}
           OPERATE_EXECUTION_NAME: ${{ inputs.execution_name }}
         run: |
           set -euo pipefail
           python -m comunicamundo_v4.hefesto.operate prepare \
             --operation "${OPERATE_OPERATION}" \
             --request-uri "${OPERATE_REQUEST_URI}" \
+            --narrative-axis-id "${OPERATE_NARRATIVE_AXIS_ID}" \
             --editorial-project-id "${OPERATE_EDITORIAL_PROJECT_ID}" \
+            --feedback "${OPERATE_FEEDBACK}" \
             --execution-name "${OPERATE_EXECUTION_NAME}" \
             --github-output "${GITHUB_OUTPUT}" \
             --summary-file "${RUNNER_TEMP}/operate-prepare.md"
@@ -102,7 +120,6 @@ jobs:
       PREPARED_MODE: ${{ needs.prepare.outputs.mode }}
       PREPARED_GCLOUD_ARGS: ${{ needs.prepare.outputs.gcloud_args }}
       PREPARED_REQUEST_URI: ${{ needs.prepare.outputs.request_uri }}
-      PREPARED_EDITORIAL_PROJECT_ID: ${{ needs.prepare.outputs.editorial_project_id }}
       PREPARED_EXECUTION_NAME: ${{ needs.prepare.outputs.execution_name }}
 
     steps:
@@ -143,8 +160,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${PREPARED_REQUEST_URI}"
-          gcloud storage cat "${PREPARED_REQUEST_URI}" --project="${PROJECT_ID}" \
-            > "${RUNNER_TEMP}/plan-request.json"
+          gcloud storage cat "${PREPARED_REQUEST_URI}" --project="${PROJECT_ID}" > "${RUNNER_TEMP}/plan-request.json"
           python -m comunicamundo_v4.hefesto.operate validate-plan-request \
             --request-file "${RUNNER_TEMP}/plan-request.json" \
             --summary-file "${RUNNER_TEMP}/plan-request.md"
@@ -184,8 +200,7 @@ jobs:
             --project="${PROJECT_ID}" \
             --limit=30 \
             --freshness=7d \
-            --format='value(textPayload)' \
-            > "${RUNNER_TEMP}/execution.log" || true
+            --format='value(textPayload)' > "${RUNNER_TEMP}/execution.log" || true
           python -m comunicamundo_v4.hefesto.operate summarize-inspect \
             --execution-json "${RUNNER_TEMP}/execution.json" \
             --log-file "${RUNNER_TEMP}/execution.log" \
@@ -207,7 +222,6 @@ jobs:
             echo "- Project: \`${PROJECT_ID}\`"
             echo "- Job: \`${JOB_NAME}\`"
             echo "- Region: \`${REGION}\`"
-            echo "- worker_argv: \`${PREPARED_GCLOUD_ARGS}\`"
             echo "- Execution: \`${EXECUTION}\`"
             echo "- Model invocation: not awaited by this workflow"
             echo
