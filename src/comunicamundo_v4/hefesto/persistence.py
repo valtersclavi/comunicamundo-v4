@@ -1,4 +1,4 @@
-"""Durable GCP boundary for the human approval split in Hefesto V4."""
+"""Durable GCP boundaries for Hefesto V4 human approvals."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 from google.cloud import firestore, storage
 from pydantic import Field
 
-from .contracts import EditorialProject, FinalArticle, StrictModel
+from .contracts import EditorialProject, FinalArticle, NarrativeAxis, StrictModel
 
 
 def _utc_now() -> datetime:
@@ -36,6 +36,13 @@ class GraphArtifact(StrictModel):
     manifest_uri: str = Field(pattern=r"^gs://")
     files: list[GraphArtifactFile] = Field(min_length=1)
     created_at: datetime
+
+
+class StoredNarrativeAxis(StrictModel):
+    narrative_axis: NarrativeAxis
+    graph_artifact: GraphArtifact
+    editorial_project_id: UUID | None = None
+    updated_at: datetime
 
 
 class StoredEditorialProject(StrictModel):
@@ -61,6 +68,7 @@ class GcpPersistenceSettings:
     project: str
     bucket: str
     root_prefix: str = "comunicamundo-v4"
+    narrative_axes_collection: str = "hefesto_v4_narrative_axes"
     editorial_projects_collection: str = "hefesto_v4_editorial_projects"
     articles_collection: str = "hefesto_v4_articles"
 
@@ -90,28 +98,25 @@ class GcsArtifactStore:
         directory = directory.resolve()
         if not directory.is_dir():
             raise ValueError(f"graph directory does not exist: {directory}")
-
         local_files = sorted(path for path in directory.rglob("*") if path.is_file())
         if not local_files:
             raise ValueError("graph directory contains no files")
 
         artifact_id = self._id_factory()
-        prefix = (
-            f"{self._root_prefix}/projects/{project_id}/graphs/{artifact_id}"
-        )
+        prefix = f"{self._root_prefix}/projects/{project_id}/graphs/{artifact_id}"
         files: list[GraphArtifactFile] = []
         for local_path in local_files:
             relative_path = local_path.relative_to(directory).as_posix()
             _validate_artifact_path(relative_path)
-            digest = _sha256_file(local_path)
             file_record = GraphArtifactFile(
                 path=relative_path,
                 size_bytes=local_path.stat().st_size,
-                sha256=digest,
+                sha256=_sha256_file(local_path),
             )
             blob = self._bucket.blob(f"{prefix}/files/{relative_path}")
-            content_type = mimetypes.guess_type(relative_path)[0]
-            blob.upload_from_filename(str(local_path), content_type=content_type)
+            blob.upload_from_filename(
+                str(local_path), content_type=mimetypes.guess_type(relative_path)[0]
+            )
             files.append(file_record)
 
         created_at = self._now()
@@ -140,10 +145,10 @@ class GcsArtifactStore:
     def restore_graph(self, artifact: GraphArtifact, destination: Path) -> None:
         if artifact.bucket != self._bucket_name:
             raise ValueError("graph artifact belongs to a different bucket")
-
         manifest_name = f"{artifact.prefix}/manifest.json"
-        manifest_bytes = self._bucket.blob(manifest_name).download_as_bytes()
-        manifest = json.loads(manifest_bytes.decode("utf-8"))
+        manifest = json.loads(
+            self._bucket.blob(manifest_name).download_as_bytes().decode("utf-8")
+        )
         _validate_manifest(manifest, artifact)
 
         destination = destination.resolve()
@@ -170,10 +175,7 @@ class GcsArtifactStore:
 
     def upload_article(self, article: FinalArticle) -> PublishedArticle:
         article_id = self._id_factory()
-        name = (
-            f"{self._root_prefix}/projects/{article.project_id}/articles/"
-            f"{article_id}.md"
-        )
+        name = f"{self._root_prefix}/projects/{article.project_id}/articles/{article_id}.md"
         self._bucket.blob(name).upload_from_string(
             article.body_markdown.encode("utf-8"),
             content_type="text/markdown; charset=utf-8",
@@ -192,20 +194,55 @@ class GcsArtifactStore:
 
 
 class FirestoreEditorialRepository:
-    """Stores compact workflow state, never graph files or article bodies."""
+    """Stores compact approval state, never graph files or article bodies."""
 
     def __init__(
         self,
         client: Any,
         *,
+        narrative_axes_collection: str = "hefesto_v4_narrative_axes",
         editorial_projects_collection: str = "hefesto_v4_editorial_projects",
         articles_collection: str = "hefesto_v4_articles",
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._client = client
+        self._narrative_axes_collection = narrative_axes_collection
         self._editorial_projects_collection = editorial_projects_collection
         self._articles_collection = articles_collection
         self._now = now
+
+    def save_narrative_axis(
+        self,
+        axis: NarrativeAxis,
+        graph_artifact: GraphArtifact,
+        *,
+        editorial_project_id: UUID | None = None,
+    ) -> StoredNarrativeAxis:
+        if axis.project_id != graph_artifact.project_id:
+            raise ValueError("Narrative Axis and graph artifact project IDs differ")
+        stored = StoredNarrativeAxis(
+            narrative_axis=axis,
+            graph_artifact=graph_artifact,
+            editorial_project_id=editorial_project_id,
+            updated_at=self._now(),
+        )
+        self._client.collection(self._narrative_axes_collection).document(
+            str(axis.narrative_axis_id)
+        ).set({"schema_version": 1, **stored.model_dump(mode="json")})
+        return stored
+
+    def get_narrative_axis(self, narrative_axis_id: UUID) -> StoredNarrativeAxis | None:
+        snapshot = self._client.collection(self._narrative_axes_collection).document(
+            str(narrative_axis_id)
+        ).get()
+        if not snapshot.exists:
+            return None
+        data = snapshot.to_dict()
+        if data.get("schema_version") != 1:
+            raise ValueError("unsupported Narrative Axis schema version")
+        return StoredNarrativeAxis.model_validate(
+            {key: value for key, value in data.items() if key != "schema_version"}
+        )
 
     def save_editorial_project(
         self,
@@ -213,7 +250,7 @@ class FirestoreEditorialRepository:
         graph_artifact: GraphArtifact,
     ) -> StoredEditorialProject:
         if project.project_id != graph_artifact.project_id:
-            raise ValueError("editorial project and graph artifact project IDs differ")
+            raise ValueError("Editorial Project and graph artifact project IDs differ")
         stored = StoredEditorialProject(
             editorial_project=project,
             graph_artifact=graph_artifact,
@@ -221,100 +258,101 @@ class FirestoreEditorialRepository:
         )
         self._client.collection(self._editorial_projects_collection).document(
             str(project.editorial_project_id)
-        ).set(
-            {
-                "schema_version": 1,
-                **stored.model_dump(mode="json"),
-            }
-        )
+        ).set({"schema_version": 2, **stored.model_dump(mode="json")})
         return stored
 
     def get_editorial_project(
-        self,
-        editorial_project_id: UUID,
+        self, editorial_project_id: UUID
     ) -> StoredEditorialProject | None:
-        snapshot = self._client.collection(
-            self._editorial_projects_collection
-        ).document(str(editorial_project_id)).get()
+        snapshot = self._client.collection(self._editorial_projects_collection).document(
+            str(editorial_project_id)
+        ).get()
         if not snapshot.exists:
             return None
         data = snapshot.to_dict()
-        if data.get("schema_version") != 1:
-            raise ValueError("unsupported editorial project schema version")
-        payload = {key: value for key, value in data.items() if key != "schema_version"}
-        return StoredEditorialProject.model_validate(payload)
+        if data.get("schema_version") != 2:
+            raise ValueError("unsupported Editorial Project schema version")
+        return StoredEditorialProject.model_validate(
+            {key: value for key, value in data.items() if key != "schema_version"}
+        )
 
     def save_article(self, publication: PublishedArticle) -> None:
         self._client.collection(self._articles_collection).document(
             str(publication.article_id)
-        ).set(
-            {
-                "schema_version": 1,
-                **publication.model_dump(mode="json"),
-            }
-        )
+        ).set({"schema_version": 1, **publication.model_dump(mode="json")})
 
 
 class GcpEditorialPersistence:
     """Coordinates Storage and Firestore without leaking either into workflows."""
 
-    def __init__(
-        self,
-        *,
-        artifacts: GcsArtifactStore,
-        repository: FirestoreEditorialRepository,
-    ) -> None:
+    def __init__(self, *, artifacts: GcsArtifactStore, repository: FirestoreEditorialRepository) -> None:
         self.artifacts = artifacts
         self.repository = repository
 
     @classmethod
     def from_settings(cls, settings: GcpPersistenceSettings) -> GcpEditorialPersistence:
-        storage_client = storage.Client(project=settings.project)
-        firestore_client = firestore.Client(project=settings.project)
         return cls(
             artifacts=GcsArtifactStore(
-                storage_client,
+                storage.Client(project=settings.project),
                 bucket_name=settings.bucket,
                 root_prefix=settings.root_prefix,
             ),
             repository=FirestoreEditorialRepository(
-                firestore_client,
+                firestore.Client(project=settings.project),
+                narrative_axes_collection=settings.narrative_axes_collection,
                 editorial_projects_collection=settings.editorial_projects_collection,
                 articles_collection=settings.articles_collection,
             ),
         )
 
     def persist_planning_result(
-        self,
-        project: EditorialProject,
-        graph_directory: Path,
-    ) -> StoredEditorialProject:
-        graph_artifact = self.artifacts.upload_graph(
-            project.project_id,
-            graph_directory,
-        )
-        return self.repository.save_editorial_project(project, graph_artifact)
+        self, axis: NarrativeAxis, graph_directory: Path
+    ) -> StoredNarrativeAxis:
+        graph_artifact = self.artifacts.upload_graph(axis.project_id, graph_directory)
+        return self.repository.save_narrative_axis(axis, graph_artifact)
 
-    def save_editorial_project(
-        self,
-        project: EditorialProject,
+    def get_narrative_axis(self, narrative_axis_id: UUID) -> StoredNarrativeAxis | None:
+        return self.repository.get_narrative_axis(narrative_axis_id)
+
+    def save_narrative_axis(self, axis: NarrativeAxis) -> StoredNarrativeAxis:
+        existing = self.repository.get_narrative_axis(axis.narrative_axis_id)
+        if existing is None:
+            raise KeyError(f"Narrative Axis not found: {axis.narrative_axis_id}")
+        return self.repository.save_narrative_axis(
+            axis,
+            existing.graph_artifact,
+            editorial_project_id=existing.editorial_project_id,
+        )
+
+    def persist_editorial_project_for_axis(
+        self, project: EditorialProject, stored_axis: StoredNarrativeAxis
     ) -> StoredEditorialProject:
+        if project.narrative_axis.narrative_axis_id != stored_axis.narrative_axis.narrative_axis_id:
+            raise ValueError("Editorial Project belongs to a different Narrative Axis")
+        stored_project = self.repository.save_editorial_project(
+            project, stored_axis.graph_artifact
+        )
+        self.repository.save_narrative_axis(
+            stored_axis.narrative_axis,
+            stored_axis.graph_artifact,
+            editorial_project_id=project.editorial_project_id,
+        )
+        return stored_project
+
+    def save_editorial_project(self, project: EditorialProject) -> StoredEditorialProject:
         existing = self.repository.get_editorial_project(project.editorial_project_id)
         if existing is None:
-            raise KeyError(
-                f"editorial project not found: {project.editorial_project_id}"
-            )
+            raise KeyError(f"Editorial Project not found: {project.editorial_project_id}")
         return self.repository.save_editorial_project(project, existing.graph_artifact)
 
     def get_editorial_project(
-        self,
-        editorial_project_id: UUID,
+        self, editorial_project_id: UUID
     ) -> StoredEditorialProject | None:
         return self.repository.get_editorial_project(editorial_project_id)
 
     def restore_graph(
         self,
-        stored: StoredEditorialProject,
+        stored: StoredNarrativeAxis | StoredEditorialProject,
         destination: Path,
     ) -> None:
         self.artifacts.restore_graph(stored.graph_artifact, destination)
@@ -346,8 +384,6 @@ def _validate_manifest(manifest: dict[str, Any], artifact: GraphArtifact) -> Non
         raise ValueError("graph manifest project ID mismatch")
     if manifest.get("artifact_id") != str(artifact.artifact_id):
         raise ValueError("graph manifest artifact ID mismatch")
-    manifest_files = [
-        GraphArtifactFile.model_validate(item) for item in manifest["files"]
-    ]
+    manifest_files = [GraphArtifactFile.model_validate(item) for item in manifest["files"]]
     if manifest_files != artifact.files:
         raise ValueError("graph manifest file list mismatch")
