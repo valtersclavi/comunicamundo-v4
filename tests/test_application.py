@@ -74,6 +74,11 @@ class ProductionWorkflow:
         )
 
 
+class Graph(ProjectGraph):
+    async def context_for_editorial_project(self, brief):
+        return "contexto"
+
+
 class Runtime:
     planning_workflow = PlanningWorkflow()
     axis_planner = AxisPlanner()
@@ -82,12 +87,7 @@ class Runtime:
 
     def load_graph(self, directory: Path):
         assert (directory / "graph.json").exists()
-        return ProjectGraph(index=object())
-
-
-class Graph:
-    async def context_for_editorial_project(self, brief):
-        return "contexto"
+        return Graph(index=object())
 
 
 class Persistence:
