@@ -12,6 +12,7 @@ from comunicamundo_v4.hefesto.contracts import (
     NarrativeAxis,
     NormalizedSource,
 )
+from comunicamundo_v4.hefesto.graph import ProjectGraph
 from comunicamundo_v4.hefesto.persistence import PublishedArticle
 
 
@@ -81,7 +82,7 @@ class Runtime:
 
     def load_graph(self, directory: Path):
         assert (directory / "graph.json").exists()
-        return Graph()
+        return ProjectGraph(index=object())
 
 
 class Graph:
