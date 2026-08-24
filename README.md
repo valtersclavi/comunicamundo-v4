@@ -1,115 +1,91 @@
 # ComunicAmundo V4
 
-Base limpa do ComunicAmundo V4.
+Base limpa do ComunicAmundo V4. O V3 permanece apenas como referência histórica
+e não é a base de código desta versão.
 
-O V3 permanece como referência histórica e operacional. Ele não é a base de
-código desta versão. Componentes só entram no V4 quando atendem diretamente ao
-contrato atual e quando reaproveitá-los custa menos do que reimplementá-los.
+## Hefesto V4
 
-## Primeira entrega
+O fluxo editorial começa com fontes normalizadas e a intenção do usuário. Antes
+de escolher assuntos, o Editor-Chefe propõe um **Eixo Narrativo** de uma ou duas
+frases: a leitura editorial que governará a peça. O usuário aprova ou corrige o
+eixo. Só então o Hefesto constrói o **Projeto Editorial**, uma lista compacta de
+assuntos a desenvolver, que também é aprovada antes da produção.
 
-O primeiro corte do Hefesto V4 transforma fontes normalizadas e a intenção do
-usuário em um **Projeto Editorial** estruturado e aprovável.
+Fluxo canônico:
 
-Entradas obrigatórias:
+```text
+briefing + fontes
+→ grafo
+→ Eixo Narrativo proposto
+→ aprovação/correção do Eixo
+→ Projeto Editorial proposto
+→ aprovação/correção do Projeto
+→ pesquisa por assunto
+→ arquitetura narrativa interna
+→ redação
+→ crítica/edição
+→ artigo final
+```
 
-- tema;
-- abordagem;
-- duração;
-- idioma de saída;
-- fontes normalizadas.
-
-O Projeto Editorial é uma lista de assuntos. Outline, capítulos e seções são
-decisões internas posteriores do redator.
+O Eixo Narrativo é superior às etapas posteriores. O Projeto Editorial não é
+outline e não expõe perguntas internas de pesquisa: cada assunto contém apenas
+título, desenvolvimento esperado e orçamento interno de duração. A profundidade
+é inferida da intenção. Um guia pode exigir práxis; uma análise pode exigir
+causalidade; uma comparação, diferenças; um relatório decisório, trade-offs.
+Nenhuma dessas formas é imposta universalmente.
 
 ## Chassi
 
 - LlamaIndex para `PropertyGraphIndex`, recuperação e workflows editoriais;
 - Google GenAI sobre Vertex AI, usando ADC;
-- Firestore para o estado compacto do workflow e Cloud Storage para artefatos;
-- nenhuma dependência de Microsoft GraphRAG;
-- nenhuma dependência de Microsoft Amplifier;
+- Firestore para estado compacto e Cloud Storage para artefatos;
+- nenhuma dependência de Microsoft GraphRAG ou Amplifier;
 - nenhum requisito de LlamaCloud ou LlamaParse.
 
-O roteamento de modelos é configurável. A base usa Flash para construção do
-grafo, pesquisa e crítica; Pro para Projeto Editorial, arquitetura narrativa,
-redação e edição.
+Flash continua responsável por grafo, pesquisa e crítica. Pro é usado para Eixo
+Narrativo, Projeto Editorial, arquitetura narrativa, redação e edição.
 
-## Persistência
+## Persistência e aprovações
 
-O grafo é salvo no Cloud Storage como um artefato imutável. Um manifesto escrito
-por último registra caminho, tamanho e SHA-256 de cada arquivo. O Projeto
-Editorial e seu estado de aprovação ficam no Firestore. O Markdown final também
-fica no Storage; o Firestore guarda somente sua URI e metadados.
+O grafo é salvo uma única vez no Cloud Storage como artefato imutável, com
+manifesto de caminho, tamanho e SHA-256. O Eixo Narrativo fica no Firestore em
+`hefesto_v4_narrative_axes`. Depois da aprovação do eixo, o Projeto Editorial é
+criado reutilizando exatamente o mesmo artefato de grafo e fica em
+`hefesto_v4_editorial_projects`. O Markdown final fica no Storage; o Firestore
+guarda URI e metadados.
 
-Projeto GCP, bucket, prefixos e coleções são configuração de implantação. O
-código não contém nomes herdados do V3 e usa Application Default Credentials.
+As duas aprovações são duráveis e independentes. Revisões anteriores à aprovação
+são versionadas. Um Eixo aprovado não pode ser revisado; um Projeto aprovado não
+pode ser revisado. Produção exige Projeto Editorial aprovado.
 
-## Hermes
-
-O fluxo inicial trabalha apenas com as fontes já selecionadas. Uma porta
-opcional de descoberta aceita fontes normalizadas do Hermes sem permitir que ele
-se torne redator, finalizador ou dependência interna do Hefesto.
-
-## Cloud Agent no iPad
-
-O desenvolvimento e a operação do V4 acontecem neste repositório pelo Cursor
-Cloud Agent. O ambiente lê `.cursor/environment.json` e instala o pacote com
-`python3 -m pip install -e '.[dev]'`. As regras permanentes estão em
-`AGENTS.md`.
+## Worker
 
 ```bash
+comunicamundo-v4-worker plan --request gs://BUCKET/requests/PROJECT.json
+comunicamundo-v4-worker revise-axis --narrative-axis-id AXIS_UUID --feedback-b64 BASE64URL
+comunicamundo-v4-worker approve-axis --narrative-axis-id AXIS_UUID
+comunicamundo-v4-worker revise-project --editorial-project-id PROJECT_UUID --feedback-b64 BASE64URL
+comunicamundo-v4-worker approve --editorial-project-id PROJECT_UUID
+comunicamundo-v4-worker produce --editorial-project-id PROJECT_UUID
+```
+
+No iPad, essas operações saem do GitHub Actions `operate` em `main`, autenticado
+por WIF. A interface do workflow recebe feedback em linguagem natural e faz a
+codificação necessária antes do dispatch. `inspect` mostra evidências não
+sensíveis, incluindo o Eixo Narrativo e os assuntos compactos quando presentes.
+
+## Desenvolvimento
+
+O Cloud Agent lê `.cursor/environment.json` e instala:
+
+```bash
+python3 -m pip install -e '.[dev]'
 python3 -m pytest
 python3 -m compileall -q src tests
 python3 -m comunicamundo_v4.hefesto.worker --help
 ```
 
-Push em `main` dispara o GitHub Actions: testes, imagem e deploy do Job no
-projeto GCP de prova `comunicamundo-v4`, autenticado por Workload Identity
-Federation. Não coloque chaves permanentes do Google no Cursor. Não reutilize
-secrets `STAGING_*`.
-
-## Desenvolvimento local
-
-Numa máquina com `python3-venv`:
-
-```bash
-python -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest
-```
-
-No Cloud Agent a imagem pode não ter `ensurepip`. Use o install do
-`.cursor/environment.json` e os comandos `python3 -m` acima.
-
-## Worker
-
-A mesma imagem executa um único lado da fronteira de aprovação por vez:
-
-```bash
-comunicamundo-v4-worker plan --request gs://BUCKET/requests/PROJECT.json
-comunicamundo-v4-worker approve --editorial-project-id EDITORIAL_PROJECT_UUID
-comunicamundo-v4-worker produce --editorial-project-id EDITORIAL_PROJECT_UUID
-```
-
-O worker exige `GOOGLE_CLOUD_PROJECT` e `HEFESTO_GCS_BUCKET`. A região vem de
-`GOOGLE_CLOUD_LOCATION` e assume `us-central1` quando omitida. O comando
-`plan` termina depois de persistir a proposta; `approve` registra a aprovação;
-somente uma nova execução de `produce`, após aprovação, restaura o grafo e
-escreve o artigo.
-
-No iPad, sem `gcloud` local e sem credenciais GCP no Cursor, essas operações
-saem do GitHub Actions `operate` em `main`, autenticado por WIF. O JSON de
-`plan` precisa já estar no bucket de prova. A inspeção de uma execução é um
-disparo separado e não espera o Job terminar.
-
-## Ambiente de prova
-
-Enquanto o produto estiver em construção, o `main` é publicado diretamente no
-projeto GCP único `comunicamundo-v4`. A imagem fica no Artifact Registry
-`comunicamundo-v4`, o worker é o Cloud Run Job `hefesto-v4` e os artefatos usam
-o bucket exclusivo `comunicamundo-v4-hefesto-30524898837`.
-
-O GitHub autentica por Workload Identity Federation restrita ao repositório
-`valtersclavi/comunicamundo-v4` e à branch `main`; nenhuma chave permanente é
-armazenada no repositório.
+Push em `main` testa, constrói e publica o Cloud Run Job `hefesto-v4` no projeto
+GCP de prova `comunicamundo-v4`, região `us-central1`, usando Workload Identity
+Federation. Nenhuma chave permanente do Google deve ser colocada no repositório
+ou no Cursor.
