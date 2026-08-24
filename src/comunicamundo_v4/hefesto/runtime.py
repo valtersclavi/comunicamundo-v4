@@ -11,6 +11,7 @@ from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
 from llama_index.llms.google_genai import GoogleGenAI
 
 from .graph import ProjectGraph
+from .planner import EditorialPlanner, NarrativeAxisPlanner
 from .production_workflow import EditorialProductionWorkflow
 from .workflow import EditorialPlanningWorkflow
 
@@ -34,6 +35,8 @@ class HefestoRuntime:
     """All model-backed capabilities required by one worker process."""
 
     planning_workflow: EditorialPlanningWorkflow
+    axis_planner: NarrativeAxisPlanner
+    editorial_planner: EditorialPlanner
     production_workflow: EditorialProductionWorkflow
     graph_llm: LLM
     embed_model: BaseEmbedding
@@ -47,16 +50,9 @@ class HefestoRuntime:
 
 
 def build_vertex_runtime(settings: VertexRuntimeSettings) -> HefestoRuntime:
-    vertexai_config = {
-        "project": settings.project,
-        "location": settings.location,
-    }
+    vertexai_config = {"project": settings.project, "location": settings.location}
 
-    def llm(
-        model: str,
-        temperature: float,
-        max_tokens: int | None = None,
-    ) -> GoogleGenAI:
+    def llm(model: str, temperature: float, max_tokens: int | None = None) -> GoogleGenAI:
         return GoogleGenAI(
             model=model,
             temperature=temperature,
@@ -65,16 +61,21 @@ def build_vertex_runtime(settings: VertexRuntimeSettings) -> HefestoRuntime:
         )
 
     graph_llm = llm(settings.graph_model, 0.1)
+    planning_llm = llm(settings.planning_model, 0.4)
     embed_model = GoogleGenAIEmbedding(
         model_name=settings.embedding_model,
         vertexai_config=vertexai_config,
     )
+    axis_planner = NarrativeAxisPlanner(planning_llm)
+    editorial_planner = EditorialPlanner(planning_llm)
     return HefestoRuntime(
         planning_workflow=EditorialPlanningWorkflow(
             graph_llm=graph_llm,
-            planning_llm=llm(settings.planning_model, 0.4),
+            axis_planner=axis_planner,
             embed_model=embed_model,
         ),
+        axis_planner=axis_planner,
+        editorial_planner=editorial_planner,
         production_workflow=EditorialProductionWorkflow(
             research_llm=llm(settings.research_model, 0.2, 4096),
             architecture_llm=llm(settings.architecture_model, 0.5),
