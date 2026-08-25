@@ -219,12 +219,99 @@ class ChunkManifest(StrictModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+GRAPH_EXTRACTION_CONTRACT_VERSION = "graph-extraction.v1"
+GRAPH_EXTRACTOR_VERSION = "hefesto.simple-llm-path.v1"
+
+
+class SourceLineageState(StrEnum):
+    CREATED = "created"
+    CHUNKS_READY = "chunks_ready"
+    GRAPH_EXTRACTIONS_IN_PROGRESS = "graph_extractions_in_progress"
+    GRAPH_EXTRACTIONS_READY = "graph_extractions_ready"
+
+
+class GraphExtractionUnitStatus(StrEnum):
+    PENDING = "pending"
+    EXTRACTED = "extracted"
+    FAILED = "failed"
+
+
+class GraphEntity(StrictModel):
+    name: str = Field(min_length=1)
+    label: str = Field(default="entity", min_length=1)
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphRelation(StrictModel):
+    source: str = Field(min_length=1)
+    relation: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphExtractionUnit(StrictModel):
+    source_lineage_id: UUID
+    chunk_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_id: UUID
+    text: str = Field(min_length=1)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_ordinal: int = Field(ge=0)
+    chunk_ordinal: int = Field(ge=0)
+    sequence: int = Field(ge=0)
+
+
+class GraphExtraction(StrictModel):
+    contract_version: str = Field(min_length=1)
+    extractor_version: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    source_lineage_id: UUID
+    source_id: UUID
+    chunk_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    entities: list[GraphEntity] = Field(default_factory=list)
+    relations: list[GraphRelation] = Field(default_factory=list)
+    extracted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class GraphExtractionManifestEntry(StrictModel):
+    chunk_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_id: UUID
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: GraphExtractionUnitStatus = GraphExtractionUnitStatus.PENDING
+    chunk_uri: str = Field(pattern=r"^gs://")
+    extraction_uri: str | None = Field(default=None, pattern=r"^gs://")
+    contract_version: str | None = None
+    extractor_version: str | None = None
+    model: str | None = None
+    error: str | None = None
+
+
+class GraphExtractionManifest(StrictModel):
+    schema_version: int = 1
+    source_lineage_id: UUID
+    project_id: UUID
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contract_version: str = Field(min_length=1)
+    extractor_version: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    chunk_count: int = Field(ge=1)
+    extracted_count: int = Field(ge=0)
+    failed_count: int = Field(ge=0)
+    entries: list[GraphExtractionManifestEntry] = Field(min_length=1)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class SourceLineage(StrictModel):
     source_lineage_id: UUID = Field(default_factory=uuid4)
     project_id: UUID
     source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    state: SourceLineageState = SourceLineageState.CREATED
     chunk_manifest_uri: str | None = Field(default=None, pattern=r"^gs://")
     chunk_count: int | None = Field(default=None, ge=0)
+    graph_extractions_manifest_uri: str | None = Field(default=None, pattern=r"^gs://")
+    extracted_count: int | None = Field(default=None, ge=0)
+    failed_count: int | None = Field(default=None, ge=0)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

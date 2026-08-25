@@ -8,6 +8,8 @@ from uuid import UUID
 from comunicamundo_v4.hefesto.contracts import (
     ChunkManifest,
     ChunkManifestEntry,
+    GraphExtraction,
+    GraphExtractionManifest,
     PlanningRequest,
     PlanningRun,
     PreparedChunk,
@@ -96,6 +98,8 @@ class MemoryPlanningPersistence:
         self.request_writes = 0
         self.chunk_writes = 0
         self.manifest_writes = 0
+        self.extraction_writes = 0
+        self.extraction_manifest_writes = 0
 
     def save_run(self, run: PlanningRun) -> PlanningRun:
         updated = run.model_copy(update={"updated_at": datetime.now(UTC)})
@@ -177,3 +181,25 @@ class MemoryPlanningPersistence:
         chunk = self.objects[uri]
         assert isinstance(chunk, PreparedChunk)
         return chunk.model_copy()
+
+    def persist_graph_extraction(self, lineage: SourceLineage, extraction: GraphExtraction) -> str:
+        self.extraction_writes += 1
+        uri = f"gs://memory/sources/{lineage.source_lineage_id}/graph-extractions/{extraction.chunk_id}.json"
+        self.objects[uri] = extraction.model_copy()
+        return uri
+
+    def persist_graph_extraction_manifest(self, lineage: SourceLineage, manifest: GraphExtractionManifest) -> str:
+        self.extraction_manifest_writes += 1
+        uri = f"gs://memory/sources/{lineage.source_lineage_id}/graph-extractions/manifest.json"
+        self.objects[uri] = manifest.model_copy()
+        return uri
+
+    def load_graph_extraction_manifest(self, uri: str) -> GraphExtractionManifest:
+        manifest = self.objects[uri]
+        assert isinstance(manifest, GraphExtractionManifest)
+        return manifest.model_copy()
+
+    def load_graph_extraction(self, uri: str) -> GraphExtraction:
+        extraction = self.objects[uri]
+        assert isinstance(extraction, GraphExtraction)
+        return extraction.model_copy()

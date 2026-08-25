@@ -39,6 +39,14 @@ class VertexRuntimeSettings:
     editing_max_tokens: int = 10_000
 
 
+@dataclass(frozen=True, slots=True)
+class GraphExtractionRuntime:
+    llm: object
+    model: str
+    context_window: int
+    max_tokens: int
+
+
 @dataclass(slots=True)
 class HefestoRuntime:
     graph_llm: object
@@ -53,32 +61,46 @@ class HefestoRuntime:
         return ProjectGraph.load(directory, llm=self.graph_llm, embed_model=self.embed_model)
 
 
+def _vertex_llm(settings: VertexRuntimeSettings, model: str, temperature: float, max_tokens: int):
+    return GoogleGenAI(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        context_window=settings.context_window,
+        vertexai_config={"project": settings.project, "location": settings.location},
+    )
+
+
+def build_graph_extraction_runtime(settings: VertexRuntimeSettings) -> GraphExtractionRuntime:
+    """Construct only the graph LLM for one-chunk extraction."""
+    if settings.context_window <= 0:
+        raise ValueError("graph extraction requires an explicit context_window")
+    if settings.graph_max_tokens <= 0:
+        raise ValueError("graph extraction requires an explicit max_tokens budget")
+    return GraphExtractionRuntime(
+        llm=_vertex_llm(settings, settings.graph_model, 0.1, settings.graph_max_tokens),
+        model=settings.graph_model,
+        context_window=settings.context_window,
+        max_tokens=settings.graph_max_tokens,
+    )
+
+
 def build_vertex_runtime(settings: VertexRuntimeSettings) -> HefestoRuntime:
     vertexai_config = {"project": settings.project, "location": settings.location}
-
-    def llm(model: str, temperature: float, max_tokens: int):
-        return GoogleGenAI(
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            context_window=settings.context_window,
-            vertexai_config=vertexai_config,
-        )
-
-    graph_llm = llm(settings.graph_model, 0.1, settings.graph_max_tokens)
+    graph_llm = _vertex_llm(settings, settings.graph_model, 0.1, settings.graph_max_tokens)
     embed_model = GoogleGenAIEmbedding(model_name=settings.embedding_model, vertexai_config=vertexai_config)
     return HefestoRuntime(
         graph_llm=graph_llm,
         embed_model=embed_model,
         director=EditorialDirector(
-            axis_llm=llm(settings.axis_model, 0.35, settings.axis_max_tokens),
-            project_llm=llm(settings.project_model, 0.35, settings.project_max_tokens),
+            axis_llm=_vertex_llm(settings, settings.axis_model, 0.35, settings.axis_max_tokens),
+            project_llm=_vertex_llm(settings, settings.project_model, 0.35, settings.project_max_tokens),
         ),
         production=EditorialProduction(
-            research_llm=llm(settings.research_model, 0.2, settings.research_max_tokens),
-            architecture_llm=llm(settings.architecture_model, 0.35, settings.architecture_max_tokens),
-            writing_llm=llm(settings.writing_model, 0.65, settings.writing_max_tokens),
-            critic_llm=llm(settings.critic_model, 0.15, settings.critic_max_tokens),
-            editing_llm=llm(settings.editing_model, 0.45, settings.editing_max_tokens),
+            research_llm=_vertex_llm(settings, settings.research_model, 0.2, settings.research_max_tokens),
+            architecture_llm=_vertex_llm(settings, settings.architecture_model, 0.35, settings.architecture_max_tokens),
+            writing_llm=_vertex_llm(settings, settings.writing_model, 0.65, settings.writing_max_tokens),
+            critic_llm=_vertex_llm(settings, settings.critic_model, 0.15, settings.critic_max_tokens),
+            editing_llm=_vertex_llm(settings, settings.editing_model, 0.45, settings.editing_max_tokens),
         ),
     )
