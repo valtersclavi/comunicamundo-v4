@@ -40,6 +40,25 @@ def test_plan_comment_reuses_canonical_validation() -> None:
     )
 
 
+def test_probe_request_read_comment_does_not_dispatch_plan() -> None:
+    uri = "gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json"
+    prepared = prepare_chatops_comment(
+        '/hefesto {"operation":"probe-request-read","request_uri":"%s"}' % uri,
+        issue_number=CHATOPS_CONTROL_ISSUE,
+        actor=CHATOPS_ALLOWED_USER,
+        repository=CHATOPS_REPOSITORY,
+    )
+    assert prepared.operation == "probe-request-read"
+    assert prepared.worker_argv == (
+        "probe",
+        "--boundary",
+        "request-read",
+        "--request",
+        uri,
+    )
+    assert "plan" not in prepared.gcloud_args
+
+
 def test_revision_feedback_is_encoded_and_not_rendered() -> None:
     axis_id = str(uuid4())
     feedback = "Sem esquecer que o adulto também está sofrendo muito."
@@ -94,6 +113,7 @@ def test_payload_shape_fails_closed() -> None:
         "/hefesto not-json",
         '/hefesto {"operation":"approve","editorial_project_id":"x","extra":"no"}',
         '/hefesto {"operation":123}',
+        '/hefesto {"operation":"probe-embed-construct","request_uri":"gs://comunicamundo-v4-hefesto-30524898837/a.json"}',
     )
     for body in bad_payloads:
         try:

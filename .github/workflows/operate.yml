@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - plan
+          - probe-request-read
           - revise-axis
           - approve-axis
           - revise-project
@@ -16,7 +17,7 @@ on:
           - produce
           - inspect
       request_uri:
-        description: gs:// JSON URI for plan only
+        description: gs:// JSON URI for plan or probe-request-read only
         required: false
         type: string
         default: ""

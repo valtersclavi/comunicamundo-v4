@@ -44,6 +44,12 @@ def _required_environment(name: str) -> str:
     return value
 
 
+def load_planning_request(location: str, *, project: str) -> PlanningJobRequest:
+    """Read and strictly validate one planning request. No Vertex, no persistence."""
+
+    return PlanningJobRequest.model_validate(_read_request(location, project=project))
+
+
 def _read_request(location: str, *, project: str) -> dict[str, Any]:
     if location.startswith("gs://"):
         parsed = urlparse(location)
@@ -122,11 +128,19 @@ def _emit_safe_failure(error: BaseException) -> None:
 
 async def _run(args: argparse.Namespace) -> None:
     project = _required_environment("GOOGLE_CLOUD_PROJECT")
+    if args.command == "probe":
+        from .probe import run_probe
+
+        print(
+            json.dumps(
+                run_probe(args.boundary, request=args.request),
+                ensure_ascii=False,
+            )
+        )
+        return
     request: PlanningJobRequest | None = None
     if args.command == "plan":
-        request = PlanningJobRequest.model_validate(
-            _read_request(args.request, project=project)
-        )
+        request = load_planning_request(args.request, project=project)
     application = _build_application(args.command)
     if args.command == "plan":
         assert request is not None
@@ -177,6 +191,22 @@ def _parser() -> argparse.ArgumentParser:
 
     produce = subparsers.add_parser("produce", help="write an approved Editorial Project")
     produce.add_argument("--editorial-project-id", required=True, type=UUID)
+
+    probe = subparsers.add_parser(
+        "probe",
+        help="run one atomic plan-startup boundary; later boundaries stay refused",
+    )
+    probe.add_argument(
+        "--boundary",
+        required=True,
+        help="one of: request-read, persistence, embed-construct, "
+        "graph-llm-construct, axis-llm-construct, graph-init, "
+        "graph-extract, axis-generate",
+    )
+    probe.add_argument(
+        "--request",
+        help="local path or gs:// JSON URI (required for request-read)",
+    )
     return parser
 
 

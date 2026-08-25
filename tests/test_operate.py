@@ -33,6 +33,21 @@ def test_prepare_plan_matches_worker_parser() -> None:
     assert args.command == "plan"
 
 
+def test_prepare_probe_request_read_does_not_dispatch_plan() -> None:
+    uri = f"gs://{PROOF_BUCKET}/requests/{uuid4()}.json"
+    prepared = prepare_operation(operation="probe-request-read", request_uri=uri)
+    args = _parser().parse_args(list(prepared.worker_argv))
+    assert prepared.operation == "probe-request-read"
+    assert prepared.mode == "dispatch"
+    assert prepared.worker_argv == ("probe", "--boundary", "request-read", "--request", uri)
+    assert args.command == "probe"
+    assert args.boundary == "request-read"
+    assert "plan" not in prepared.gcloud_args
+    summary = render_step_summary(prepared)
+    assert "probe-request-read" in summary
+    assert "Model invocation: not started" in summary
+
+
 def test_prepare_axis_approval_and_revision() -> None:
     axis_id = uuid4()
     approved = prepare_operation(operation="approve-axis", narrative_axis_id=str(axis_id))
@@ -64,6 +79,7 @@ def test_prepare_inspect_accepts_job_execution_name() -> None:
     ("kwargs", "message"),
     [
         ({"operation": "plan"}, "plan requires only request_uri"),
+        ({"operation": "probe-request-read"}, "probe-request-read requires only request_uri"),
         ({"operation": "approve-axis"}, "approve-axis requires only narrative_axis_id"),
         ({"operation": "revise-axis", "narrative_axis_id": str(uuid4())}, "revise-axis requires"),
         ({"operation": "revise-project", "editorial_project_id": str(uuid4())}, "revise-project requires"),
@@ -86,7 +102,45 @@ def test_validate_plan_request_file_omits_source_text(tmp_path: Path) -> None:
     assert "Conteúdo" not in json.dumps(summary)
 
 
-def test_summarize_execution_surfaces_safe_worker_error() -> None:
+def test_summarize_execution_surfaces_probe_request_read() -> None:
+    execution = {
+        "metadata": {"name": "hefesto-v4-probe1", "creationTimestamp": "2026-08-25T12:00:00Z"},
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "image": "image",
+                            "args": [
+                                "probe",
+                                "--boundary",
+                                "request-read",
+                                "--request",
+                                f"gs://{PROOF_BUCKET}/requests/job.json",
+                            ],
+                        }
+                    ]
+                }
+            }
+        },
+        "status": {"completionTime": "2026-08-25T12:00:10Z", "succeededCount": 1, "failedCount": 0},
+    }
+    logs = json.dumps(
+        {
+            "boundary": "request-read",
+            "status": "pass",
+            "paid": False,
+            "project_id": "13101c35-723d-43fe-9b45-0082b49c0a76",
+            "source_count": 2,
+            "duration_minutes": 8,
+        }
+    )
+    report = summarize_execution(execution, log_text=logs)
+    assert report["state"] == "SUCCEEDED"
+    assert report["evidence"]["boundary"] == "request-read"
+    assert report["evidence"]["status"] == "pass"
+    assert report["evidence"]["source_count"] == 2
+    assert report["args"][0] == "probe"
     execution = {
         "metadata": {"name": "hefesto-v4-tdkmc", "creationTimestamp": "2026-08-25T11:37:40Z"},
         "spec": {
@@ -146,6 +200,7 @@ def test_operate_workflow_exposes_both_approval_boundaries() -> None:
     assert "PROJECT_ID: comunicamundo-v4" in workflow
     assert "- revise-axis" in workflow
     assert "- approve-axis" in workflow
+    assert "- probe-request-read" in workflow
     assert "- revise-project" in workflow
     assert "feedback:" in workflow
     assert "--async" in workflow

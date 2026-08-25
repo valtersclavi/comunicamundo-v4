@@ -12,6 +12,7 @@ from comunicamundo_v4.hefesto.worker import (
     _parser,
     _read_request,
     _safe_failure_payload,
+    load_planning_request,
     main,
 )
 
@@ -31,6 +32,8 @@ def test_local_planning_request_is_strictly_validated(tmp_path) -> None:
     request = PlanningJobRequest.model_validate(_read_request(str(request_path), project="unused"))
     assert request.brief.duration_minutes == 8
     assert len(request.sources) == 1
+    loaded = load_planning_request(str(request_path), project="unused")
+    assert loaded.project_id == request.project_id
 
 
 def test_planning_request_rejects_recipe_fields(tmp_path) -> None:

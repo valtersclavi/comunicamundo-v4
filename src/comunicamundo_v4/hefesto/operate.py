@@ -13,7 +13,7 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 from uuid import UUID
 
-from .worker import MAX_REQUEST_BYTES, PlanningJobRequest, _parser, _read_request
+from .worker import MAX_REQUEST_BYTES, _parser, load_planning_request
 
 PROOF_PROJECT = "comunicamundo-v4"
 PROOF_BUCKET = "comunicamundo-v4-hefesto-30524898837"
@@ -21,6 +21,7 @@ PROOF_JOB = "hefesto-v4"
 PROOF_REGION = "us-central1"
 OPERATIONS = (
     "plan",
+    "probe-request-read",
     "revise-axis",
     "approve-axis",
     "revise-project",
@@ -145,7 +146,7 @@ def prepare_operation(
     command = _blank_to_none(operation)
     if command not in OPERATIONS:
         raise ValueError(
-            "operation must be plan, revise-axis, approve-axis, revise-project, approve, produce, or inspect"
+            "operation must be plan, probe-request-read, revise-axis, approve-axis, revise-project, approve, produce, or inspect"
         )
     fields = {
         "request_uri": _blank_to_none(request_uri),
@@ -161,6 +162,15 @@ def prepare_operation(
             raise ValueError("plan requires only request_uri")
         uri = _require_request_uri(fields["request_uri"], allowed_bucket=allowed_bucket)
         argv = ("plan", "--request", uri)
+        _parser().parse_args(list(argv))
+        return PreparedOperation(command, "dispatch", argv, request_uri=uri)
+
+    if command == "probe-request-read":
+        unexpected = _unexpected_fields(fields, {"request_uri"})
+        if unexpected or fields["request_uri"] is None:
+            raise ValueError("probe-request-read requires only request_uri")
+        uri = _require_request_uri(fields["request_uri"], allowed_bucket=allowed_bucket)
+        argv = ("probe", "--boundary", "request-read", "--request", uri)
         _parser().parse_args(list(argv))
         return PreparedOperation(command, "dispatch", argv, request_uri=uri)
 
@@ -236,7 +246,7 @@ def prepare_operation(
 def validate_plan_request_file(path: Path, *, project: str = PROOF_PROJECT) -> dict[str, Any]:
     if path.stat().st_size > MAX_REQUEST_BYTES:
         raise ValueError("planning request exceeds the 50 MiB limit")
-    request = PlanningJobRequest.model_validate(_read_request(str(path), project=project))
+    request = load_planning_request(str(path), project=project)
     return {
         "project_id": str(request.project_id),
         "theme": request.brief.theme,
@@ -342,6 +352,14 @@ def _evidence_from_worker_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         "title",
         "error_type",
         "error",
+        "boundary",
+        "status",
+        "source_count",
+        "duration_minutes",
+        "output_language",
+        "theme",
+        "approach",
+        "paid",
     ):
         if payload.get(key) not in (None, _BLANK) and key not in evidence:
             evidence[key] = payload[key]
