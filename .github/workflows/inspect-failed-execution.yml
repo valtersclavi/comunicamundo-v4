@@ -10,6 +10,7 @@ env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
   EXECUTION: hefesto-v4-rebuild-bgvht
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
 
@@ -28,13 +29,12 @@ jobs:
       - name: Describe failed execution only
         run: |
           set -euo pipefail
-          echo '=== EXECUTION JSON ==='
-          gcloud run jobs executions describe "${EXECUTION}" \
-            --project="${PROJECT_ID}" \
-            --region="${REGION}" \
-            --format=json
-          echo '=== EXECUTION STATUS ==='
           gcloud run jobs executions describe "${EXECUTION}" \
             --project="${PROJECT_ID}" \
             --region="${REGION}" \
             --format='yaml(status)'
+      - name: Prove existing bucket read without exposing request
+        run: |
+          set -euo pipefail
+          gcloud storage cat "${REQUEST_URI}" >/dev/null
+          echo 'BUCKET_READ: SUCCESS'
