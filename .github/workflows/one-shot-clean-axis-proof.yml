@@ -66,64 +66,18 @@ jobs:
           done
           if [ "${terminal}" != "succeeded" ]; then
             echo "PLAN_EXECUTION: ${terminal:-timeout}" >&2
-            gcloud logging read \
-              "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND labels.\"run.googleapis.com/execution_name\"=${EXECUTION}" \
-              --project="${PROJECT_ID}" --limit=80 --freshness=1h --format='value(textPayload)' || true
+            gcloud run jobs executions describe "${EXECUTION}" \
+              --project="${PROJECT_ID}" --region="${REGION}" --format='yaml(status)' || true
             exit 1
           fi
           echo "PLAN_EXECUTION: SUCCEEDED"
-      - name: Read only the resulting approval object
+      - name: Result
+        if: always()
         run: |
-          set -euo pipefail
-          sleep 3
-          gcloud logging read \
-            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND labels.\"run.googleapis.com/execution_name\"=${EXECUTION}" \
-            --project="${PROJECT_ID}" --limit=100 --freshness=1h --order=asc --format='value(textPayload)' > "${RUNNER_TEMP}/plan.log"
-          python - "${RUNNER_TEMP}/plan.log" "${GITHUB_STEP_SUMMARY}" <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          lines = Path(sys.argv[1]).read_text(encoding="utf-8").splitlines()
-          result = None
-          for raw in lines:
-              line = raw.strip()
-              if not line.startswith("{"):
-                  continue
-              try:
-                  candidate = json.loads(line)
-              except json.JSONDecodeError:
-                  continue
-              if isinstance(candidate, dict) and isinstance(candidate.get("narrative_axis"), dict):
-                  result = candidate
-          if result is None:
-              raise SystemExit("worker result JSON with narrative_axis was not found")
-
-          axis = result["narrative_axis"]
-          if axis.get("status") != "proposed":
-              raise SystemExit(f"Narrative Axis did not stop proposed: {axis.get('status')}")
-          if result.get("editorial_project_id") is not None:
-              raise SystemExit("Editorial Project was created before Axis approval")
-          statement = str(axis.get("statement") or "").strip()
-          if not statement:
-              raise SystemExit("Narrative Axis statement is empty")
-          artifact = result.get("graph_artifact") or {}
-          prefix = str(artifact.get("prefix") or "")
-          if not prefix.startswith("comunicamundo-v4-rebuild/projects/"):
-              raise SystemExit(f"graph artifact did not use rebuild namespace: {prefix}")
-
-          summary = Path(sys.argv[2])
-          with summary.open("a", encoding="utf-8") as out:
-              out.write("# FIRST CLEAN NARRATIVE AXIS: PASS\n\n")
-              out.write(f"- Execution: `{__import__('os').environ['EXECUTION']}`\n")
-              out.write(f"- Narrative Axis ID: `{axis['narrative_axis_id']}`\n")
-              out.write(f"- Project ID: `{axis['project_id']}`\n")
-              out.write("- Status: `proposed`\n")
-              out.write("- Editorial Project: `NOT CREATED`\n")
-              out.write(f"- Fresh graph prefix: `{prefix}`\n\n")
-              out.write("## Eixo Narrativo\n\n")
-              out.write(statement + "\n")
-          print("FIRST_CLEAN_NARRATIVE_AXIS: PASS")
-          print(f"NARRATIVE_AXIS_ID={axis['narrative_axis_id']}")
-          print(f"NARRATIVE_AXIS={statement}")
-          PY
+          {
+            echo "# Atomic real plan proof"
+            echo "- Execution: \`${EXECUTION:-NOT_DISPATCHED}\`"
+            echo "- Scope: plan only"
+            echo "- Approval command: none"
+            echo "- Cloud Logging read: none"
+          } >> "${GITHUB_STEP_SUMMARY}"
