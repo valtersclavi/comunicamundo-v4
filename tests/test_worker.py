@@ -1,7 +1,14 @@
 import base64
+import json
+import sys
 from uuid import uuid4
+
 import pytest
-from comunicamundo_v4.hefesto.worker import _feedback, _parser
+from pydantic import ValidationError
+
+from comunicamundo_v4.hefesto.contracts import PlanningRun, PlanningRunState
+from comunicamundo_v4.hefesto.worker import _feedback, _parser, main
+from fakes import MemoryPlanningPersistence
 
 
 def test_worker_exposes_both_approval_boundaries() -> None:
@@ -10,6 +17,7 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     project_id = str(uuid4())
     assert parser.parse_args(["approve-axis", "--narrative-axis-id", axis_id]).command == "approve-axis"
     assert parser.parse_args(["approve-project", "--editorial-project-id", project_id]).command == "approve-project"
+    assert parser.parse_args(["plan", "--request", "gs://bucket/request.json"]).command == "plan"
 
 
 def test_feedback_is_transport_encoded_but_natural_language() -> None:
@@ -18,3 +26,79 @@ def test_feedback_is_transport_encoded_but_natural_language() -> None:
     assert _feedback(encoded) == text
     with pytest.raises(ValueError):
         _feedback("")
+
+
+def _write_request(path, *, extra=None, sources=None, brief=None) -> None:
+    payload = {
+        "project_id": str(uuid4()),
+        "brief": brief or {"theme": "Luto infantil", "approach": "sensível", "duration_minutes": 8},
+        "sources": [{"source_id": str(uuid4()), "text": "A criança percebe a ausência.", "language": "pt-BR"}] if sources is None else sources,
+    }
+    if extra:
+        payload.update(extra)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_invalid_plan_request_stops_before_runtime_and_persistence(monkeypatch, tmp_path) -> None:
+    sys.modules.pop("comunicamundo_v4.hefesto.runtime", None)
+    sys.modules.pop("comunicamundo_v4.hefesto.application", None)
+    calls: list[str] = []
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.delenv("HEFESTO_GCS_BUCKET", raising=False)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._application", lambda: calls.append("application") or (_ for _ in ()).throw(AssertionError("runtime")))
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._planning_persistence", lambda: calls.append("persistence") or (_ for _ in ()).throw(AssertionError("persistence")))
+    path = tmp_path / "bad.json"
+    _write_request(path, extra={"recipe": "not allowed"})
+    with pytest.raises(ValidationError):
+        main(["plan", "--request", str(path)])
+    assert calls == []
+    assert "comunicamundo_v4.hefesto.runtime" not in sys.modules
+    assert "comunicamundo_v4.hefesto.application" not in sys.modules
+
+
+def test_empty_sources_stop_before_runtime(monkeypatch, tmp_path) -> None:
+    sys.modules.pop("comunicamundo_v4.hefesto.runtime", None)
+    calls: list[str] = []
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._application", lambda: calls.append("application") or (_ for _ in ()).throw(AssertionError("runtime")))
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._planning_persistence", lambda: calls.append("persistence") or (_ for _ in ()).throw(AssertionError("persistence")))
+    path = tmp_path / "empty.json"
+    _write_request(path, sources=[])
+    with pytest.raises(ValidationError):
+        main(["plan", "--request", str(path)])
+    assert calls == []
+    assert "comunicamundo_v4.hefesto.runtime" not in sys.modules
+
+
+def test_plan_command_reaches_source_chunks_ready_without_building_runtime(monkeypatch, tmp_path, capsys) -> None:
+    sys.modules.pop("comunicamundo_v4.hefesto.runtime", None)
+    sys.modules.pop("comunicamundo_v4.hefesto.application", None)
+    store = MemoryPlanningPersistence()
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._planning_persistence", lambda: store)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._application", lambda: (_ for _ in ()).throw(AssertionError("Vertex runtime must not be built for plan")))
+    path = tmp_path / "request.json"
+    _write_request(path)
+    main(["plan", "--request", str(path)])
+    run = PlanningRun.model_validate_json(capsys.readouterr().out)
+    assert run.state is PlanningRunState.SOURCE_CHUNKS_READY
+    assert run.chunk_count == 1
+    assert store.manifest_writes == 1
+    assert "comunicamundo_v4.hefesto.runtime" not in sys.modules
+    main(["plan", "--request", str(path)])
+    rerun = PlanningRun.model_validate_json(capsys.readouterr().out)
+    assert rerun.planning_run_id == run.planning_run_id
+    assert rerun.source_lineage_id == run.source_lineage_id
+    assert store.manifest_writes == 1
+    assert "comunicamundo_v4.hefesto.runtime" not in sys.modules
+    changed = json.loads(path.read_text(encoding="utf-8"))
+    changed["brief"]["theme"] = "Outro recorte"
+    changed_path = tmp_path / "changed-brief.json"
+    changed_path.write_text(json.dumps(changed), encoding="utf-8")
+    main(["plan", "--request", str(changed_path)])
+    new_brief = PlanningRun.model_validate_json(capsys.readouterr().out)
+    assert new_brief.planning_run_id != run.planning_run_id
+    assert new_brief.source_lineage_id == run.source_lineage_id
+    assert store.manifest_writes == 1
+    assert store.chunk_writes == 1
+    assert "comunicamundo_v4.hefesto.runtime" not in sys.modules

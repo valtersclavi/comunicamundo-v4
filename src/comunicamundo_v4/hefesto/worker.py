@@ -12,20 +12,12 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from google.cloud import storage
-from pydantic import Field
 
-from .application import HefestoApplication
-from .contracts import EditorialBrief, NormalizedSource, StrictModel
+from .contracts import PlanningRequest, PlanningRun
 from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
-from .runtime import VertexRuntimeSettings, build_vertex_runtime
+from .planning import PlanningOrchestrator
 
 MAX_REQUEST_BYTES = 50 * 1024 * 1024
-
-
-class PlanningRequest(StrictModel):
-    project_id: UUID
-    brief: EditorialBrief
-    sources: list[NormalizedSource] = Field(min_length=1)
 
 
 def _required(name: str) -> str:
@@ -52,6 +44,10 @@ def _read_request(location: str, *, project: str) -> dict[str, Any]:
     return parsed
 
 
+def load_planning_request(location: str, *, project: str) -> PlanningRequest:
+    return PlanningRequest.model_validate(_read_request(location, project=project))
+
+
 def _feedback(encoded: str) -> str:
     try:
         value = base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8").strip()
@@ -62,7 +58,22 @@ def _feedback(encoded: str) -> str:
     return value
 
 
-def _application() -> HefestoApplication:
+def _planning_persistence() -> GcpEditorialPersistence:
+    project = _required("GOOGLE_CLOUD_PROJECT")
+    bucket = _required("HEFESTO_GCS_BUCKET")
+    return GcpEditorialPersistence.from_settings(GcpPersistenceSettings(project=project, bucket=bucket))
+
+
+def run_plan_command(location: str) -> PlanningRun:
+    project = _required("GOOGLE_CLOUD_PROJECT")
+    request = load_planning_request(location, project=project)
+    return PlanningOrchestrator(_planning_persistence()).execute(request)
+
+
+def _application():
+    from .application import HefestoApplication
+    from .runtime import VertexRuntimeSettings, build_vertex_runtime
+
     project = _required("GOOGLE_CLOUD_PROJECT")
     bucket = _required("HEFESTO_GCS_BUCKET")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
@@ -73,12 +84,12 @@ def _application() -> HefestoApplication:
 
 
 async def _run(args: argparse.Namespace) -> None:
-    app = _application()
     if args.command == "plan":
-        project = _required("GOOGLE_CLOUD_PROJECT")
-        request = PlanningRequest.model_validate(_read_request(args.request, project=project))
-        result = await app.plan(project_id=request.project_id, brief=request.brief, sources=request.sources)
-    elif args.command == "revise-axis":
+        result = run_plan_command(args.request)
+        print(result.model_dump_json())
+        return
+    app = _application()
+    if args.command == "revise-axis":
         result = await app.revise_axis(args.narrative_axis_id, _feedback(args.feedback_b64))
     elif args.command == "approve-axis":
         result = await app.approve_axis(args.narrative_axis_id)
@@ -96,7 +107,7 @@ async def _run(args: argparse.Namespace) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ComunicAmundo V4 Hefesto clean rebuild")
     commands = parser.add_subparsers(dest="command", required=True)
-    plan = commands.add_parser("plan", help="build a fresh graph and propose a Narrative Axis")
+    plan = commands.add_parser("plan", help="validate the request, prepare source chunks, and persist a resumable PlanningRun")
     plan.add_argument("--request", required=True)
     revise_axis = commands.add_parser("revise-axis")
     revise_axis.add_argument("--narrative-axis-id", type=UUID, required=True)
