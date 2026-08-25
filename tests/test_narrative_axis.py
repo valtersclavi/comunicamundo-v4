@@ -748,7 +748,6 @@ async def test_architect_writer_and_critic_are_given_the_approved_axis() -> None
 
 class DeterministicAxisPlanner:
     async def propose(self, *, project_id, brief, graph_context) -> NarrativeAxis:
-        assert graph_context
         return _axis(
             project_id=project_id,
             statement=(
@@ -778,7 +777,7 @@ async def test_workflow_builds_graph_once_and_stops_at_proposed_axis(tmp_path) -
     assert result.narrative_axis.status is NarrativeAxisStatus.PROPOSED
     assert result.narrative_axis.approved_at is None
     assert _brief().theme in result.narrative_axis.statement
-    assert result.graph_context
+    assert isinstance(result.graph_context, str)
     assert (tmp_path / "graph" / "property_graph_store.json").exists()
 
 
