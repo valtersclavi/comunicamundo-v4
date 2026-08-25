@@ -1,4 +1,4 @@
-"""First vertical slice: sources to an approvable Editorial Project."""
+"""Sources to the first durable Narrative Axis approval boundary."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.llms import LLM
 from llama_index.core.workflow import Event, StartEvent, StopEvent, Workflow, step
 
-from .contracts import EditorialBrief, EditorialProject, NormalizedSource
+from .contracts import EditorialBrief, NarrativeAxis, NormalizedSource
 from .graph import ProjectGraph
-from .planner import EditorialPlanner
+from .planner import NarrativeAxisPlanner
 
 
-class BuildEditorialProjectRequest(StartEvent):
+class BuildNarrativeAxisRequest(StartEvent):
     project_id: UUID
     brief: EditorialBrief
     sources: list[NormalizedSource]
@@ -29,23 +29,23 @@ class GraphBuilt(Event):
 
 
 class EditorialPlanningWorkflow(Workflow):
-    """Build the graph and stop at the durable human-approval boundary."""
+    """Build the graph, propose the Narrative Axis, and stop for approval."""
 
     def __init__(
         self,
         *,
         graph_llm: LLM,
-        planning_llm: LLM,
+        axis_planner: NarrativeAxisPlanner,
         embed_model: BaseEmbedding,
         timeout: float | None = 1800,
     ) -> None:
         super().__init__(timeout=timeout)
         self._graph_llm = graph_llm
         self._embed_model = embed_model
-        self._planner = EditorialPlanner(planning_llm)
+        self._axis_planner = axis_planner
 
     @step
-    async def build_graph(self, event: BuildEditorialProjectRequest) -> GraphBuilt:
+    async def build_graph(self, event: BuildNarrativeAxisRequest) -> GraphBuilt:
         # PropertyGraphIndex performs its own bounded async extraction. Running
         # construction in a worker thread prevents its event loop from nesting
         # inside the Workflow event loop and keeps the workflow responsive.
@@ -63,14 +63,14 @@ class EditorialPlanningWorkflow(Workflow):
         )
 
     @step
-    async def build_editorial_project(self, event: GraphBuilt) -> StopEvent:
+    async def build_narrative_axis(self, event: GraphBuilt) -> StopEvent:
         graph_context = await event.graph.context_for_editorial_project(event.brief)
-        editorial_project = await self._planner.build_project(
+        axis = await self._axis_planner.propose(
             project_id=event.project_id,
             brief=event.brief,
             graph_context=graph_context,
         )
-        return StopEvent(result=editorial_project)
+        return StopEvent(result=axis)
 
 
 async def run_editorial_planning(
@@ -80,15 +80,15 @@ async def run_editorial_planning(
     brief: EditorialBrief,
     sources: list[NormalizedSource],
     graph_storage_path: Path,
-) -> EditorialProject:
+) -> NarrativeAxis:
     result = await workflow.run(
-        start_event=BuildEditorialProjectRequest(
+        start_event=BuildNarrativeAxisRequest(
             project_id=project_id,
             brief=brief,
             sources=sources,
             graph_storage_path=graph_storage_path,
         )
     )
-    if not isinstance(result, EditorialProject):
-        raise TypeError(f"expected EditorialProject, received {type(result).__name__}")
+    if not isinstance(result, NarrativeAxis):
+        raise TypeError(f"expected NarrativeAxis, received {type(result).__name__}")
     return result
