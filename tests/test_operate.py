@@ -133,6 +133,17 @@ def test_execution_describe_does_not_use_unsupported_job_flag() -> None:
         assert '--job="${JOB_NAME}"' not in inspect_block
 
 
+def test_planning_request_is_read_only_by_worker_runtime() -> None:
+    for path in (
+        Path(".github/workflows/operate.yml"),
+        Path(".github/workflows/chatops-operate.yml"),
+    ):
+        workflow = path.read_text(encoding="utf-8")
+        assert "gcloud storage cat" not in workflow
+        assert "validate-plan-request" not in workflow
+        assert "--args=\"${PREPARED_GCLOUD_ARGS}\"" in workflow
+
+
 def test_step_summary_does_not_include_feedback_or_secrets() -> None:
     prepared = prepare_operation(operation="revise-axis", narrative_axis_id=str(uuid4()), feedback="texto sensível do usuário")
     summary = render_step_summary(prepared)
