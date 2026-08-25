@@ -7,22 +7,28 @@ import asyncio
 import base64
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import urlparse
 from uuid import UUID
 
 from google.cloud import storage
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from .application import HefestoApplication
 from .contracts import EditorialBrief, NormalizedSource, StrictModel
 from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
-from .runtime import VertexRuntimeSettings, build_vertex_runtime
+from .runtime import VertexRuntimeSettings, build_vertex_runtime, profile_for_command
 
 
 MAX_REQUEST_BYTES = 50 * 1024 * 1024
 MAX_FEEDBACK_BYTES = 8 * 1024
+MAX_FAILURE_MESSAGE_BYTES = 2000
+_SENSITIVE = re.compile(
+    r"(?i)(secret|token|password|api[_-]?key|authorization|bearer|"
+    r"private[_-]?key|begin (rsa |ec |openssh )?private)"
+)
 
 
 class PlanningJobRequest(StrictModel):
@@ -76,25 +82,54 @@ def _decode_feedback(value: str) -> str:
     return feedback
 
 
-def _build_application() -> HefestoApplication:
+def _build_application(command: str) -> HefestoApplication:
     project = _required_environment("GOOGLE_CLOUD_PROJECT")
     bucket = _required_environment("HEFESTO_GCS_BUCKET")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
     return HefestoApplication(
-        runtime=build_vertex_runtime(VertexRuntimeSettings(project=project, location=location)),
+        runtime=build_vertex_runtime(
+            VertexRuntimeSettings(project=project, location=location),
+            profile=profile_for_command(command),
+        ),
         persistence=GcpEditorialPersistence.from_settings(
             GcpPersistenceSettings(project=project, bucket=bucket)
         ),
     )
 
 
+def _safe_failure_payload(error: BaseException) -> dict[str, str]:
+    """Compact, non-sensitive failure for Cloud Run stdout and inspect."""
+
+    if isinstance(error, ValidationError):
+        details = "; ".join(
+            f"{'.'.join(str(part) for part in item.get('loc', ()))}: {item.get('msg')}"
+            for item in error.errors(include_url=False, include_input=False)
+        )
+        message = details or "request validation failed"
+    else:
+        message = str(error).strip() or type(error).__name__
+    if _SENSITIVE.search(message):
+        message = type(error).__name__
+    return {
+        "error_type": type(error).__name__,
+        "error": message[:MAX_FAILURE_MESSAGE_BYTES],
+    }
+
+
+def _emit_safe_failure(error: BaseException) -> None:
+    print(json.dumps(_safe_failure_payload(error), ensure_ascii=False), flush=True)
+
+
 async def _run(args: argparse.Namespace) -> None:
     project = _required_environment("GOOGLE_CLOUD_PROJECT")
-    application = _build_application()
+    request: PlanningJobRequest | None = None
     if args.command == "plan":
         request = PlanningJobRequest.model_validate(
             _read_request(args.request, project=project)
         )
+    application = _build_application(args.command)
+    if args.command == "plan":
+        assert request is not None
         result = await application.plan_project(
             project_id=request.project_id,
             brief=request.brief,
@@ -146,7 +181,12 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    asyncio.run(_run(_parser().parse_args(argv)))
+    args = _parser().parse_args(argv)
+    try:
+        asyncio.run(_run(args))
+    except Exception as error:
+        _emit_safe_failure(error)
+        raise SystemExit(1) from error
 
 
 if __name__ == "__main__":

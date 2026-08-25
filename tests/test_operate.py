@@ -86,6 +86,39 @@ def test_validate_plan_request_file_omits_source_text(tmp_path: Path) -> None:
     assert "Conteúdo" not in json.dumps(summary)
 
 
+def test_summarize_execution_surfaces_safe_worker_error() -> None:
+    execution = {
+        "metadata": {"name": "hefesto-v4-tdkmc", "creationTimestamp": "2026-08-25T11:37:40Z"},
+        "spec": {
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "image": "image",
+                            "args": [
+                                "plan",
+                                "--request",
+                                f"gs://{PROOF_BUCKET}/requests/job.json",
+                            ],
+                        }
+                    ]
+                }
+            }
+        },
+        "status": {"completionTime": "2026-08-25T11:38:00Z", "succeededCount": 0, "failedCount": 1},
+    }
+    logs = json.dumps(
+        {
+            "error_type": "ClientError",
+            "error": "403 PERMISSION_DENIED: serviceusage.services.use is required",
+        }
+    )
+    report = summarize_execution(execution, log_text=logs)
+    assert report["state"] == "FAILED"
+    assert report["evidence"]["error_type"] == "ClientError"
+    assert "serviceusage.services.use" in report["evidence"]["error"]
+
+
 def test_summarize_execution_surfaces_axis_and_compact_project() -> None:
     axis_id = str(uuid4())
     project_id = str(uuid4())
