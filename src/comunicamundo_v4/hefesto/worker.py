@@ -19,7 +19,7 @@ from pydantic import Field, ValidationError
 from .application import HefestoApplication
 from .contracts import EditorialBrief, NormalizedSource, StrictModel
 from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
-from .runtime import VertexRuntimeSettings, build_vertex_runtime
+from .runtime import VertexRuntimeSettings, build_vertex_runtime, profile_for_command
 
 
 MAX_REQUEST_BYTES = 50 * 1024 * 1024
@@ -82,12 +82,15 @@ def _decode_feedback(value: str) -> str:
     return feedback
 
 
-def _build_application() -> HefestoApplication:
+def _build_application(command: str) -> HefestoApplication:
     project = _required_environment("GOOGLE_CLOUD_PROJECT")
     bucket = _required_environment("HEFESTO_GCS_BUCKET")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
     return HefestoApplication(
-        runtime=build_vertex_runtime(VertexRuntimeSettings(project=project, location=location)),
+        runtime=build_vertex_runtime(
+            VertexRuntimeSettings(project=project, location=location),
+            profile=profile_for_command(command),
+        ),
         persistence=GcpEditorialPersistence.from_settings(
             GcpPersistenceSettings(project=project, bucket=bucket)
         ),
@@ -124,7 +127,7 @@ async def _run(args: argparse.Namespace) -> None:
         request = PlanningJobRequest.model_validate(
             _read_request(args.request, project=project)
         )
-    application = _build_application()
+    application = _build_application(args.command)
     if args.command == "plan":
         assert request is not None
         result = await application.plan_project(
