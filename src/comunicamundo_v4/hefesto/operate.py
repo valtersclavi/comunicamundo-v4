@@ -340,6 +340,8 @@ def _evidence_from_worker_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         "word_count",
         "quality_score",
         "title",
+        "error_type",
+        "error",
     ):
         if payload.get(key) not in (None, _BLANK) and key not in evidence:
             evidence[key] = payload[key]
