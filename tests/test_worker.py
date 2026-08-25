@@ -88,5 +88,17 @@ def test_plan_command_reaches_source_chunks_ready_without_building_runtime(monke
     main(["plan", "--request", str(path)])
     rerun = PlanningRun.model_validate_json(capsys.readouterr().out)
     assert rerun.planning_run_id == run.planning_run_id
+    assert rerun.source_lineage_id == run.source_lineage_id
     assert store.manifest_writes == 1
+    assert "comunicamundo_v4.hefesto.runtime" not in sys.modules
+    changed = json.loads(path.read_text(encoding="utf-8"))
+    changed["brief"]["theme"] = "Outro recorte"
+    changed_path = tmp_path / "changed-brief.json"
+    changed_path.write_text(json.dumps(changed), encoding="utf-8")
+    main(["plan", "--request", str(changed_path)])
+    new_brief = PlanningRun.model_validate_json(capsys.readouterr().out)
+    assert new_brief.planning_run_id != run.planning_run_id
+    assert new_brief.source_lineage_id == run.source_lineage_id
+    assert store.manifest_writes == 1
+    assert store.chunk_writes == 1
     assert "comunicamundo_v4.hefesto.runtime" not in sys.modules
