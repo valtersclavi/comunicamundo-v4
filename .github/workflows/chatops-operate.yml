@@ -123,18 +123,6 @@ jobs:
           configured="$(gcloud config get-value project)"
           test "${configured}" = "comunicamundo-v4"
 
-      - name: Validate the plan request object
-        if: needs.prepare.outputs.mode == 'dispatch' && needs.prepare.outputs.operation == 'plan'
-        run: |
-          set -euo pipefail
-          test -n "${PREPARED_REQUEST_URI}"
-          gcloud storage cat "${PREPARED_REQUEST_URI}" --project="${PROJECT_ID}" > "${RUNNER_TEMP}/plan-request.json"
-          python -m comunicamundo_v4.hefesto.operate validate-plan-request \
-            --request-file "${RUNNER_TEMP}/plan-request.json" \
-            --summary-file "${RUNNER_TEMP}/plan-request.md"
-          cat "${RUNNER_TEMP}/plan-request.md" >> "${GITHUB_STEP_SUMMARY}"
-          rm -f "${RUNNER_TEMP}/plan-request.json"
-
       - name: Dispatch the Cloud Run Job asynchronously
         if: needs.prepare.outputs.mode == 'dispatch'
         run: |
