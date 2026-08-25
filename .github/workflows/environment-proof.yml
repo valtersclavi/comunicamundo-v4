@@ -1,0 +1,98 @@
+name: environment-proof
+
+# Reproducible no-deploy proof that this lineage installs and tests against
+# the Aug 22 known-good environment (run 32602746777 / be5292d).
+# Does not authenticate to GCP, push images, execute Cloud Run, or call models.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: environment-proof-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the revision
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12.14"
+
+      - name: Install the V4 package against the Aug 22 freeze
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip==26.2.1
+          python -m pip install -e '.[dev]' --constraint constraints/be5292d-run-32602746777.txt
+          python -m pip check
+
+      - name: Assert pinned runtime versions
+        run: python scripts/prove_environment.py
+
+      - name: Test and compile
+        run: |
+          set -euo pipefail
+          python -m pytest
+          python -m compileall -q src tests scripts
+
+      - name: Worker help (no model)
+        run: python -m comunicamundo_v4.hefesto.worker --help
+
+      - name: Build the worker image from the pinned base
+        run: |
+          set -euo pipefail
+          docker build --tag hefesto-v4-env-proof:local --progress=plain . 2>&1 | tee "${RUNNER_TEMP}/docker-build.log"
+          grep -F 'python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a' "${RUNNER_TEMP}/docker-build.log"
+
+      - name: Assert image runtime pins and worker help
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python hefesto-v4-env-proof:local -c '
+          from importlib import metadata
+          pins = {
+              "google-api-core": "2.34.0",
+              "google-auth": "2.56.3",
+              "google-cloud-core": "2.6.1",
+              "google-cloud-firestore": "2.28.1",
+              "google-cloud-storage": "3.13.1",
+              "google-genai": "2.19.0",
+              "llama-index-core": "0.14.24",
+              "llama-index-embeddings-google-genai": "0.5.1",
+              "llama-index-llms-google-genai": "0.10.0",
+          }
+          errors = []
+          for name, expected in pins.items():
+              got = metadata.version(name)
+              if got != expected:
+                  errors.append(f"{name}: expected {expected}, got {got}")
+          if errors:
+              raise SystemExit("ENVIRONMENT_PROOF_IMAGE: FAIL\n" + "\n".join(errors))
+          print("ENVIRONMENT_PROOF_IMAGE: PASS")
+          '
+          docker run --rm hefesto-v4-env-proof:local --help
+
+      - name: Write the result
+        if: always()
+        run: |
+          {
+            echo "# Environment proof"
+            echo
+            echo "- Lineage: PR #24 head plus environment pin"
+            echo "- Known-good run: \`32602746777\`"
+            echo "- Known-good SHA: \`be5292d6af449481503543b24d82f061b52c2c47\`"
+            echo "- Python: 3.12.14"
+            echo "- Docker base: \`python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a\`"
+            echo "- Deploy: none"
+            echo "- Cloud Run: none"
+            echo "- Model invocation: none"
+          } >> "${GITHUB_STEP_SUMMARY}"
