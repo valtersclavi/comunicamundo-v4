@@ -202,6 +202,48 @@ async def test_application_has_two_durable_approval_boundaries() -> None:
     assert publication.quality_score == 91
 
 
+async def test_axis_failure_does_not_upload_the_property_graph() -> None:
+    """Current plan checkpoints the graph only after Axis succeeds.
+
+    A successful PropertyGraphIndex can still be discarded if Axis fails.
+    """
+
+    class FailingAxisPlanner:
+        async def propose(self, *, project_id, brief, graph_context):
+            raise RuntimeError("axis generation failed")
+
+    class RecordingPersistence(Persistence):
+        def __init__(self) -> None:
+            super().__init__()
+            self.persist_calls = 0
+
+        def persist_planning_result(self, axis, graph_directory):
+            self.persist_calls += 1
+            return super().persist_planning_result(axis, graph_directory)
+
+    from llama_index.core.embeddings import MockEmbedding
+    from llama_index.core.llms import MockLLM
+
+    from comunicamundo_v4.hefesto.workflow import EditorialPlanningWorkflow
+
+    persistence = RecordingPersistence()
+    runtime = Runtime()
+    runtime.planning_workflow = EditorialPlanningWorkflow(
+        graph_llm=MockLLM(max_tokens=64),
+        axis_planner=FailingAxisPlanner(),
+        embed_model=MockEmbedding(embed_dim=8),
+    )
+    application = HefestoApplication(runtime=runtime, persistence=persistence)
+    with pytest.raises(RuntimeError, match="axis generation failed"):
+        await application.plan_project(
+            project_id=uuid4(),
+            brief=_brief(),
+            sources=[NormalizedSource(source_id=uuid4(), text="Conteúdo", language="pt")],
+        )
+    assert persistence.persist_calls == 0
+    assert persistence.axis is None
+
+
 async def test_axis_and_project_approval_are_idempotent() -> None:
     persistence = Persistence()
     application = HefestoApplication(runtime=Runtime(), persistence=persistence)
