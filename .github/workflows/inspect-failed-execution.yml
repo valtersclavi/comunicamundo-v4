@@ -1,0 +1,40 @@
+name: inspect-failed-execution
+on:
+  push:
+    branches:
+      - main
+permissions:
+  contents: read
+  id-token: write
+env:
+  PROJECT_ID: comunicamundo-v4
+  REGION: us-central1
+  EXECUTION: hefesto-v4-rebuild-bgvht
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+
+jobs:
+  inspect:
+    if: ${{ contains(github.event.head_commit.message, '[inspect-execution]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Describe failed execution only
+        run: |
+          set -euo pipefail
+          echo '=== EXECUTION JSON ==='
+          gcloud run jobs executions describe "${EXECUTION}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format=json
+          echo '=== EXECUTION STATUS ==='
+          gcloud run jobs executions describe "${EXECUTION}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='yaml(status)'
