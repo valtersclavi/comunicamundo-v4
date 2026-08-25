@@ -8,6 +8,8 @@ from comunicamundo_v4.hefesto.contracts import (
     EditorialProject,
     EditorialProjectStatus,
     EditorialSubject,
+    NarrativeAxis,
+    NarrativeAxisStatus,
 )
 
 
@@ -28,9 +30,12 @@ def test_editorial_project_is_a_list_of_subjects_with_duration_budget() -> None:
         approach="Texto sensível e acessível para familiares",
         duration_minutes=8,
     )
+    axis_id = uuid4()
     project = EditorialProject(
         project_id=uuid4(),
         brief=brief,
+        narrative_axis_id=axis_id,
+        narrative_axis="O luto infantil só se compreende quando o sofrimento adulto também entra em cena.",
         working_title="Quando a infância encontra a perda",
         editorial_promise="Compreender como a criança vive e expressa o luto.",
         subjects=[
@@ -57,6 +62,23 @@ def test_editorial_project_is_a_list_of_subjects_with_duration_budget() -> None:
         "Como a criança compreende a morte",
         "O papel da comunicação adulta",
     ]
+    assert project.narrative_axis_id == axis_id
+    assert "sofrimento adulto" in project.narrative_axis
+
+
+def test_narrative_axis_is_proposed_until_explicit_approval() -> None:
+    axis = NarrativeAxis(
+        project_id=uuid4(),
+        statement="O luto infantil só se compreende quando o sofrimento adulto também entra em cena.",
+    )
+    approved = axis.approve()
+
+    assert axis.status is NarrativeAxisStatus.PROPOSED
+    assert axis.approved_at is None
+    assert approved.status is NarrativeAxisStatus.APPROVED
+    assert approved.approved_at is not None
+    with pytest.raises(ValidationError):
+        approved.statement = "outro centro"
 
 
 def test_editorial_project_rejects_unbounded_duration() -> None:
@@ -68,6 +90,8 @@ def test_editorial_project_rejects_unbounded_duration() -> None:
                 approach="Abordagem",
                 duration_minutes=8,
             ),
+            narrative_axis_id=uuid4(),
+            narrative_axis="O luto infantil só se compreende quando o sofrimento adulto também entra em cena.",
             working_title="Título",
             editorial_promise="Promessa",
             subjects=[

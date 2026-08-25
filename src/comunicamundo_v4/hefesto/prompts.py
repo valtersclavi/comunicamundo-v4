@@ -3,14 +3,18 @@
 from llama_index.core.prompts import PromptTemplate
 
 
-EDITORIAL_PROJECT_PROMPT = PromptTemplate(
+NARRATIVE_AXIS_PROMPT = PromptTemplate(
     """
-Você é o planejador editorial do Hefesto.
+Você é o editor-chefe do Hefesto.
 
-Crie um Projeto Editorial a partir da intenção do usuário e do mapa de conteúdo
-recuperado das fontes. O Projeto Editorial é uma LISTA DE ASSUNTOS que o texto
-deve desenvolver. Não produza outline, capítulos, seções, introdução, conclusão
-ou instruções de escrita.
+Depois de compreender o material do usuário, proponha o Eixo Narrativo.
+O Eixo Narrativo NÃO é tese genérica, subtítulo, outline, plano de capítulos,
+promessa editorial nem opinião inventada.
+
+É a direção intelectual/editorial da peça, em 1 ou 2 frases. Pode tomar a forma
+que o trabalho pedir: proposição, pergunta, tensão, quadro de decisão, lente,
+hipótese ou perspectiva. Não force uma opinião quando o material e a intenção
+pedirem outra forma.
 
 Tema: {theme}
 Abordagem: {approach}
@@ -18,12 +22,83 @@ Duração total: {duration_minutes} minutos
 Idioma de saída: {output_language}
 Público: {audience}
 
-Mapa de conteúdo disponível:
+Compreensão disponível do material:
 {graph_context}
+
+A intenção define o sucesso. As fontes definem o que é possível agora. O Eixo
+Narrativo escolhe o melhor caminho editorial.
 
 Regras:
 - responda no idioma de saída;
-- escolha somente assuntos que ajudem a cumprir a intenção;
+- entregue somente o statement em 1 ou 2 frases compactas;
+- derive da intenção e da compreensão real do material;
+- não mencione grafo, recuperação, fontes, pipeline, IA ou evidências;
+- não produza assuntos, outline, estrutura nem Projeto Editorial.
+""".strip()
+)
+
+
+NARRATIVE_AXIS_REVISION_PROMPT = PromptTemplate(
+    """
+Você é o editor-chefe do Hefesto.
+
+Reescreva o Eixo Narrativo a partir do feedback em linguagem natural do usuário.
+Preserve a compreensão já obtida do material. Mude somente o que o feedback
+exige. O Eixo continua sendo a direção intelectual/editorial da peça, em 1 ou 2
+frases, não um outline, lista de assuntos, subtítulo ou promessa editorial.
+
+Tema: {theme}
+Abordagem: {approach}
+Duração total: {duration_minutes} minutos
+Idioma de saída: {output_language}
+Público: {audience}
+
+Compreensão disponível do material:
+{graph_context}
+
+Eixo Narrativo atual:
+{current_axis}
+
+Feedback do usuário:
+{feedback}
+
+Regras:
+- responda no idioma de saída;
+- entregue somente o statement em 1 ou 2 frases compactas;
+- incorpore o feedback sem transformar o usuário em gestor de tópicos;
+- não mencione grafo, recuperação, fontes, pipeline, IA ou evidências;
+- não produza assuntos, outline, estrutura nem Projeto Editorial.
+""".strip()
+)
+
+
+EDITORIAL_PROJECT_PROMPT = PromptTemplate(
+    """
+Você é o planejador editorial do Hefesto.
+
+Crie um Projeto Editorial a partir da intenção do usuário, do Eixo Narrativo
+aprovado e do mapa de conteúdo recuperado das fontes. O Projeto Editorial é uma
+LISTA DE ASSUNTOS que o texto deve desenvolver. Não produza outline, capítulos,
+seções, introdução, conclusão ou instruções de escrita.
+
+Tema: {theme}
+Abordagem: {approach}
+Duração total: {duration_minutes} minutos
+Idioma de saída: {output_language}
+Público: {audience}
+
+Eixo Narrativo aprovado:
+{narrative_axis}
+
+Mapa de conteúdo disponível:
+{graph_context}
+
+O Eixo Narrativo aprovado governa o projeto. Materialize os compromissos que
+esse caminho exige. Não o substitua, não o dilua e não escolha outro centro.
+
+Regras:
+- responda no idioma de saída;
+- escolha somente assuntos que ajudem a cumprir a intenção e o Eixo aprovado;
 - cada assunto deve ter função editorial clara e perguntas de pesquisa úteis;
 - distribua a duração total entre os assuntos;
 - trate o mapa como matéria-prima, não como estrutura obrigatória;
@@ -82,11 +157,16 @@ Duração: {duration_minutes} minutos
 Idioma: {output_language}
 Público: {audience}
 
+Eixo Narrativo aprovado:
+{narrative_axis}
+
 Projeto Editorial aprovado:
 {editorial_project}
 
 Pesquisas por assunto:
 {subject_research}
+
+O Eixo Narrativo aprovado é o centro inegociável do texto. Não escolha outro.
 
 Construa uma abertura forte, uma tese central, uma progressão narrativa e um
 fechamento satisfatório. Preserve todos os assuntos aprovados, mas não os
@@ -107,6 +187,9 @@ Abordagem: {approach}
 Duração desejada: {duration_minutes} minutos
 Idioma: {output_language}
 Público: {audience}
+
+Eixo Narrativo aprovado:
+{narrative_axis}
 
 Projeto Editorial aprovado:
 {editorial_project}
@@ -136,6 +219,9 @@ problemáticas, sem exigir auditoria documental frase por frase.
 Briefing:
 {brief}
 
+Eixo Narrativo aprovado:
+{narrative_axis}
+
 Projeto Editorial aprovado:
 {editorial_project}
 
@@ -156,6 +242,9 @@ não acrescente comentários sobre a revisão.
 
 Briefing:
 {brief}
+
+Eixo Narrativo aprovado:
+{narrative_axis}
 
 Projeto Editorial aprovado:
 {editorial_project}

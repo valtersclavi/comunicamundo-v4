@@ -5,50 +5,36 @@ from llama_index.core.llms import MockLLM
 
 from comunicamundo_v4.hefesto.contracts import (
     EditorialBrief,
-    EditorialProject,
-    EditorialProjectStatus,
-    EditorialSubject,
+    NarrativeAxis,
+    NarrativeAxisStatus,
     NormalizedSource,
 )
 from comunicamundo_v4.hefesto.workflow import (
     EditorialPlanningWorkflow,
-    run_editorial_planning,
+    run_narrative_axis_planning,
 )
 
 
-class DeterministicPlanner:
-    async def build_project(
-        self,
-        *,
-        project_id,
-        brief,
-        graph_context,
-    ) -> EditorialProject:
-        return EditorialProject(
+class DeterministicAxisPlanner:
+    async def propose(self, *, project_id, brief, graph_context) -> NarrativeAxis:
+        return NarrativeAxis(
             project_id=project_id,
-            brief=brief,
-            working_title="Quando a infância encontra a perda",
-            editorial_promise="Compreender a experiência infantil sem reduzi-la.",
-            subjects=[
-                EditorialSubject(
-                    title="A compreensão infantil da morte",
-                    purpose="Apresentar a perspectiva da criança.",
-                    research_questions=["Como essa compreensão se manifesta?"],
-                    estimated_minutes=brief.duration_minutes,
-                )
-            ],
+            statement=(
+                f"Como {brief.theme} pode ser narrado a partir da compreensão "
+                "já recuperada do material."
+            ),
         )
 
 
-async def test_workflow_stops_at_editorial_approval_boundary(tmp_path) -> None:
+async def test_workflow_stops_at_proposed_narrative_axis(tmp_path) -> None:
     workflow = EditorialPlanningWorkflow(
         graph_llm=MockLLM(max_tokens=64),
         planning_llm=MockLLM(max_tokens=64),
         embed_model=MockEmbedding(embed_dim=8),
     )
-    workflow._planner = DeterministicPlanner()
+    workflow._axis_planner = DeterministicAxisPlanner()
 
-    result = await run_editorial_planning(
+    result = await run_narrative_axis_planning(
         workflow,
         project_id=uuid4(),
         brief=EditorialBrief(
@@ -66,8 +52,8 @@ async def test_workflow_stops_at_editorial_approval_boundary(tmp_path) -> None:
         graph_storage_path=tmp_path / "graph",
     )
 
-    assert result.status is EditorialProjectStatus.PROPOSED
-    assert result.approved_at is None
+    assert result.narrative_axis.status is NarrativeAxisStatus.PROPOSED
+    assert result.narrative_axis.approved_at is None
     assert result.brief.duration_minutes == 8
-    assert len(result.subjects) == 1
+    assert "luto na infância" in result.narrative_axis.statement
     assert (tmp_path / "graph" / "property_graph_store.json").exists()

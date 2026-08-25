@@ -1,4 +1,4 @@
-"""First vertical slice: sources to an approvable Editorial Project."""
+"""First vertical slice: sources to a proposed Narrative Axis."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.llms import LLM
 from llama_index.core.workflow import Event, StartEvent, StopEvent, Workflow, step
 
-from .contracts import EditorialBrief, EditorialProject, NormalizedSource
+from .contracts import EditorialBrief, NarrativeAxis, NormalizedSource, StrictModel
 from .graph import ProjectGraph
-from .planner import EditorialPlanner
+from .planner import EditorialPlanner, NarrativeAxisPlanner
 
 
 class BuildEditorialProjectRequest(StartEvent):
@@ -28,8 +28,14 @@ class GraphBuilt(Event):
     graph: ProjectGraph
 
 
+class AxisPlanningOutcome(StrictModel):
+    narrative_axis: NarrativeAxis
+    brief: EditorialBrief
+    graph_context: str
+
+
 class EditorialPlanningWorkflow(Workflow):
-    """Build the graph and stop at the durable human-approval boundary."""
+    """Build the graph once and stop at the proposed Narrative Axis."""
 
     def __init__(
         self,
@@ -42,6 +48,7 @@ class EditorialPlanningWorkflow(Workflow):
         super().__init__(timeout=timeout)
         self._graph_llm = graph_llm
         self._embed_model = embed_model
+        self._axis_planner = NarrativeAxisPlanner(planning_llm)
         self._planner = EditorialPlanner(planning_llm)
 
     @step
@@ -63,24 +70,30 @@ class EditorialPlanningWorkflow(Workflow):
         )
 
     @step
-    async def build_editorial_project(self, event: GraphBuilt) -> StopEvent:
+    async def propose_narrative_axis(self, event: GraphBuilt) -> StopEvent:
         graph_context = await event.graph.context_for_editorial_project(event.brief)
-        editorial_project = await self._planner.build_project(
+        narrative_axis = await self._axis_planner.propose(
             project_id=event.project_id,
             brief=event.brief,
             graph_context=graph_context,
         )
-        return StopEvent(result=editorial_project)
+        return StopEvent(
+            result=AxisPlanningOutcome(
+                narrative_axis=narrative_axis,
+                brief=event.brief,
+                graph_context=graph_context,
+            )
+        )
 
 
-async def run_editorial_planning(
+async def run_narrative_axis_planning(
     workflow: EditorialPlanningWorkflow,
     *,
     project_id: UUID,
     brief: EditorialBrief,
     sources: list[NormalizedSource],
     graph_storage_path: Path,
-) -> EditorialProject:
+) -> AxisPlanningOutcome:
     result = await workflow.run(
         start_event=BuildEditorialProjectRequest(
             project_id=project_id,
@@ -89,6 +102,8 @@ async def run_editorial_planning(
             graph_storage_path=graph_storage_path,
         )
     )
-    if not isinstance(result, EditorialProject):
-        raise TypeError(f"expected EditorialProject, received {type(result).__name__}")
+    if not isinstance(result, AxisPlanningOutcome):
+        raise TypeError(
+            f"expected AxisPlanningOutcome, received {type(result).__name__}"
+        )
     return result

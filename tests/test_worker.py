@@ -68,6 +68,33 @@ def test_planning_request_rejects_recipe_fields(tmp_path) -> None:
         )
 
 
+def test_axis_commands_require_narrative_axis_identity() -> None:
+    narrative_axis_id = uuid4()
+
+    revised = _parser().parse_args(
+        [
+            "revise-axis",
+            "--narrative-axis-id",
+            str(narrative_axis_id),
+            "--feedback",
+            "inclua que o adulto também sofre",
+        ]
+    )
+    approved = _parser().parse_args(
+        [
+            "approve-axis",
+            "--narrative-axis-id",
+            str(narrative_axis_id),
+        ]
+    )
+
+    assert revised.command == "revise-axis"
+    assert revised.narrative_axis_id == narrative_axis_id
+    assert revised.feedback == "inclua que o adulto também sofre"
+    assert approved.command == "approve-axis"
+    assert approved.narrative_axis_id == narrative_axis_id
+
+
 def test_approval_command_requires_a_valid_editorial_project_id() -> None:
     editorial_project_id = uuid4()
 
