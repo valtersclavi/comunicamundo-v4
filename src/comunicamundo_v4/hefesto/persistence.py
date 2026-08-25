@@ -22,6 +22,7 @@ from .contracts import (
     PlanningRequest,
     PlanningRun,
     PreparedChunk,
+    SourceLineage,
     StrictModel,
 )
 
@@ -83,10 +84,12 @@ class GcpPersistenceSettings:
     projects_collection: str = "hefesto_v4_rebuild_projects"
     articles_collection: str = "hefesto_v4_rebuild_articles"
     planning_runs_collection: str = "hefesto_v4_rebuild_planning_runs"
-    planning_lineages_collection: str = "hefesto_v4_rebuild_planning_lineages"
+    planning_intents_collection: str = "hefesto_v4_rebuild_planning_intents"
+    source_lineages_collection: str = "hefesto_v4_rebuild_source_lineages"
+    source_lineage_keys_collection: str = "hefesto_v4_rebuild_source_lineage_keys"
 
 
-def planning_lineage_id(project_id: UUID, source_fingerprint: str) -> str:
+def source_lineage_lookup_id(project_id: UUID, source_fingerprint: str) -> str:
     return sha256(f"{project_id}:{source_fingerprint}".encode("utf-8")).hexdigest()
 
 
@@ -165,6 +168,14 @@ class GcsArtifactStore:
     def persist_planning_json(self, *, project_id: UUID, planning_run_id: UUID, relative_path: str, payload: dict[str, Any]) -> str:
         _validate_relative(relative_path)
         name = f"{self._root}/projects/{project_id}/planning/{planning_run_id}/{relative_path}"
+        return self._upload_json(name, payload)
+
+    def persist_source_lineage_json(self, *, project_id: UUID, source_lineage_id: UUID, relative_path: str, payload: dict[str, Any]) -> str:
+        _validate_relative(relative_path)
+        name = f"{self._root}/projects/{project_id}/sources/{source_lineage_id}/{relative_path}"
+        return self._upload_json(name, payload)
+
+    def _upload_json(self, name: str, payload: dict[str, Any]) -> str:
         data = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         self._bucket.blob(name).upload_from_string(data, content_type="application/json")
         return f"gs://{self._bucket_name}/{name}"
@@ -202,7 +213,9 @@ class FirestoreEditorialRepository:
         projects_collection: str,
         articles_collection: str,
         planning_runs_collection: str,
-        planning_lineages_collection: str,
+        planning_intents_collection: str,
+        source_lineages_collection: str,
+        source_lineage_keys_collection: str,
         now: Callable[[], datetime] = _now,
     ) -> None:
         self._client = client
@@ -210,7 +223,9 @@ class FirestoreEditorialRepository:
         self._projects = projects_collection
         self._articles = articles_collection
         self._planning_runs = planning_runs_collection
-        self._planning_lineages = planning_lineages_collection
+        self._planning_intents = planning_intents_collection
+        self._source_lineages = source_lineages_collection
+        self._source_lineage_keys = source_lineage_keys_collection
         self._now = now
 
     def save_axis(self, stored: StoredNarrativeAxis) -> StoredNarrativeAxis:
@@ -248,12 +263,15 @@ class FirestoreEditorialRepository:
         updated = run.model_copy(update={"updated_at": self._now()})
         payload = {"schema_version": 1, **updated.model_dump(mode="json")}
         self._client.collection(self._planning_runs).document(str(updated.planning_run_id)).set(payload)
-        self._client.collection(self._planning_lineages).document(planning_lineage_id(updated.project_id, updated.source_fingerprint)).set(
+        self._client.collection(self._planning_intents).document(updated.request_fingerprint).set(
             {
                 "schema_version": 1,
                 "project_id": str(updated.project_id),
+                "request_fingerprint": updated.request_fingerprint,
                 "source_fingerprint": updated.source_fingerprint,
+                "brief_fingerprint": updated.brief_fingerprint,
                 "planning_run_id": str(updated.planning_run_id),
+                "source_lineage_id": str(updated.source_lineage_id),
                 "updated_at": updated.updated_at.isoformat(),
             }
         )
@@ -268,17 +286,56 @@ class FirestoreEditorialRepository:
             raise ValueError("unsupported PlanningRun schema")
         return PlanningRun.model_validate(data)
 
-    def find_planning_run(self, project_id: UUID, source_fingerprint: str) -> PlanningRun | None:
-        snap = self._client.collection(self._planning_lineages).document(planning_lineage_id(project_id, source_fingerprint)).get()
+    def find_planning_run(self, project_id: UUID, request_fingerprint: str) -> PlanningRun | None:
+        snap = self._client.collection(self._planning_intents).document(request_fingerprint).get()
         if not snap.exists:
             return None
         data = snap.to_dict()
         if data.get("schema_version") != 1:
-            raise ValueError("unsupported planning lineage schema")
+            raise ValueError("unsupported planning intent schema")
+        if data.get("project_id") != str(project_id):
+            raise ValueError("planning intent project mismatch")
         run = self.get_planning_run(UUID(data["planning_run_id"]))
         if run is None:
-            raise ValueError("planning lineage points to a missing run")
+            raise ValueError("planning intent points to a missing run")
         return run
+
+    def save_source_lineage(self, lineage: SourceLineage) -> SourceLineage:
+        updated = lineage.model_copy(update={"updated_at": self._now()})
+        self._client.collection(self._source_lineages).document(str(updated.source_lineage_id)).set({"schema_version": 1, **updated.model_dump(mode="json")})
+        self._client.collection(self._source_lineage_keys).document(source_lineage_lookup_id(updated.project_id, updated.source_fingerprint)).set(
+            {
+                "schema_version": 1,
+                "project_id": str(updated.project_id),
+                "source_fingerprint": updated.source_fingerprint,
+                "source_lineage_id": str(updated.source_lineage_id),
+                "updated_at": updated.updated_at.isoformat(),
+            }
+        )
+        return updated
+
+    def get_source_lineage(self, source_lineage_id: UUID) -> SourceLineage | None:
+        snap = self._client.collection(self._source_lineages).document(str(source_lineage_id)).get()
+        if not snap.exists:
+            return None
+        data = snap.to_dict()
+        if data.pop("schema_version", None) != 1:
+            raise ValueError("unsupported SourceLineage schema")
+        return SourceLineage.model_validate(data)
+
+    def find_source_lineage(self, project_id: UUID, source_fingerprint: str) -> SourceLineage | None:
+        snap = self._client.collection(self._source_lineage_keys).document(source_lineage_lookup_id(project_id, source_fingerprint)).get()
+        if not snap.exists:
+            return None
+        data = snap.to_dict()
+        if data.get("schema_version") != 1:
+            raise ValueError("unsupported source lineage key schema")
+        if data.get("project_id") != str(project_id):
+            raise ValueError("source lineage project mismatch")
+        lineage = self.get_source_lineage(UUID(data["source_lineage_id"]))
+        if lineage is None:
+            raise ValueError("source lineage key points to a missing lineage")
+        return lineage
 
 
 class GcpEditorialPersistence:
@@ -296,7 +353,9 @@ class GcpEditorialPersistence:
                 projects_collection=settings.projects_collection,
                 articles_collection=settings.articles_collection,
                 planning_runs_collection=settings.planning_runs_collection,
-                planning_lineages_collection=settings.planning_lineages_collection,
+                planning_intents_collection=settings.planning_intents_collection,
+                source_lineages_collection=settings.source_lineages_collection,
+                source_lineage_keys_collection=settings.source_lineage_keys_collection,
             ),
         )
 
@@ -336,8 +395,17 @@ class GcpEditorialPersistence:
     def get_run(self, planning_run_id: UUID) -> PlanningRun | None:
         return self.repository.get_planning_run(planning_run_id)
 
-    def find_run(self, project_id: UUID, source_fingerprint: str) -> PlanningRun | None:
-        return self.repository.find_planning_run(project_id, source_fingerprint)
+    def find_run(self, project_id: UUID, request_fingerprint: str) -> PlanningRun | None:
+        return self.repository.find_planning_run(project_id, request_fingerprint)
+
+    def save_source_lineage(self, lineage: SourceLineage) -> SourceLineage:
+        return self.repository.save_source_lineage(lineage)
+
+    def get_source_lineage(self, source_lineage_id: UUID) -> SourceLineage | None:
+        return self.repository.get_source_lineage(source_lineage_id)
+
+    def find_source_lineage(self, project_id: UUID, source_fingerprint: str) -> SourceLineage | None:
+        return self.repository.find_source_lineage(project_id, source_fingerprint)
 
     def persist_request(self, run: PlanningRun, request: PlanningRequest) -> str:
         return self.artifacts.persist_planning_json(
@@ -347,14 +415,16 @@ class GcpEditorialPersistence:
             payload=request.model_dump(mode="json"),
         )
 
-    def persist_chunks(self, run: PlanningRun, chunks: list[PreparedChunk]) -> str:
+    def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str:
+        if lineage.chunk_manifest_uri is not None:
+            raise ValueError("source lineage chunks already persisted")
         if not chunks:
             raise ValueError("cannot persist an empty chunk manifesto")
         entries: list[ChunkManifestEntry] = []
         for chunk in chunks:
-            chunk_uri = self.artifacts.persist_planning_json(
-                project_id=run.project_id,
-                planning_run_id=run.planning_run_id,
+            chunk_uri = self.artifacts.persist_source_lineage_json(
+                project_id=lineage.project_id,
+                source_lineage_id=lineage.source_lineage_id,
                 relative_path=f"chunks/{chunk.chunk_id}.json",
                 payload=chunk.model_dump(mode="json"),
             )
@@ -372,15 +442,15 @@ class GcpEditorialPersistence:
                 )
             )
         manifest = ChunkManifest(
-            planning_run_id=run.planning_run_id,
-            project_id=run.project_id,
-            source_fingerprint=run.source_fingerprint,
+            source_lineage_id=lineage.source_lineage_id,
+            project_id=lineage.project_id,
+            source_fingerprint=lineage.source_fingerprint,
             chunk_count=len(entries),
             chunks=entries,
         )
-        return self.artifacts.persist_planning_json(
-            project_id=run.project_id,
-            planning_run_id=run.planning_run_id,
+        return self.artifacts.persist_source_lineage_json(
+            project_id=lineage.project_id,
+            source_lineage_id=lineage.source_lineage_id,
             relative_path="chunks/manifest.json",
             payload=manifest.model_dump(mode="json"),
         )

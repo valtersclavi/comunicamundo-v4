@@ -211,12 +211,22 @@ class ChunkManifestEntry(StrictModel):
 
 class ChunkManifest(StrictModel):
     schema_version: int = 1
-    planning_run_id: UUID
+    source_lineage_id: UUID
     project_id: UUID
     source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     chunk_count: int = Field(ge=1)
     chunks: list[ChunkManifestEntry] = Field(min_length=1)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class SourceLineage(StrictModel):
+    source_lineage_id: UUID = Field(default_factory=uuid4)
+    project_id: UUID
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_manifest_uri: str | None = Field(default=None, pattern=r"^gs://")
+    chunk_count: int | None = Field(default=None, ge=0)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class PlanningArtifactRefs(StrictModel):
@@ -231,9 +241,11 @@ class PlanningArtifactRefs(StrictModel):
 class PlanningRun(StrictModel):
     planning_run_id: UUID = Field(default_factory=uuid4)
     project_id: UUID
+    source_lineage_id: UUID
     state: PlanningRunState
     source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     brief_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     artifacts: PlanningArtifactRefs = Field(default_factory=PlanningArtifactRefs)
     chunk_count: int | None = Field(default=None, ge=0)
     error: str | None = None

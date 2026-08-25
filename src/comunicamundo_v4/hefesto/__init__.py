@@ -1,5 +1,5 @@
 """Hefesto V4 clean rebuild."""
-from .contracts import EditorialBrief, EditorialProject, NarrativeAxis, NormalizedSource, PlanningRequest, PlanningRun, PlanningRunState
+from .contracts import EditorialBrief, EditorialProject, NarrativeAxis, NormalizedSource, PlanningRequest, PlanningRun, PlanningRunState, SourceLineage
 
 __all__ = [
     "EditorialBrief",
@@ -9,4 +9,5 @@ __all__ = [
     "PlanningRequest",
     "PlanningRun",
     "PlanningRunState",
+    "SourceLineage",
 ]

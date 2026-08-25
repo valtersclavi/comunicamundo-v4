@@ -11,6 +11,7 @@ from comunicamundo_v4.hefesto.contracts import (
     PlanningRequest,
     PlanningRun,
     PreparedChunk,
+    SourceLineage,
 )
 
 
@@ -88,7 +89,9 @@ class FakeStorageClient:
 class MemoryPlanningPersistence:
     def __init__(self) -> None:
         self.runs: dict[UUID, PlanningRun] = {}
-        self.lineages: dict[tuple[UUID, str], UUID] = {}
+        self.intents: dict[tuple[UUID, str], UUID] = {}
+        self.lineages: dict[UUID, SourceLineage] = {}
+        self.lineage_keys: dict[tuple[UUID, str], UUID] = {}
         self.objects: dict[str, object] = {}
         self.request_writes = 0
         self.chunk_writes = 0
@@ -97,18 +100,34 @@ class MemoryPlanningPersistence:
     def save_run(self, run: PlanningRun) -> PlanningRun:
         updated = run.model_copy(update={"updated_at": datetime.now(UTC)})
         self.runs[updated.planning_run_id] = updated
-        self.lineages[(updated.project_id, updated.source_fingerprint)] = updated.planning_run_id
+        self.intents[(updated.project_id, updated.request_fingerprint)] = updated.planning_run_id
         return updated
 
     def get_run(self, planning_run_id: UUID) -> PlanningRun | None:
         stored = self.runs.get(planning_run_id)
         return None if stored is None else stored.model_copy()
 
-    def find_run(self, project_id: UUID, source_fingerprint: str) -> PlanningRun | None:
-        run_id = self.lineages.get((project_id, source_fingerprint))
+    def find_run(self, project_id: UUID, request_fingerprint: str) -> PlanningRun | None:
+        run_id = self.intents.get((project_id, request_fingerprint))
         if run_id is None:
             return None
         return self.get_run(run_id)
+
+    def save_source_lineage(self, lineage: SourceLineage) -> SourceLineage:
+        updated = lineage.model_copy(update={"updated_at": datetime.now(UTC)})
+        self.lineages[updated.source_lineage_id] = updated
+        self.lineage_keys[(updated.project_id, updated.source_fingerprint)] = updated.source_lineage_id
+        return updated
+
+    def get_source_lineage(self, source_lineage_id: UUID) -> SourceLineage | None:
+        stored = self.lineages.get(source_lineage_id)
+        return None if stored is None else stored.model_copy()
+
+    def find_source_lineage(self, project_id: UUID, source_fingerprint: str) -> SourceLineage | None:
+        lineage_id = self.lineage_keys.get((project_id, source_fingerprint))
+        if lineage_id is None:
+            return None
+        return self.get_source_lineage(lineage_id)
 
     def persist_request(self, run: PlanningRun, request: PlanningRequest) -> str:
         self.request_writes += 1
@@ -116,11 +135,13 @@ class MemoryPlanningPersistence:
         self.objects[uri] = request.model_copy()
         return uri
 
-    def persist_chunks(self, run: PlanningRun, chunks: list[PreparedChunk]) -> str:
+    def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str:
+        if lineage.chunk_manifest_uri is not None:
+            raise ValueError("source lineage chunks already persisted")
         self.chunk_writes += 1
         entries: list[ChunkManifestEntry] = []
         for chunk in chunks:
-            chunk_uri = f"gs://memory/{run.planning_run_id}/chunks/{chunk.chunk_id}.json"
+            chunk_uri = f"gs://memory/sources/{lineage.source_lineage_id}/chunks/{chunk.chunk_id}.json"
             self.objects[chunk_uri] = chunk.model_copy()
             entries.append(
                 ChunkManifestEntry(
@@ -136,13 +157,13 @@ class MemoryPlanningPersistence:
                 )
             )
         manifest = ChunkManifest(
-            planning_run_id=run.planning_run_id,
-            project_id=run.project_id,
-            source_fingerprint=run.source_fingerprint,
+            source_lineage_id=lineage.source_lineage_id,
+            project_id=lineage.project_id,
+            source_fingerprint=lineage.source_fingerprint,
             chunk_count=len(entries),
             chunks=entries,
         )
-        uri = f"gs://memory/{run.planning_run_id}/chunks/manifest.json"
+        uri = f"gs://memory/sources/{lineage.source_lineage_id}/chunks/manifest.json"
         self.objects[uri] = manifest
         self.manifest_writes += 1
         return uri

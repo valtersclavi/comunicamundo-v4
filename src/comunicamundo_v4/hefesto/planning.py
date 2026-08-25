@@ -17,6 +17,7 @@ from .contracts import (
     PlanningRun,
     PlanningRunState,
     PreparedChunk,
+    SourceLineage,
 )
 
 CHUNK_SIZE_CHARS = 4000
@@ -52,6 +53,18 @@ def fingerprint_sources(sources: Sequence[NormalizedSource]) -> str:
 
 def fingerprint_brief(brief: EditorialBrief) -> str:
     return _sha256_text(_canonical_json(brief.model_dump(mode="json")))
+
+
+def fingerprint_request(*, project_id: UUID, source_fingerprint: str, brief_fingerprint: str) -> str:
+    return _sha256_text(
+        _canonical_json(
+            {
+                "project_id": str(project_id),
+                "source_fingerprint": source_fingerprint,
+                "brief_fingerprint": brief_fingerprint,
+            }
+        )
+    )
 
 
 def _break_length(window: str) -> int:
@@ -123,9 +136,12 @@ def prepare_source_chunks(sources: Sequence[NormalizedSource]) -> list[PreparedC
 class PlanningPersistence(Protocol):
     def save_run(self, run: PlanningRun) -> PlanningRun: ...
     def get_run(self, planning_run_id: UUID) -> PlanningRun | None: ...
-    def find_run(self, project_id: UUID, source_fingerprint: str) -> PlanningRun | None: ...
+    def find_run(self, project_id: UUID, request_fingerprint: str) -> PlanningRun | None: ...
+    def save_source_lineage(self, lineage: SourceLineage) -> SourceLineage: ...
+    def get_source_lineage(self, source_lineage_id: UUID) -> SourceLineage | None: ...
+    def find_source_lineage(self, project_id: UUID, source_fingerprint: str) -> SourceLineage | None: ...
     def persist_request(self, run: PlanningRun, request: PlanningRequest) -> str: ...
-    def persist_chunks(self, run: PlanningRun, chunks: list[PreparedChunk]) -> str: ...
+    def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str: ...
     def load_chunk_manifest(self, uri: str) -> ChunkManifest: ...
     def load_chunk(self, uri: str) -> PreparedChunk: ...
 
@@ -134,6 +150,7 @@ class PlanningOrchestrator:
     """Advance a PlanningRun through implemented stages only.
 
     Entrega 1 stops at source_chunks_ready. Later stages are contract-only.
+    SourceLineage owns reusable chunk artifacts. PlanningRun is the editorial request.
     """
 
     terminal_state = PlanningRunState.SOURCE_CHUNKS_READY
@@ -147,14 +164,27 @@ class PlanningOrchestrator:
 
     def _ensure_request_validated(self, request: PlanningRequest) -> PlanningRun:
         source_fingerprint = fingerprint_sources(request.sources)
-        existing = self._persistence.find_run(request.project_id, source_fingerprint)
+        brief_fingerprint = fingerprint_brief(request.brief)
+        request_fingerprint = fingerprint_request(
+            project_id=request.project_id,
+            source_fingerprint=source_fingerprint,
+            brief_fingerprint=brief_fingerprint,
+        )
+        existing = self._persistence.find_run(request.project_id, request_fingerprint)
         if existing is not None:
             return existing
+        lineage = self._persistence.find_source_lineage(request.project_id, source_fingerprint)
+        if lineage is None:
+            lineage = self._persistence.save_source_lineage(
+                SourceLineage(project_id=request.project_id, source_fingerprint=source_fingerprint)
+            )
         run = PlanningRun(
             project_id=request.project_id,
+            source_lineage_id=lineage.source_lineage_id,
             state=PlanningRunState.REQUEST_VALIDATED,
             source_fingerprint=source_fingerprint,
-            brief_fingerprint=fingerprint_brief(request.brief),
+            brief_fingerprint=brief_fingerprint,
+            request_fingerprint=request_fingerprint,
         )
         request_uri = self._persistence.persist_request(run, request)
         return self._persistence.save_run(
@@ -164,15 +194,28 @@ class PlanningOrchestrator:
     def _ensure_source_chunks_ready(self, run: PlanningRun, request: PlanningRequest) -> PlanningRun:
         if run.state is not PlanningRunState.REQUEST_VALIDATED:
             return run
+        lineage = self._persistence.get_source_lineage(run.source_lineage_id)
+        if lineage is None:
+            raise ValueError("PlanningRun points to a missing SourceLineage")
         try:
-            chunks = prepare_source_chunks(request.sources)
-            manifest_uri = self._persistence.persist_chunks(run, chunks)
+            if lineage.chunk_manifest_uri is None:
+                chunks = prepare_source_chunks(request.sources)
+                manifest_uri = self._persistence.persist_chunks(lineage, chunks)
+                lineage = self._persistence.save_source_lineage(
+                    lineage.model_copy(
+                        update={
+                            "chunk_manifest_uri": manifest_uri,
+                            "chunk_count": len(chunks),
+                            "updated_at": _now(),
+                        }
+                    )
+                )
             return self._persistence.save_run(
                 run.model_copy(
                     update={
                         "state": PlanningRunState.SOURCE_CHUNKS_READY,
-                        "artifacts": run.artifacts.model_copy(update={"chunk_manifest_uri": manifest_uri}),
-                        "chunk_count": len(chunks),
+                        "artifacts": run.artifacts.model_copy(update={"chunk_manifest_uri": lineage.chunk_manifest_uri}),
+                        "chunk_count": lineage.chunk_count,
                         "error": None,
                         "updated_at": _now(),
                     }
