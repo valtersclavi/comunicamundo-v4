@@ -166,7 +166,6 @@ jobs:
           set -euo pipefail
           test -n "${PREPARED_EXECUTION_NAME}"
           gcloud run jobs executions describe "${PREPARED_EXECUTION_NAME}" \
-            --job="${JOB_NAME}" \
             --project="${PROJECT_ID}" \
             --region="${REGION}" \
             --format=json > "${RUNNER_TEMP}/execution.json"

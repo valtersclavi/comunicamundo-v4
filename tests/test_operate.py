@@ -120,6 +120,19 @@ def test_operate_workflow_exposes_both_approval_boundaries() -> None:
     assert "comunicamundo-v3" not in workflow
 
 
+def test_execution_describe_does_not_use_unsupported_job_flag() -> None:
+    for path in (
+        Path(".github/workflows/operate.yml"),
+        Path(".github/workflows/chatops-operate.yml"),
+    ):
+        workflow = path.read_text(encoding="utf-8")
+        assert 'gcloud run jobs executions describe "${PREPARED_EXECUTION_NAME}"' in workflow
+        inspect_block = workflow.split(
+            'gcloud run jobs executions describe "${PREPARED_EXECUTION_NAME}"', 1
+        )[1].split('--format=json > "${RUNNER_TEMP}/execution.json"', 1)[0]
+        assert '--job="${JOB_NAME}"' not in inspect_block
+
+
 def test_step_summary_does_not_include_feedback_or_secrets() -> None:
     prepared = prepare_operation(operation="revise-axis", narrative_axis_id=str(uuid4()), feedback="texto sensível do usuário")
     summary = render_step_summary(prepared)
