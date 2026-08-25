@@ -24,6 +24,8 @@ class PlanningWorkflow:
         return EditorialProject(
             project_id=start_event.project_id,
             brief=start_event.brief,
+            narrative_axis_id=uuid4(),
+            narrative_axis="O luto infantil só se compreende quando o sofrimento adulto também entra em cena.",
             working_title="Título",
             editorial_promise="Promessa editorial",
             subjects=[

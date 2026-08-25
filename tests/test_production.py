@@ -42,6 +42,8 @@ async def test_subject_research_is_internal_prose_not_structured_json() -> None:
             approach="Texto sensível",
             duration_minutes=8,
         ),
+        narrative_axis_id=uuid4(),
+        narrative_axis="O luto infantil só se compreende quando o sofrimento adulto também entra em cena.",
         working_title="Quando a infância encontra a perda",
         editorial_promise="Compreender para acolher.",
         subjects=[subject],

@@ -111,6 +111,8 @@ async def test_approved_project_reaches_final_article_after_quality_revision() -
             approach="Texto sensível para familiares",
             duration_minutes=8,
         ),
+        narrative_axis_id=uuid4(),
+        narrative_axis="O luto infantil só se compreende quando o sofrimento adulto também entra em cena.",
         working_title="Quando a infância encontra a perda",
         editorial_promise="Compreender a experiência infantil do luto.",
         subjects=[subject],

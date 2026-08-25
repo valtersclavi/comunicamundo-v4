@@ -27,6 +27,8 @@ class DeterministicPlanner:
         return EditorialProject(
             project_id=project_id,
             brief=brief,
+            narrative_axis_id=uuid4(),
+            narrative_axis="O luto infantil só se compreende quando o sofrimento adulto também entra em cena.",
             working_title="Quando a infância encontra a perda",
             editorial_promise="Compreender a experiência infantil sem reduzi-la.",
             subjects=[

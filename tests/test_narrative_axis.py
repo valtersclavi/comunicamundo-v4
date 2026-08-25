@@ -635,24 +635,34 @@ async def test_editorial_project_carries_approved_axis_and_prompt_receives_it() 
 
 def test_downstream_prompts_receive_the_approved_axis() -> None:
     axis = "O luto infantil só se compreende quando o sofrimento adulto também entra em cena."
-    for prompt in (
-        NARRATIVE_PLAN_PROMPT,
-        ARTICLE_DRAFT_PROMPT,
-        EDITORIAL_REVIEW_PROMPT,
-    ):
-        rendered = prompt.format(
-            theme="Tema",
-            approach="Abordagem",
-            duration_minutes=8,
-            output_language="pt-BR",
-            audience="público",
-            editorial_project="{}",
-            narrative_axis=axis,
-            subject_research="[]",
-            narrative_plan="{}",
-            brief="{}",
-            draft="texto",
-        )
+    rendered_plan = NARRATIVE_PLAN_PROMPT.format(
+        theme="Tema",
+        approach="Abordagem",
+        duration_minutes=8,
+        output_language="pt-BR",
+        audience="público",
+        editorial_project="{}",
+        narrative_axis=axis,
+        subject_research="[]",
+    )
+    rendered_draft = ARTICLE_DRAFT_PROMPT.format(
+        theme="Tema",
+        approach="Abordagem",
+        duration_minutes=8,
+        output_language="pt-BR",
+        audience="público",
+        editorial_project="{}",
+        narrative_axis=axis,
+        narrative_plan="{}",
+        subject_research="[]",
+    )
+    rendered_review = EDITORIAL_REVIEW_PROMPT.format(
+        brief="{}",
+        narrative_axis=axis,
+        editorial_project="{}",
+        draft="texto",
+    )
+    for rendered in (rendered_plan, rendered_draft, rendered_review):
         assert axis in rendered
         assert "Eixo Narrativo" in rendered
 

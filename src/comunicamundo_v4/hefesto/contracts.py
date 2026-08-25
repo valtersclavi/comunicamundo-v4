@@ -67,12 +67,59 @@ class EditorialProjectStatus(StrEnum):
     REVISION_REQUESTED = "revision_requested"
 
 
+class NarrativeAxisStatus(StrEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    SUPERSEDED = "superseded"
+
+
+class NarrativeAxisProposal(StrictModel):
+    """Model-generated Narrative Axis before server-owned identity is assigned."""
+
+    statement: str = Field(min_length=1, max_length=800)
+
+
+class NarrativeAxis(StrictModel):
+    """1–2 sentence intellectual/editorial direction of the piece."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+
+    narrative_axis_id: UUID = Field(default_factory=uuid4)
+    project_id: UUID
+    parent_axis_id: UUID | None = None
+    statement: str = Field(min_length=1, max_length=800)
+    status: NarrativeAxisStatus = NarrativeAxisStatus.PROPOSED
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    approved_at: datetime | None = None
+
+    def approve(self) -> NarrativeAxis:
+        if self.status is NarrativeAxisStatus.APPROVED:
+            return self
+        if self.status is NarrativeAxisStatus.SUPERSEDED:
+            raise ValueError("cannot approve a superseded Narrative Axis")
+        return self.model_copy(
+            update={
+                "status": NarrativeAxisStatus.APPROVED,
+                "approved_at": datetime.now(UTC),
+            }
+        )
+
+    def supersede(self) -> NarrativeAxis:
+        if self.status is NarrativeAxisStatus.APPROVED:
+            raise ValueError("approved Narrative Axis is immutable")
+        if self.status is NarrativeAxisStatus.SUPERSEDED:
+            return self
+        return self.model_copy(update={"status": NarrativeAxisStatus.SUPERSEDED})
+
+
 class EditorialProject(StrictModel):
     """The sole object presented for editorial approval."""
 
     editorial_project_id: UUID = Field(default_factory=uuid4)
     project_id: UUID
     brief: EditorialBrief
+    narrative_axis_id: UUID
+    narrative_axis: str = Field(min_length=1, max_length=800)
     working_title: str = Field(min_length=1)
     editorial_promise: str = Field(min_length=1)
     subjects: list[EditorialSubject] = Field(min_length=1, max_length=20)
