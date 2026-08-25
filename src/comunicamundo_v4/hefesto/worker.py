@@ -1,4 +1,4 @@
-"""Cloud Run Job entrypoint for Hefesto V4 durable editorial operations."""
+"""Cloud Run Job entrypoint for planning, approval, or production."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from pydantic import Field, ValidationError
 from .application import HefestoApplication
 from .contracts import EditorialBrief, NormalizedSource, StrictModel
 from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
-from .runtime import VertexRuntimeSettings, build_vertex_runtime, profile_for_command
+from .runtime import VertexRuntimeSettings, build_vertex_runtime
 
 
 MAX_REQUEST_BYTES = 50 * 1024 * 1024
@@ -82,21 +82,6 @@ def _decode_feedback(value: str) -> str:
     return feedback
 
 
-def _build_application(command: str) -> HefestoApplication:
-    project = _required_environment("GOOGLE_CLOUD_PROJECT")
-    bucket = _required_environment("HEFESTO_GCS_BUCKET")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-    return HefestoApplication(
-        runtime=build_vertex_runtime(
-            VertexRuntimeSettings(project=project, location=location),
-            profile=profile_for_command(command),
-        ),
-        persistence=GcpEditorialPersistence.from_settings(
-            GcpPersistenceSettings(project=project, bucket=bucket)
-        ),
-    )
-
-
 def _safe_failure_payload(error: BaseException) -> dict[str, str]:
     """Compact, non-sensitive failure for Cloud Run stdout and inspect."""
 
@@ -120,16 +105,27 @@ def _emit_safe_failure(error: BaseException) -> None:
     print(json.dumps(_safe_failure_payload(error), ensure_ascii=False), flush=True)
 
 
+def _build_application() -> HefestoApplication:
+    project = _required_environment("GOOGLE_CLOUD_PROJECT")
+    bucket = _required_environment("HEFESTO_GCS_BUCKET")
+    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    return HefestoApplication(
+        runtime=build_vertex_runtime(
+            VertexRuntimeSettings(project=project, location=location)
+        ),
+        persistence=GcpEditorialPersistence.from_settings(
+            GcpPersistenceSettings(project=project, bucket=bucket)
+        ),
+    )
+
+
 async def _run(args: argparse.Namespace) -> None:
     project = _required_environment("GOOGLE_CLOUD_PROJECT")
-    request: PlanningJobRequest | None = None
+    application = _build_application()
     if args.command == "plan":
         request = PlanningJobRequest.model_validate(
             _read_request(args.request, project=project)
         )
-    application = _build_application(args.command)
-    if args.command == "plan":
-        assert request is not None
         result = await application.plan_project(
             project_id=request.project_id,
             brief=request.brief,
@@ -181,9 +177,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    args = _parser().parse_args(argv)
     try:
-        asyncio.run(_run(args))
+        asyncio.run(_run(_parser().parse_args(argv)))
     except Exception as error:
         _emit_safe_failure(error)
         raise SystemExit(1) from error

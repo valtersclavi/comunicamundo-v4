@@ -85,11 +85,6 @@ class Runtime:
     editorial_planner = EditorialPlanner()
     production_workflow = ProductionWorkflow()
 
-    def require(self, name: str):
-        value = getattr(self, name)
-        assert value is not None
-        return value
-
     def load_graph(self, directory: Path):
         assert (directory / "graph.json").exists()
         return Graph(index=object())

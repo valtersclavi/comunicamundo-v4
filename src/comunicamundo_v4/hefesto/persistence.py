@@ -98,25 +98,28 @@ class GcsArtifactStore:
         directory = directory.resolve()
         if not directory.is_dir():
             raise ValueError(f"graph directory does not exist: {directory}")
+
         local_files = sorted(path for path in directory.rglob("*") if path.is_file())
         if not local_files:
             raise ValueError("graph directory contains no files")
 
         artifact_id = self._id_factory()
-        prefix = f"{self._root_prefix}/projects/{project_id}/graphs/{artifact_id}"
+        prefix = (
+            f"{self._root_prefix}/projects/{project_id}/graphs/{artifact_id}"
+        )
         files: list[GraphArtifactFile] = []
         for local_path in local_files:
             relative_path = local_path.relative_to(directory).as_posix()
             _validate_artifact_path(relative_path)
+            digest = _sha256_file(local_path)
             file_record = GraphArtifactFile(
                 path=relative_path,
                 size_bytes=local_path.stat().st_size,
-                sha256=_sha256_file(local_path),
+                sha256=digest,
             )
             blob = self._bucket.blob(f"{prefix}/files/{relative_path}")
-            blob.upload_from_filename(
-                str(local_path), content_type=mimetypes.guess_type(relative_path)[0]
-            )
+            content_type = mimetypes.guess_type(relative_path)[0]
+            blob.upload_from_filename(str(local_path), content_type=content_type)
             files.append(file_record)
 
         created_at = self._now()
@@ -145,10 +148,10 @@ class GcsArtifactStore:
     def restore_graph(self, artifact: GraphArtifact, destination: Path) -> None:
         if artifact.bucket != self._bucket_name:
             raise ValueError("graph artifact belongs to a different bucket")
+
         manifest_name = f"{artifact.prefix}/manifest.json"
-        manifest = json.loads(
-            self._bucket.blob(manifest_name).download_as_bytes().decode("utf-8")
-        )
+        manifest_bytes = self._bucket.blob(manifest_name).download_as_bytes()
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
         _validate_manifest(manifest, artifact)
 
         destination = destination.resolve()
@@ -175,7 +178,10 @@ class GcsArtifactStore:
 
     def upload_article(self, article: FinalArticle) -> PublishedArticle:
         article_id = self._id_factory()
-        name = f"{self._root_prefix}/projects/{article.project_id}/articles/{article_id}.md"
+        name = (
+            f"{self._root_prefix}/projects/{article.project_id}/articles/"
+            f"{article_id}.md"
+        )
         self._bucket.blob(name).upload_from_string(
             article.body_markdown.encode("utf-8"),
             content_type="text/markdown; charset=utf-8",
@@ -285,20 +291,27 @@ class FirestoreEditorialRepository:
 class GcpEditorialPersistence:
     """Coordinates Storage and Firestore without leaking either into workflows."""
 
-    def __init__(self, *, artifacts: GcsArtifactStore, repository: FirestoreEditorialRepository) -> None:
+    def __init__(
+        self,
+        *,
+        artifacts: GcsArtifactStore,
+        repository: FirestoreEditorialRepository,
+    ) -> None:
         self.artifacts = artifacts
         self.repository = repository
 
     @classmethod
     def from_settings(cls, settings: GcpPersistenceSettings) -> GcpEditorialPersistence:
+        storage_client = storage.Client(project=settings.project)
+        firestore_client = firestore.Client(project=settings.project)
         return cls(
             artifacts=GcsArtifactStore(
-                storage.Client(project=settings.project),
+                storage_client,
                 bucket_name=settings.bucket,
                 root_prefix=settings.root_prefix,
             ),
             repository=FirestoreEditorialRepository(
-                firestore.Client(project=settings.project),
+                firestore_client,
                 narrative_axes_collection=settings.narrative_axes_collection,
                 editorial_projects_collection=settings.editorial_projects_collection,
                 articles_collection=settings.articles_collection,
@@ -384,6 +397,8 @@ def _validate_manifest(manifest: dict[str, Any], artifact: GraphArtifact) -> Non
         raise ValueError("graph manifest project ID mismatch")
     if manifest.get("artifact_id") != str(artifact.artifact_id):
         raise ValueError("graph manifest artifact ID mismatch")
-    manifest_files = [GraphArtifactFile.model_validate(item) for item in manifest["files"]]
+    manifest_files = [
+        GraphArtifactFile.model_validate(item) for item in manifest["files"]
+    ]
     if manifest_files != artifact.files:
         raise ValueError("graph manifest file list mismatch")

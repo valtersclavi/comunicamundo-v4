@@ -46,6 +46,9 @@ class EditorialPlanningWorkflow(Workflow):
 
     @step
     async def build_graph(self, event: BuildNarrativeAxisRequest) -> GraphBuilt:
+        # PropertyGraphIndex performs its own bounded async extraction. Running
+        # construction in a worker thread prevents its event loop from nesting
+        # inside the Workflow event loop and keeps the workflow responsive.
         graph = await asyncio.to_thread(
             ProjectGraph.build,
             event.sources,

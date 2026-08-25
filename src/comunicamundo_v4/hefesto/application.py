@@ -42,7 +42,7 @@ class HefestoApplication:
         with TemporaryDirectory(prefix="hefesto-v4-plan-") as temporary:
             graph_directory = Path(temporary) / "graph"
             axis = await run_editorial_planning(
-                self._runtime.require("planning_workflow"),
+                self._runtime.planning_workflow,
                 project_id=project_id,
                 brief=brief,
                 sources=sources,
@@ -78,7 +78,7 @@ class HefestoApplication:
             graph_context = await graph.context_for_editorial_project(
                 stored.narrative_axis.brief
             )
-            revised = await self._runtime.require("axis_planner").revise(
+            revised = await self._runtime.axis_planner.revise(
                 axis=stored.narrative_axis,
                 feedback=feedback,
                 graph_context=graph_context,
@@ -117,7 +117,7 @@ class HefestoApplication:
             )
             graph = await asyncio.to_thread(self._runtime.load_graph, graph_directory)
             graph_context = await graph.context_for_editorial_project(approved_axis.brief)
-            project = await self._runtime.require("editorial_planner").build_project(
+            project = await self._runtime.editorial_planner.build_project(
                 axis=approved_axis,
                 graph_context=graph_context,
             )
@@ -149,7 +149,7 @@ class HefestoApplication:
             graph_context = await graph.context_for_editorial_project(
                 stored.editorial_project.brief
             )
-            revised = await self._runtime.require("editorial_planner").revise_project(
+            revised = await self._runtime.editorial_planner.revise_project(
                 project=stored.editorial_project,
                 feedback=feedback,
                 graph_context=graph_context,
@@ -190,7 +190,7 @@ class HefestoApplication:
             )
             graph = await asyncio.to_thread(self._runtime.load_graph, graph_directory)
             article = await run_editorial_production(
-                self._runtime.require("production_workflow"),
+                self._runtime.production_workflow,
                 project=stored.editorial_project,
                 graph=graph,
             )

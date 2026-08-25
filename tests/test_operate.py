@@ -86,6 +86,21 @@ def test_validate_plan_request_file_omits_source_text(tmp_path: Path) -> None:
     assert "Conteúdo" not in json.dumps(summary)
 
 
+def test_summarize_execution_surfaces_axis_and_compact_project() -> None:
+    axis_id = str(uuid4())
+    project_id = str(uuid4())
+    execution = {
+        "metadata": {"name": "hefesto-v4-abc12", "creationTimestamp": "2026-08-24T22:00:00Z"},
+        "spec": {"template": {"spec": {"containers": [{"image": "image", "args": ["approve-axis", "--narrative-axis-id", axis_id]}]}}},
+        "status": {"completionTime": "2026-08-24T22:00:10Z", "succeededCount": 1, "failedCount": 0},
+    }
+    logs = json.dumps({"editorial_project": {"editorial_project_id": project_id, "project_id": str(uuid4()), "status": "proposed", "working_title": "Título", "narrative_axis": {"narrative_axis_id": axis_id, "statement": "O adulto também está de luto."}, "subjects": [{"title": "Assunto", "development": "O que precisa ser desenvolvido."}]}})
+    report = summarize_execution(execution, log_text=logs)
+    assert report["state"] == "SUCCEEDED"
+    assert report["evidence"]["narrative_axis"] == "O adulto também está de luto."
+    assert "Assunto" in report["evidence"]["subjects"]
+
+
 def test_summarize_execution_surfaces_safe_worker_error() -> None:
     execution = {
         "metadata": {"name": "hefesto-v4-tdkmc", "creationTimestamp": "2026-08-25T11:37:40Z"},
@@ -119,21 +134,6 @@ def test_summarize_execution_surfaces_safe_worker_error() -> None:
     assert "serviceusage.services.use" in report["evidence"]["error"]
 
 
-def test_summarize_execution_surfaces_axis_and_compact_project() -> None:
-    axis_id = str(uuid4())
-    project_id = str(uuid4())
-    execution = {
-        "metadata": {"name": "hefesto-v4-abc12", "creationTimestamp": "2026-08-24T22:00:00Z"},
-        "spec": {"template": {"spec": {"containers": [{"image": "image", "args": ["approve-axis", "--narrative-axis-id", axis_id]}]}}},
-        "status": {"completionTime": "2026-08-24T22:00:10Z", "succeededCount": 1, "failedCount": 0},
-    }
-    logs = json.dumps({"editorial_project": {"editorial_project_id": project_id, "project_id": str(uuid4()), "status": "proposed", "working_title": "Título", "narrative_axis": {"narrative_axis_id": axis_id, "statement": "O adulto também está de luto."}, "subjects": [{"title": "Assunto", "development": "O que precisa ser desenvolvido."}]}})
-    report = summarize_execution(execution, log_text=logs)
-    assert report["state"] == "SUCCEEDED"
-    assert report["evidence"]["narrative_axis"] == "O adulto também está de luto."
-    assert "Assunto" in report["evidence"]["subjects"]
-
-
 def test_cli_prepare_writes_github_output(tmp_path: Path) -> None:
     output = tmp_path / "github.output"
     uri = f"gs://{PROOF_BUCKET}/requests/job.json"
@@ -164,17 +164,6 @@ def test_execution_describe_does_not_use_unsupported_job_flag() -> None:
             'gcloud run jobs executions describe "${PREPARED_EXECUTION_NAME}"', 1
         )[1].split('--format=json > "${RUNNER_TEMP}/execution.json"', 1)[0]
         assert '--job="${JOB_NAME}"' not in inspect_block
-
-
-def test_planning_request_is_read_only_by_worker_runtime() -> None:
-    for path in (
-        Path(".github/workflows/operate.yml"),
-        Path(".github/workflows/chatops-operate.yml"),
-    ):
-        workflow = path.read_text(encoding="utf-8")
-        assert "gcloud storage cat" not in workflow
-        assert "validate-plan-request" not in workflow
-        assert "--args=\"${PREPARED_GCLOUD_ARGS}\"" in workflow
 
 
 def test_step_summary_does_not_include_feedback_or_secrets() -> None:

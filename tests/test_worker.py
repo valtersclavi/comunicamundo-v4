@@ -5,7 +5,6 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from comunicamundo_v4.hefesto.runtime import RuntimeProfile
 from comunicamundo_v4.hefesto.worker import (
     PlanningJobRequest,
     _decode_feedback,
@@ -95,7 +94,7 @@ def test_safe_failure_omits_validation_input_and_secrets() -> None:
     assert "Bearer" not in secret["error"]
 
 
-def test_worker_emits_json_failure_before_runtime_construction(
+def test_worker_emits_json_failure_for_invalid_plan_request(
     tmp_path, monkeypatch, capsys
 ) -> None:
     request_path = tmp_path / "request.json"
@@ -112,12 +111,12 @@ def test_worker_emits_json_failure_before_runtime_construction(
     )
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "comunicamundo-v4")
     monkeypatch.setenv("HEFESTO_GCS_BUCKET", "comunicamundo-v4-hefesto-30524898837")
-
-    def fail_if_runtime_built(*args, **kwargs):
-        raise AssertionError("Vertex runtime must not be built for an invalid request")
-
     monkeypatch.setattr(
-        "comunicamundo_v4.hefesto.worker.build_vertex_runtime", fail_if_runtime_built
+        "comunicamundo_v4.hefesto.worker.build_vertex_runtime", lambda settings: object()
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker.GcpEditorialPersistence.from_settings",
+        classmethod(lambda cls, settings: object()),
     )
     with pytest.raises(SystemExit) as caught:
         main(["plan", "--request", str(request_path)])
@@ -125,45 +124,3 @@ def test_worker_emits_json_failure_before_runtime_construction(
     printed = json.loads(capsys.readouterr().out.strip())
     assert printed["error_type"] == "ValidationError"
     assert "recipe" in printed["error"]
-
-
-def test_plan_requests_planning_runtime_profile(tmp_path, monkeypatch, capsys) -> None:
-    request_path = tmp_path / "request.json"
-    request_path.write_text(
-        json.dumps(
-            {
-                "project_id": str(uuid4()),
-                "brief": {"theme": "Tema", "approach": "Abordagem", "duration_minutes": 8},
-                "sources": [{"source_id": str(uuid4()), "text": "Conteúdo", "language": "pt"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "comunicamundo-v4")
-    monkeypatch.setenv("HEFESTO_GCS_BUCKET", "comunicamundo-v4-hefesto-30524898837")
-    captured: dict[str, object] = {}
-
-    def fake_runtime(settings, *, profile):
-        captured["profile"] = profile
-        return object()
-
-    class FakeApplication:
-        def __init__(self, *, runtime, persistence) -> None:
-            captured["runtime"] = runtime
-
-        async def plan_project(self, **kwargs):
-            return type("Stored", (), {"model_dump_json": lambda self: "{}"})()
-
-    monkeypatch.setattr(
-        "comunicamundo_v4.hefesto.worker.build_vertex_runtime", fake_runtime
-    )
-    monkeypatch.setattr(
-        "comunicamundo_v4.hefesto.worker.HefestoApplication", FakeApplication
-    )
-    monkeypatch.setattr(
-        "comunicamundo_v4.hefesto.worker.GcpEditorialPersistence.from_settings",
-        classmethod(lambda cls, settings: object()),
-    )
-    main(["plan", "--request", str(request_path)])
-    assert captured["profile"] is RuntimeProfile.PLAN
-    assert capsys.readouterr().out.strip() == "{}"
