@@ -12,7 +12,18 @@ from uuid import UUID, uuid4
 from google.cloud import firestore, storage
 from pydantic import Field
 
-from .contracts import EditorialBrief, EditorialProject, FinalArticle, NarrativeAxis, StrictModel
+from .contracts import (
+    ChunkManifest,
+    ChunkManifestEntry,
+    EditorialBrief,
+    EditorialProject,
+    FinalArticle,
+    NarrativeAxis,
+    PlanningRequest,
+    PlanningRun,
+    PreparedChunk,
+    StrictModel,
+)
 
 
 def _now() -> datetime:
@@ -71,6 +82,12 @@ class GcpPersistenceSettings:
     axes_collection: str = "hefesto_v4_rebuild_axes"
     projects_collection: str = "hefesto_v4_rebuild_projects"
     articles_collection: str = "hefesto_v4_rebuild_articles"
+    planning_runs_collection: str = "hefesto_v4_rebuild_planning_runs"
+    planning_lineages_collection: str = "hefesto_v4_rebuild_planning_lineages"
+
+
+def planning_lineage_id(project_id: UUID, source_fingerprint: str) -> str:
+    return sha256(f"{project_id}:{source_fingerprint}".encode("utf-8")).hexdigest()
 
 
 def _validate_relative(path: str) -> None:
@@ -145,6 +162,20 @@ class GcsArtifactStore:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
 
+    def persist_planning_json(self, *, project_id: UUID, planning_run_id: UUID, relative_path: str, payload: dict[str, Any]) -> str:
+        _validate_relative(relative_path)
+        name = f"{self._root}/projects/{project_id}/planning/{planning_run_id}/{relative_path}"
+        data = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        self._bucket.blob(name).upload_from_string(data, content_type="application/json")
+        return f"gs://{self._bucket_name}/{name}"
+
+    def load_json_uri(self, uri: str) -> dict[str, Any]:
+        prefix = f"gs://{self._bucket_name}/"
+        if not uri.startswith(prefix):
+            raise ValueError("artifact belongs to another bucket")
+        name = uri[len(prefix):]
+        return json.loads(self._bucket.blob(name).download_as_bytes().decode("utf-8"))
+
     def upload_article(self, article: FinalArticle) -> PublishedArticle:
         article_id = self._id_factory()
         name = f"{self._root}/projects/{article.project_id}/articles/{article_id}.md"
@@ -163,11 +194,23 @@ class GcsArtifactStore:
 
 
 class FirestoreEditorialRepository:
-    def __init__(self, client: Any, *, axes_collection: str, projects_collection: str, articles_collection: str, now: Callable[[], datetime] = _now) -> None:
+    def __init__(
+        self,
+        client: Any,
+        *,
+        axes_collection: str,
+        projects_collection: str,
+        articles_collection: str,
+        planning_runs_collection: str,
+        planning_lineages_collection: str,
+        now: Callable[[], datetime] = _now,
+    ) -> None:
         self._client = client
         self._axes = axes_collection
         self._projects = projects_collection
         self._articles = articles_collection
+        self._planning_runs = planning_runs_collection
+        self._planning_lineages = planning_lineages_collection
         self._now = now
 
     def save_axis(self, stored: StoredNarrativeAxis) -> StoredNarrativeAxis:
@@ -201,6 +244,42 @@ class FirestoreEditorialRepository:
     def save_article(self, article: PublishedArticle) -> None:
         self._client.collection(self._articles).document(str(article.article_id)).set({"schema_version": 1, **article.model_dump(mode="json")})
 
+    def save_planning_run(self, run: PlanningRun) -> PlanningRun:
+        updated = run.model_copy(update={"updated_at": self._now()})
+        payload = {"schema_version": 1, **updated.model_dump(mode="json")}
+        self._client.collection(self._planning_runs).document(str(updated.planning_run_id)).set(payload)
+        self._client.collection(self._planning_lineages).document(planning_lineage_id(updated.project_id, updated.source_fingerprint)).set(
+            {
+                "schema_version": 1,
+                "project_id": str(updated.project_id),
+                "source_fingerprint": updated.source_fingerprint,
+                "planning_run_id": str(updated.planning_run_id),
+                "updated_at": updated.updated_at.isoformat(),
+            }
+        )
+        return updated
+
+    def get_planning_run(self, planning_run_id: UUID) -> PlanningRun | None:
+        snap = self._client.collection(self._planning_runs).document(str(planning_run_id)).get()
+        if not snap.exists:
+            return None
+        data = snap.to_dict()
+        if data.pop("schema_version", None) != 1:
+            raise ValueError("unsupported PlanningRun schema")
+        return PlanningRun.model_validate(data)
+
+    def find_planning_run(self, project_id: UUID, source_fingerprint: str) -> PlanningRun | None:
+        snap = self._client.collection(self._planning_lineages).document(planning_lineage_id(project_id, source_fingerprint)).get()
+        if not snap.exists:
+            return None
+        data = snap.to_dict()
+        if data.get("schema_version") != 1:
+            raise ValueError("unsupported planning lineage schema")
+        run = self.get_planning_run(UUID(data["planning_run_id"]))
+        if run is None:
+            raise ValueError("planning lineage points to a missing run")
+        return run
+
 
 class GcpEditorialPersistence:
     def __init__(self, *, artifacts: GcsArtifactStore, repository: FirestoreEditorialRepository) -> None:
@@ -216,6 +295,8 @@ class GcpEditorialPersistence:
                 axes_collection=settings.axes_collection,
                 projects_collection=settings.projects_collection,
                 articles_collection=settings.articles_collection,
+                planning_runs_collection=settings.planning_runs_collection,
+                planning_lineages_collection=settings.planning_lineages_collection,
             ),
         )
 
@@ -248,3 +329,64 @@ class GcpEditorialPersistence:
         publication = self.artifacts.upload_article(article)
         self.repository.save_article(publication)
         return publication
+
+    def save_run(self, run: PlanningRun) -> PlanningRun:
+        return self.repository.save_planning_run(run)
+
+    def get_run(self, planning_run_id: UUID) -> PlanningRun | None:
+        return self.repository.get_planning_run(planning_run_id)
+
+    def find_run(self, project_id: UUID, source_fingerprint: str) -> PlanningRun | None:
+        return self.repository.find_planning_run(project_id, source_fingerprint)
+
+    def persist_request(self, run: PlanningRun, request: PlanningRequest) -> str:
+        return self.artifacts.persist_planning_json(
+            project_id=run.project_id,
+            planning_run_id=run.planning_run_id,
+            relative_path="request.json",
+            payload=request.model_dump(mode="json"),
+        )
+
+    def persist_chunks(self, run: PlanningRun, chunks: list[PreparedChunk]) -> str:
+        if not chunks:
+            raise ValueError("cannot persist an empty chunk manifesto")
+        entries: list[ChunkManifestEntry] = []
+        for chunk in chunks:
+            chunk_uri = self.artifacts.persist_planning_json(
+                project_id=run.project_id,
+                planning_run_id=run.planning_run_id,
+                relative_path=f"chunks/{chunk.chunk_id}.json",
+                payload=chunk.model_dump(mode="json"),
+            )
+            entries.append(
+                ChunkManifestEntry(
+                    chunk_id=chunk.chunk_id,
+                    source_id=chunk.source_id,
+                    source_ordinal=chunk.source_ordinal,
+                    chunk_ordinal=chunk.chunk_ordinal,
+                    sequence=chunk.sequence,
+                    content_sha256=chunk.content_sha256,
+                    status=chunk.status,
+                    chunk_uri=chunk_uri,
+                    extraction_ref=chunk.extraction_ref,
+                )
+            )
+        manifest = ChunkManifest(
+            planning_run_id=run.planning_run_id,
+            project_id=run.project_id,
+            source_fingerprint=run.source_fingerprint,
+            chunk_count=len(entries),
+            chunks=entries,
+        )
+        return self.artifacts.persist_planning_json(
+            project_id=run.project_id,
+            planning_run_id=run.planning_run_id,
+            relative_path="chunks/manifest.json",
+            payload=manifest.model_dump(mode="json"),
+        )
+
+    def load_chunk_manifest(self, uri: str) -> ChunkManifest:
+        return ChunkManifest.model_validate(self.artifacts.load_json_uri(uri))
+
+    def load_chunk(self, uri: str) -> PreparedChunk:
+        return PreparedChunk.model_validate(self.artifacts.load_json_uri(uri))

@@ -33,3 +33,4 @@ where = ["src"]
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["tests"]

@@ -4,32 +4,20 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-from .contracts import EditorialBrief, EditorialProjectStatus, NarrativeAxisStatus, NormalizedSource
+from .contracts import EditorialProjectStatus, NarrativeAxisStatus
 from .persistence import GcpEditorialPersistence, StoredEditorialProject, StoredNarrativeAxis
-from .runtime import HefestoRuntime
+
+if TYPE_CHECKING:
+    from .runtime import HefestoRuntime
 
 
 class HefestoApplication:
     def __init__(self, *, runtime: HefestoRuntime, persistence: GcpEditorialPersistence) -> None:
         self._runtime = runtime
         self._persistence = persistence
-
-    async def plan(self, *, project_id: UUID, brief: EditorialBrief, sources: list[NormalizedSource]) -> StoredNarrativeAxis:
-        with TemporaryDirectory(prefix="hefesto-v4-rebuild-plan-") as temporary:
-            graph_dir = Path(temporary) / "graph"
-            graph = await asyncio.to_thread(self._runtime.build_graph, sources)
-            graph_context = await graph.understand(brief)
-            await asyncio.to_thread(graph.persist, graph_dir)
-            axis = await self._runtime.director.propose_axis(project_id=project_id, brief=brief, graph_context=graph_context)
-            return await asyncio.to_thread(
-                self._persistence.persist_new_axis,
-                axis=axis,
-                brief=brief,
-                graph_context=graph_context,
-                graph_directory=graph_dir,
-            )
 
     async def revise_axis(self, axis_id: UUID, feedback: str) -> StoredNarrativeAxis:
         stored = await asyncio.to_thread(self._persistence.get_axis, axis_id)

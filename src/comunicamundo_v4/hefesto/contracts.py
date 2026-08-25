@@ -162,3 +162,80 @@ class FinalArticle(StrictModel):
     quality_score: int = Field(ge=0, le=100)
     revision_rounds: int = Field(ge=0, le=3)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class PlanningRequest(StrictModel):
+    project_id: UUID
+    brief: EditorialBrief
+    sources: list[NormalizedSource] = Field(min_length=1)
+
+
+class PlanningRunState(StrEnum):
+    REQUEST_VALIDATED = "request_validated"
+    SOURCE_CHUNKS_READY = "source_chunks_ready"
+    GRAPH_EXTRACTIONS_READY = "graph_extractions_ready"
+    GRAPH_READY = "graph_ready"
+    UNDERSTANDING_READY = "understanding_ready"
+    AXIS_PROPOSED = "axis_proposed"
+
+
+class ChunkStatus(StrEnum):
+    PREPARED = "prepared"
+    EXTRACTED = "extracted"
+    FAILED = "failed"
+
+
+class PreparedChunk(StrictModel):
+    chunk_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_id: UUID
+    source_ordinal: int = Field(ge=0)
+    chunk_ordinal: int = Field(ge=0)
+    sequence: int = Field(ge=0)
+    text: str = Field(min_length=1)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: ChunkStatus = ChunkStatus.PREPARED
+    extraction_ref: str | None = None
+
+
+class ChunkManifestEntry(StrictModel):
+    chunk_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_id: UUID
+    source_ordinal: int = Field(ge=0)
+    chunk_ordinal: int = Field(ge=0)
+    sequence: int = Field(ge=0)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: ChunkStatus = ChunkStatus.PREPARED
+    chunk_uri: str = Field(pattern=r"^gs://")
+    extraction_ref: str | None = None
+
+
+class ChunkManifest(StrictModel):
+    schema_version: int = 1
+    planning_run_id: UUID
+    project_id: UUID
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_count: int = Field(ge=1)
+    chunks: list[ChunkManifestEntry] = Field(min_length=1)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class PlanningArtifactRefs(StrictModel):
+    request_uri: str | None = Field(default=None, pattern=r"^gs://")
+    chunk_manifest_uri: str | None = Field(default=None, pattern=r"^gs://")
+    graph_extractions_uri: str | None = Field(default=None, pattern=r"^gs://")
+    graph_artifact_id: UUID | None = None
+    understanding_uri: str | None = Field(default=None, pattern=r"^gs://")
+    narrative_axis_id: UUID | None = None
+
+
+class PlanningRun(StrictModel):
+    planning_run_id: UUID = Field(default_factory=uuid4)
+    project_id: UUID
+    state: PlanningRunState
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    brief_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    artifacts: PlanningArtifactRefs = Field(default_factory=PlanningArtifactRefs)
+    chunk_count: int | None = Field(default=None, ge=0)
+    error: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
