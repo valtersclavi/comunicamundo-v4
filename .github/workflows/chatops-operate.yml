@@ -167,6 +167,16 @@ jobs:
             --execution-json "${RUNNER_TEMP}/execution.json" \
             --log-file "${RUNNER_TEMP}/execution.log" \
             --summary-file "${RUNNER_TEMP}/chatops-result.md"
+          terminal_condition="$(jq -r '[.status.conditions[]? | select((.state // "") == "CONDITION_FAILED" or (.status // "") == "False") | [(.type // ""), (.reason // ""), (.message // "")] | map(select(length > 0)) | join(": ")] | map(select(length > 0)) | join(" | ")' "${RUNNER_TEMP}/execution.json")"
+          if [ -n "${terminal_condition}" ]; then
+            {
+              echo
+              echo "## Terminal condition"
+              echo
+              printf '%s\n' "${terminal_condition}" | head -c 2000
+              echo
+            } >> "${RUNNER_TEMP}/chatops-result.md"
+          fi
           cat "${RUNNER_TEMP}/chatops-result.md" >> "${GITHUB_STEP_SUMMARY}"
           rm -f "${RUNNER_TEMP}/execution.log"
 
