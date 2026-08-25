@@ -84,6 +84,7 @@ class NarrativeArchitect:
             duration_minutes=project.brief.duration_minutes,
             output_language=project.brief.output_language,
             audience=project.brief.audience or "não especificado",
+            narrative_axis=project.narrative_axis,
             editorial_project=_json(project),
             subject_research=json.dumps(
                 [item.model_dump(mode="json") for item in research],
@@ -116,6 +117,7 @@ class ArticleWriter:
             duration_minutes=project.brief.duration_minutes,
             output_language=project.brief.output_language,
             audience=project.brief.audience or "não especificado",
+            narrative_axis=project.narrative_axis,
             editorial_project=_json(project),
             narrative_plan=_json(narrative_plan),
             subject_research=json.dumps(
@@ -135,6 +137,7 @@ class EditorialCritic:
             EditorialReview,
             EDITORIAL_REVIEW_PROMPT,
             brief=_json(project.brief),
+            narrative_axis=project.narrative_axis,
             editorial_project=_json(project),
             draft=draft,
         )
@@ -155,6 +158,7 @@ class ArticleEditor:
         return await self._llm.apredict(
             ARTICLE_REVISION_PROMPT,
             brief=_json(project.brief),
+            narrative_axis=project.narrative_axis,
             editorial_project=_json(project),
             narrative_plan=_json(narrative_plan),
             review=_json(review),

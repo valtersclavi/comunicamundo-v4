@@ -113,7 +113,7 @@ class NarrativeAxis(StrictModel):
 
 
 class EditorialProject(StrictModel):
-    """The sole object presented for editorial approval."""
+    """The object presented for editorial approval after the Narrative Axis."""
 
     editorial_project_id: UUID = Field(default_factory=uuid4)
     project_id: UUID

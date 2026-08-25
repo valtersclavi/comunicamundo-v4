@@ -15,7 +15,14 @@ from uuid import UUID, uuid4
 from google.cloud import firestore, storage
 from pydantic import Field
 
-from .contracts import EditorialProject, FinalArticle, StrictModel
+from .contracts import (
+    EditorialBrief,
+    EditorialProject,
+    FinalArticle,
+    NarrativeAxis,
+    NarrativeAxisStatus,
+    StrictModel,
+)
 
 
 def _utc_now() -> datetime:
@@ -44,6 +51,15 @@ class StoredEditorialProject(StrictModel):
     updated_at: datetime
 
 
+class StoredNarrativeAxis(StrictModel):
+    narrative_axis: NarrativeAxis
+    brief: EditorialBrief
+    graph_artifact: GraphArtifact
+    graph_context: str
+    editorial_project_id: UUID | None = None
+    updated_at: datetime
+
+
 class PublishedArticle(StrictModel):
     article_id: UUID
     project_id: UUID
@@ -62,6 +78,7 @@ class GcpPersistenceSettings:
     bucket: str
     root_prefix: str = "comunicamundo-v4"
     editorial_projects_collection: str = "hefesto_v4_editorial_projects"
+    narrative_axes_collection: str = "hefesto_v4_narrative_axes"
     articles_collection: str = "hefesto_v4_articles"
 
 
@@ -199,11 +216,13 @@ class FirestoreEditorialRepository:
         client: Any,
         *,
         editorial_projects_collection: str = "hefesto_v4_editorial_projects",
+        narrative_axes_collection: str = "hefesto_v4_narrative_axes",
         articles_collection: str = "hefesto_v4_articles",
         now: Callable[[], datetime] = _utc_now,
     ) -> None:
         self._client = client
         self._editorial_projects_collection = editorial_projects_collection
+        self._narrative_axes_collection = narrative_axes_collection
         self._articles_collection = articles_collection
         self._now = now
 
@@ -244,6 +263,35 @@ class FirestoreEditorialRepository:
         payload = {key: value for key, value in data.items() if key != "schema_version"}
         return StoredEditorialProject.model_validate(payload)
 
+    def save_narrative_axis(self, stored: StoredNarrativeAxis) -> StoredNarrativeAxis:
+        if stored.narrative_axis.project_id != stored.graph_artifact.project_id:
+            raise ValueError("narrative axis and graph artifact project IDs differ")
+        stored = stored.model_copy(update={"updated_at": self._now()})
+        self._client.collection(self._narrative_axes_collection).document(
+            str(stored.narrative_axis.narrative_axis_id)
+        ).set(
+            {
+                "schema_version": 1,
+                **stored.model_dump(mode="json"),
+            }
+        )
+        return stored
+
+    def get_narrative_axis(
+        self,
+        narrative_axis_id: UUID,
+    ) -> StoredNarrativeAxis | None:
+        snapshot = self._client.collection(
+            self._narrative_axes_collection
+        ).document(str(narrative_axis_id)).get()
+        if not snapshot.exists:
+            return None
+        data = snapshot.to_dict()
+        if data.get("schema_version") != 1:
+            raise ValueError("unsupported narrative axis schema version")
+        payload = {key: value for key, value in data.items() if key != "schema_version"}
+        return StoredNarrativeAxis.model_validate(payload)
+
     def save_article(self, publication: PublishedArticle) -> None:
         self._client.collection(self._articles_collection).document(
             str(publication.article_id)
@@ -280,6 +328,7 @@ class GcpEditorialPersistence:
             repository=FirestoreEditorialRepository(
                 firestore_client,
                 editorial_projects_collection=settings.editorial_projects_collection,
+                narrative_axes_collection=settings.narrative_axes_collection,
                 articles_collection=settings.articles_collection,
             ),
         )
@@ -294,6 +343,76 @@ class GcpEditorialPersistence:
             graph_directory,
         )
         return self.repository.save_editorial_project(project, graph_artifact)
+
+    def persist_axis_planning_result(
+        self,
+        axis: NarrativeAxis,
+        brief: EditorialBrief,
+        graph_context: str,
+        graph_directory: Path,
+    ) -> StoredNarrativeAxis:
+        graph_artifact = self.artifacts.upload_graph(axis.project_id, graph_directory)
+        return self.repository.save_narrative_axis(
+            StoredNarrativeAxis(
+                narrative_axis=axis,
+                brief=brief,
+                graph_artifact=graph_artifact,
+                graph_context=graph_context,
+                updated_at=_utc_now(),
+            )
+        )
+
+    def get_narrative_axis(
+        self,
+        narrative_axis_id: UUID,
+    ) -> StoredNarrativeAxis | None:
+        return self.repository.get_narrative_axis(narrative_axis_id)
+
+    def save_narrative_axis(
+        self,
+        stored: StoredNarrativeAxis,
+    ) -> StoredNarrativeAxis:
+        existing = self.repository.get_narrative_axis(
+            stored.narrative_axis.narrative_axis_id
+        )
+        graph_artifact = (
+            existing.graph_artifact if existing is not None else stored.graph_artifact
+        )
+        if existing is not None and existing.graph_artifact != stored.graph_artifact:
+            raise ValueError("cannot replace the persisted graph artifact of a Narrative Axis")
+        return self.repository.save_narrative_axis(
+            stored.model_copy(update={"graph_artifact": graph_artifact})
+        )
+
+    def persist_editorial_project_from_axis(
+        self,
+        project: EditorialProject,
+        stored_axis: StoredNarrativeAxis,
+    ) -> StoredEditorialProject:
+        if stored_axis.narrative_axis.status is not NarrativeAxisStatus.APPROVED:
+            raise ValueError(
+                "Editorial Project cannot be created from an unapproved Narrative Axis"
+            )
+        if project.narrative_axis_id != stored_axis.narrative_axis.narrative_axis_id:
+            raise ValueError("editorial project does not reference the approved Narrative Axis")
+        if project.narrative_axis != stored_axis.narrative_axis.statement:
+            raise ValueError("editorial project does not carry the approved Narrative Axis")
+        if stored_axis.editorial_project_id is not None:
+            existing = self.repository.get_editorial_project(
+                stored_axis.editorial_project_id
+            )
+            if existing is not None:
+                return existing
+        stored_project = self.repository.save_editorial_project(
+            project,
+            stored_axis.graph_artifact,
+        )
+        self.repository.save_narrative_axis(
+            stored_axis.model_copy(
+                update={"editorial_project_id": project.editorial_project_id}
+            )
+        )
+        return stored_project
 
     def save_editorial_project(
         self,
