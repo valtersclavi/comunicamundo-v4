@@ -229,6 +229,9 @@ def test_changed_brief_does_not_return_a_later_stage_run() -> None:
     first = orchestrator.execute(first_request)
     advanced = first.model_copy(update={"state": PlanningRunState.AXIS_PROPOSED})
     store.save_run(advanced)
+    same_brief = orchestrator.execute(first_request)
+    assert same_brief.planning_run_id == first.planning_run_id
+    assert same_brief.state is PlanningRunState.AXIS_PROPOSED
     second = orchestrator.execute(_request(sources=[source], project_id=project_id, brief=_brief(approach="outro rumo")))
     assert second.planning_run_id != first.planning_run_id
     assert second.state is PlanningRunState.SOURCE_CHUNKS_READY
