@@ -40,12 +40,12 @@ class SyncLLMPathExtractor(SimpleLLMPathExtractor):
     LlamaIndex's SimpleLLMPathExtractor.__call__ always does
     ``asyncio.run(self.acall(...))``, even when PropertyGraphIndex is constructed
     with ``use_async=False``. That path uses GoogleGenAI._achat and the Vertex
-    aio HTTP client. Hefesto builds the graph inside ``asyncio.to_thread`` after
-    constructing those clients on the worker's running loop. A shared
-    httpx.AsyncClient then dies on the second ``asyncio.run`` with
-    ``RuntimeError: Event loop is closed``. Graph build therefore uses
-    ``predict()`` / ``embed_content()`` instead of aio. ``use_async=False`` is
-    still required so embeddings also stay on the sync client.
+    aio HTTP client. Hefesto constructs those clients on the worker's running
+    loop, then builds the graph inside ``asyncio.to_thread``. After constructors
+    skip ``models.get()``, that aio-from-a-throwaway-loop path is the first
+    model-backed graph RPC. Graph build therefore uses ``predict()`` /
+    ``embed_content()`` instead of aio. ``use_async=False`` is still required so
+    embeddings also stay on the sync client.
     """
 
     @classmethod
