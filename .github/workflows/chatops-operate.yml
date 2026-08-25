@@ -160,9 +160,9 @@ jobs:
           gcloud logging read \
             "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND labels.\"run.googleapis.com/execution_name\"=${PREPARED_EXECUTION_NAME}" \
             --project="${PROJECT_ID}" \
-            --limit=30 \
+            --limit=60 \
             --freshness=7d \
-            --format='value(textPayload)' > "${RUNNER_TEMP}/execution.log" || true
+            --format='value(textPayload,jsonPayload.message)' > "${RUNNER_TEMP}/execution.log" || true
           python -m comunicamundo_v4.hefesto.operate summarize-inspect \
             --execution-json "${RUNNER_TEMP}/execution.json" \
             --log-file "${RUNNER_TEMP}/execution.log" \
@@ -175,6 +175,15 @@ jobs:
               echo
               printf '%s\n' "${terminal_condition}" | head -c 2000
               echo
+            } >> "${RUNNER_TEMP}/chatops-result.md"
+          fi
+          container_errors="$(grep -Eai '(Traceback|[A-Za-z0-9_.]+(Error|Exception):|PermissionDenied|NotFound|InvalidArgument|FailedPrecondition|ResourceExhausted|DeadlineExceeded|ValueError|TypeError|RuntimeError|KeyError|AttributeError)' "${RUNNER_TEMP}/execution.log" | grep -Evi '(secret|token|password|api[_-]?key|authorization|bearer|private[_-]?key)' | tail -n 12 | head -c 4000 || true)"
+          if [ -n "${container_errors}" ]; then
+            {
+              echo
+              echo "## Container error evidence"
+              echo
+              printf '%s\n' "${container_errors}"
             } >> "${RUNNER_TEMP}/chatops-result.md"
           fi
           cat "${RUNNER_TEMP}/chatops-result.md" >> "${GITHUB_STEP_SUMMARY}"
