@@ -1,0 +1,192 @@
+name: chatops-operate
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: comunicamundo-v4-chatops-${{ github.event.comment.id }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: comunicamundo-v4
+  PROJECT_NUMBER: "30524898837"
+  REGION: us-central1
+  REPOSITORY: comunicamundo-v4
+  JOB_NAME: hefesto-v4
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  CONTROL_ISSUE: "6"
+  ALLOWED_USER: valtersclavi
+  ALLOWED_REPOSITORY: valtersclavi/comunicamundo-v4
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 6 &&
+      github.event.comment.user.login == 'valtersclavi' &&
+      startsWith(github.event.comment.body, '/hefesto ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      operation: ${{ steps.prepare.outputs.operation }}
+      mode: ${{ steps.prepare.outputs.mode }}
+      gcloud_args: ${{ steps.prepare.outputs.gcloud_args }}
+      request_uri: ${{ steps.prepare.outputs.request_uri }}
+      narrative_axis_id: ${{ steps.prepare.outputs.narrative_axis_id }}
+      editorial_project_id: ${{ steps.prepare.outputs.editorial_project_id }}
+      execution_name: ${{ steps.prepare.outputs.execution_name }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the V4 package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install '.[dev]'
+
+      - name: Validate the authorized ChatOps command
+        id: prepare
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = "${ALLOWED_REPOSITORY}"
+          test "${GITHUB_REF}" = "refs/heads/main"
+          python -m comunicamundo_v4.hefesto.chatops \
+            --event-file "${GITHUB_EVENT_PATH}" \
+            --control-issue "${CONTROL_ISSUE}" \
+            --allowed-user "${ALLOWED_USER}" \
+            --allowed-repository "${ALLOWED_REPOSITORY}" \
+            --github-output "${GITHUB_OUTPUT}" \
+            --summary-file "${RUNNER_TEMP}/chatops-prepare.md"
+          cat "${RUNNER_TEMP}/chatops-prepare.md" >> "${GITHUB_STEP_SUMMARY}"
+
+  operate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PREPARED_OPERATION: ${{ needs.prepare.outputs.operation }}
+      PREPARED_MODE: ${{ needs.prepare.outputs.mode }}
+      PREPARED_GCLOUD_ARGS: ${{ needs.prepare.outputs.gcloud_args }}
+      PREPARED_REQUEST_URI: ${{ needs.prepare.outputs.request_uri }}
+      PREPARED_EXECUTION_NAME: ${{ needs.prepare.outputs.execution_name }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the V4 package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install '.[dev]'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Confirm the proof boundary
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = "${ALLOWED_REPOSITORY}"
+          test "${PROJECT_ID}" = "comunicamundo-v4"
+          test "${JOB_NAME}" = "hefesto-v4"
+          configured="$(gcloud config get-value project)"
+          test "${configured}" = "comunicamundo-v4"
+
+      - name: Validate the plan request object
+        if: needs.prepare.outputs.mode == 'dispatch' && needs.prepare.outputs.operation == 'plan'
+        run: |
+          set -euo pipefail
+          test -n "${PREPARED_REQUEST_URI}"
+          gcloud storage cat "${PREPARED_REQUEST_URI}" --project="${PROJECT_ID}" > "${RUNNER_TEMP}/plan-request.json"
+          python -m comunicamundo_v4.hefesto.operate validate-plan-request \
+            --request-file "${RUNNER_TEMP}/plan-request.json" \
+            --summary-file "${RUNNER_TEMP}/plan-request.md"
+          cat "${RUNNER_TEMP}/plan-request.md" >> "${GITHUB_STEP_SUMMARY}"
+          rm -f "${RUNNER_TEMP}/plan-request.json"
+
+      - name: Dispatch the Cloud Run Job asynchronously
+        if: needs.prepare.outputs.mode == 'dispatch'
+        run: |
+          set -euo pipefail
+          test -n "${PREPARED_GCLOUD_ARGS}"
+          execution="$(gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --args="${PREPARED_GCLOUD_ARGS}" \
+            --async \
+            --format='value(metadata.name)')"
+          test -n "${execution}"
+          case "${execution}" in
+            hefesto-v4-*) ;;
+            *) echo "unexpected execution name" >&2; exit 1 ;;
+          esac
+          echo "EXECUTION=${execution}" >> "${GITHUB_ENV}"
+          {
+            echo "# Hefesto ChatOps"
+            echo
+            echo "- Operation: \`${PREPARED_OPERATION}\`"
+            echo "- Execution: \`${execution}\`"
+            echo "- State: \`DISPATCHED\`"
+          } > "${RUNNER_TEMP}/chatops-result.md"
+
+      - name: Inspect one execution
+        if: needs.prepare.outputs.mode == 'inspect'
+        run: |
+          set -euo pipefail
+          test -n "${PREPARED_EXECUTION_NAME}"
+          gcloud run jobs executions describe "${PREPARED_EXECUTION_NAME}" \
+            --job="${JOB_NAME}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format=json > "${RUNNER_TEMP}/execution.json"
+          gcloud logging read \
+            "resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND labels.\"run.googleapis.com/execution_name\"=${PREPARED_EXECUTION_NAME}" \
+            --project="${PROJECT_ID}" \
+            --limit=30 \
+            --freshness=7d \
+            --format='value(textPayload)' > "${RUNNER_TEMP}/execution.log" || true
+          python -m comunicamundo_v4.hefesto.operate summarize-inspect \
+            --execution-json "${RUNNER_TEMP}/execution.json" \
+            --log-file "${RUNNER_TEMP}/execution.log" \
+            --summary-file "${RUNNER_TEMP}/chatops-result.md"
+          cat "${RUNNER_TEMP}/chatops-result.md" >> "${GITHUB_STEP_SUMMARY}"
+          rm -f "${RUNNER_TEMP}/execution.log"
+
+      - name: Publish the safe result to the control issue
+        run: |
+          set -euo pipefail
+          test -s "${RUNNER_TEMP}/chatops-result.md"
+          gh issue comment "${CONTROL_ISSUE}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body-file "${RUNNER_TEMP}/chatops-result.md"
