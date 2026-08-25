@@ -62,10 +62,23 @@ Do iPad, dispare `.github/workflows/operate.yml` em `main` (Actions → operate)
 - `produce`: somente `editorial_project_id`;
 - `inspect`: somente `execution_name` no formato `hefesto-v4-...`.
 
+Do ChatGPT conectado ao GitHub, prefira o canal permanente `.github/workflows/chatops-operate.yml`:
+
+- issue de controle: `#6` (`Hefesto ChatOps Control`);
+- único autor autorizado: `valtersclavi`;
+- formato: `/hefesto {JSON}`;
+- os únicos campos aceitos são `operation`, `request_uri`, `narrative_axis_id`,
+  `editorial_project_id`, `feedback` e `execution_name`;
+- o parser reutiliza `prepare_operation()`, portanto as mesmas combinações
+  inválidas continuam falhando fechadas;
+- o workflow publica no próprio issue apenas resultado operacional seguro;
+- comentários fora do issue, de outro autor ou sem o prefixo não podem operar o Job.
+
 As combinações inválidas falham fechadas. As operações de worker disparam o Job
 `hefesto-v4` de forma assíncrona e gravam o nome da execução no Step Summary.
 `inspect` descreve uma execução sem esperar. Feedback textual é codificado antes
-de virar argumento do Job e não deve ser repetido no Step Summary.
+de virar argumento do Job e não deve ser repetido no Step Summary nem no
+comentário de resultado.
 
 Não execute operações com modelo a menos que a tarefa peça uma prova delimitada.
 Uma prova de startup deve ser única, observável e sem modelo.
