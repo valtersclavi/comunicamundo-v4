@@ -1,6 +1,7 @@
 import inspect
 
 import pytest
+from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
 from llama_index.llms.google_genai import GoogleGenAI
 
 from comunicamundo_v4.hefesto.runtime import (
@@ -25,6 +26,20 @@ def test_google_genai_fetches_model_meta_unless_both_limits_are_set() -> None:
     source = inspect.getsource(GoogleGenAI.__init__)
     assert "if max_tokens is None or context_window is None" in source
     assert "client.models.get(model=model)" in source
+
+
+def test_google_genai_embedding_init_does_not_fetch_model_meta() -> None:
+    source = inspect.getsource(GoogleGenAIEmbedding.__init__)
+    assert "models.get" not in source
+
+
+def test_google_genai_sync_chat_uses_vertex_sync_client_after_prepare() -> None:
+    """predict() still asyncio.run()s message conversion, but generateContent is sync."""
+
+    source = inspect.getsource(GoogleGenAI._chat)
+    assert "asyncio.run" in source
+    assert "self._client.chats.create" in source
+    assert "self._client.aio" not in source
 
 
 class CapturedLLM:
