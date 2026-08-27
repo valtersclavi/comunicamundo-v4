@@ -31,9 +31,13 @@ class VertexRuntimeSettings:
     understanding_model: str = "gemini-2.5-pro"
     embedding_model: str = "gemini-embedding-001"
     context_window: int = GEMINI_2_5_CONTEXT_WINDOW
-    graph_max_tokens: int = 2_048
-    understanding_max_tokens: int = 4_096
-    axis_max_tokens: int = 1_200
+    # Gemini 2.5 thinking tokens count against max output. These planning
+    # stages therefore need enough headroom for reasoning plus the final
+    # compact response; the previous 2K/4K/1.2K caps could terminate before
+    # the model emitted a usable answer even for one atomic chunk.
+    graph_max_tokens: int = 12_000
+    understanding_max_tokens: int = 16_384
+    axis_max_tokens: int = 10_000
     project_max_tokens: int = 5_000
     research_max_tokens: int = 4_096
     architecture_max_tokens: int = 5_000
