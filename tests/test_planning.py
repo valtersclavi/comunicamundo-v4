@@ -14,6 +14,7 @@ from comunicamundo_v4.hefesto.contracts import (
     PlanningRun,
     PlanningRunState,
     SourceLineage,
+    SourceLineageState,
 )
 from comunicamundo_v4.hefesto.persistence import (
     FirestoreEditorialRepository,
@@ -82,6 +83,12 @@ def test_canonical_planning_states_are_stable() -> None:
         "graph_ready",
         "understanding_ready",
         "axis_proposed",
+    ]
+    assert [state.value for state in SourceLineageState] == [
+        "created",
+        "chunks_ready",
+        "graph_extractions_in_progress",
+        "graph_extractions_ready",
     ]
 
 
@@ -168,6 +175,7 @@ def test_plan_reaches_source_chunks_ready_without_model_runtime() -> None:
     assert run.artifacts.narrative_axis_id is None
     lineage = store.get_source_lineage(run.source_lineage_id)
     assert lineage is not None
+    assert lineage.state is SourceLineageState.CHUNKS_READY
     assert lineage.chunk_manifest_uri == run.artifacts.chunk_manifest_uri
     manifest = store.load_chunk_manifest(run.artifacts.chunk_manifest_uri)
     assert manifest.source_lineage_id == run.source_lineage_id

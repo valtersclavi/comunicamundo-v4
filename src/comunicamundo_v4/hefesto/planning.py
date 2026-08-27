@@ -18,6 +18,7 @@ from .contracts import (
     PlanningRunState,
     PreparedChunk,
     SourceLineage,
+    SourceLineageState,
 )
 
 CHUNK_SIZE_CHARS = 4000
@@ -204,6 +205,7 @@ class PlanningOrchestrator:
                 lineage = self._persistence.save_source_lineage(
                     lineage.model_copy(
                         update={
+                            "state": SourceLineageState.CHUNKS_READY,
                             "chunk_manifest_uri": manifest_uri,
                             "chunk_count": len(chunks),
                             "updated_at": _now(),

@@ -18,6 +18,8 @@ from .contracts import (
     EditorialBrief,
     EditorialProject,
     FinalArticle,
+    GraphExtraction,
+    GraphExtractionManifest,
     NarrativeAxis,
     PlanningRequest,
     PlanningRun,
@@ -460,3 +462,25 @@ class GcpEditorialPersistence:
 
     def load_chunk(self, uri: str) -> PreparedChunk:
         return PreparedChunk.model_validate(self.artifacts.load_json_uri(uri))
+
+    def persist_graph_extraction(self, lineage: SourceLineage, extraction: GraphExtraction) -> str:
+        return self.artifacts.persist_source_lineage_json(
+            project_id=lineage.project_id,
+            source_lineage_id=lineage.source_lineage_id,
+            relative_path=f"graph-extractions/{extraction.chunk_id}.json",
+            payload=extraction.model_dump(mode="json"),
+        )
+
+    def persist_graph_extraction_manifest(self, lineage: SourceLineage, manifest: GraphExtractionManifest) -> str:
+        return self.artifacts.persist_source_lineage_json(
+            project_id=lineage.project_id,
+            source_lineage_id=lineage.source_lineage_id,
+            relative_path="graph-extractions/manifest.json",
+            payload=manifest.model_dump(mode="json"),
+        )
+
+    def load_graph_extraction_manifest(self, uri: str) -> GraphExtractionManifest:
+        return GraphExtractionManifest.model_validate(self.artifacts.load_json_uri(uri))
+
+    def load_graph_extraction(self, uri: str) -> GraphExtraction:
+        return GraphExtraction.model_validate(self.artifacts.load_json_uri(uri))
