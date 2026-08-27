@@ -17,9 +17,10 @@ from comunicamundo_v4.hefesto.contracts import (
     SourceLineage,
     SourceLineageState,
 )
-from comunicamundo_v4.hefesto.runtime import GraphExtractionRuntime
+from comunicamundo_v4.hefesto.runtime import GraphExtractionRuntime, GraphIndexingRuntime
 from comunicamundo_v4.hefesto.worker import _feedback, _parser, main
 from fakes import MemoryPlanningPersistence
+from llama_index.core.embeddings import MockEmbedding
 
 
 def test_worker_exposes_both_approval_boundaries() -> None:
@@ -32,6 +33,9 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     parsed = parser.parse_args(["extract-graph", "--source-lineage-id", axis_id])
     assert parsed.command == "extract-graph"
     assert str(parsed.source_lineage_id) == axis_id
+    indexed = parser.parse_args(["index-graph", "--source-lineage-id", axis_id])
+    assert indexed.command == "index-graph"
+    assert str(indexed.source_lineage_id) == axis_id
 
 
 def test_feedback_is_transport_encoded_but_natural_language() -> None:
@@ -175,4 +179,99 @@ def test_extract_graph_command_uses_only_graph_extraction_runtime(monkeypatch, t
     assert rerun.state is SourceLineageState.GRAPH_EXTRACTIONS_READY
     assert store.extraction_writes == 3
     assert len(calls) == 3
+
+
+class _RecordingEmbed(MockEmbedding):
+    def __init__(self) -> None:
+        super().__init__(embed_dim=8, model_name="fake-embed")
+        object.__setattr__(self, "_recorded", [])
+
+    @property
+    def texts(self) -> list[str]:
+        return self._recorded
+
+    def get_text_embedding_batch(self, texts, **kwargs):
+        self._recorded.extend(list(texts))
+        return super().get_text_embedding_batch(texts, **kwargs)
+
+
+def test_index_graph_command_uses_only_embedding_runtime(monkeypatch, tmp_path, capsys) -> None:
+    store = MemoryPlanningPersistence()
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._planning_persistence", lambda: store)
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._application",
+        lambda: (_ for _ in ()).throw(AssertionError("full Vertex runtime must not be built for index-graph")),
+    )
+    path = tmp_path / "request.json"
+    _write_request(
+        path,
+        sources=[
+            {"source_id": str(uuid4()), "text": "primeiro.", "language": "pt-BR"},
+            {"source_id": str(uuid4()), "text": "segundo.", "language": "pt-BR"},
+            {"source_id": str(uuid4()), "text": "terceiro.", "language": "pt-BR"},
+        ],
+    )
+    main(["plan", "--request", str(path)])
+    run = PlanningRun.model_validate_json(capsys.readouterr().out)
+
+    class FakeExtractor:
+        def __init__(self, runtime) -> None:
+            assert runtime.model == "fake-graph-llm"
+
+        def extract(self, unit):
+            return GraphExtraction(
+                contract_version=GRAPH_EXTRACTION_CONTRACT_VERSION,
+                extractor_version=GRAPH_EXTRACTOR_VERSION,
+                model="fake-graph-llm",
+                source_lineage_id=unit.source_lineage_id,
+                source_id=unit.source_id,
+                chunk_id=unit.chunk_id,
+                chunk_sha256=unit.content_sha256,
+                entities=[GraphEntity(name="Criança"), GraphEntity(name="Ausência")],
+                relations=[GraphRelation(source="Criança", relation="PERCEBE", target="Ausência")],
+            )
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_extraction_runtime",
+        lambda: GraphExtractionRuntime(llm=object(), model="fake-graph-llm", context_window=1_048_576, max_tokens=2_048),
+    )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.graph_extraction.LlamaIndexChunkGraphExtractor", FakeExtractor)
+    main(["extract-graph", "--source-lineage-id", str(run.source_lineage_id)])
+    extracted = SourceLineage.model_validate_json(capsys.readouterr().out)
+    assert extracted.state is SourceLineageState.GRAPH_EXTRACTIONS_READY
+    extract_writes = store.extraction_writes
+
+    embed = _RecordingEmbed()
+    indexing_calls: list[str] = []
+
+    def indexing_runtime():
+        indexing_calls.append("indexing")
+        return GraphIndexingRuntime(
+            embed_model=embed,
+            model="fake-embed",
+            package_version="test-embed-1",
+            config={"model_name": "fake-embed", "location": "us-central1", "embed_kg_nodes": True},
+        )
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_extraction_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("graph extraction runtime must not be built for index-graph")),
+    )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._graph_indexing_runtime", indexing_runtime)
+    main(["index-graph", "--source-lineage-id", str(run.source_lineage_id)])
+    lineage = SourceLineage.model_validate_json(capsys.readouterr().out)
+    assert lineage.state is SourceLineageState.GRAPH_READY
+    assert lineage.graph_artifact_id is not None
+    assert store.extraction_writes == extract_writes
+    assert embed.texts
+    first_texts = list(embed.texts)
+    assert indexing_calls == ["indexing"]
+    main(["index-graph", "--source-lineage-id", str(run.source_lineage_id)])
+    rerun = SourceLineage.model_validate_json(capsys.readouterr().out)
+    assert rerun.state is SourceLineageState.GRAPH_READY
+    assert rerun.graph_artifact_id == lineage.graph_artifact_id
+    assert store.extraction_writes == extract_writes
+    assert embed.texts == first_texts
+    assert indexing_calls == ["indexing", "indexing"]
 

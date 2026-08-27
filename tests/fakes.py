@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from hashlib import sha256
 import json
+from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from comunicamundo_v4.hefesto.contracts import (
     ChunkManifest,
     ChunkManifestEntry,
+    GraphArtifact,
+    GraphArtifactFile,
     GraphExtraction,
     GraphExtractionManifest,
+    GraphReadyManifest,
     PlanningRequest,
     PlanningRun,
     PreparedChunk,
@@ -100,6 +105,8 @@ class MemoryPlanningPersistence:
         self.manifest_writes = 0
         self.extraction_writes = 0
         self.extraction_manifest_writes = 0
+        self.graph_writes = 0
+        self.graph_manifest_writes = 0
 
     def save_run(self, run: PlanningRun) -> PlanningRun:
         updated = run.model_copy(update={"updated_at": datetime.now(UTC)})
@@ -203,3 +210,56 @@ class MemoryPlanningPersistence:
         extraction = self.objects[uri]
         assert isinstance(extraction, GraphExtraction)
         return extraction.model_copy()
+
+    def persist_source_lineage_graph(self, lineage: SourceLineage, directory: Path) -> GraphArtifact:
+        self.graph_writes += 1
+        artifact_id = uuid4()
+        prefix = f"comunicamundo-v4-rebuild/projects/{lineage.project_id}/sources/{lineage.source_lineage_id}/graph/{artifact_id}"
+        records: list[GraphArtifactFile] = []
+        for local in sorted(path for path in directory.rglob("*") if path.is_file()):
+            relative = local.relative_to(directory).as_posix()
+            data = local.read_bytes()
+            uri = f"gs://memory/{prefix}/files/{relative}"
+            self.objects[uri] = data
+            records.append(GraphArtifactFile(path=relative, size_bytes=len(data), sha256=sha256(data).hexdigest()))
+        created_at = datetime.now(UTC)
+        manifest_uri = f"gs://memory/{prefix}/manifest.json"
+        artifact = GraphArtifact(
+            project_id=lineage.project_id,
+            artifact_id=artifact_id,
+            bucket="memory",
+            prefix=prefix,
+            manifest_uri=manifest_uri,
+            files=records,
+            created_at=created_at,
+        )
+        self.objects[manifest_uri] = artifact.model_copy()
+        return artifact
+
+    def restore_source_lineage_graph(self, artifact: GraphArtifact, destination: Path) -> None:
+        destination.mkdir(parents=True, exist_ok=True)
+        if any(destination.iterdir()):
+            raise ValueError("graph restore destination must be empty")
+        stored = self.objects[artifact.manifest_uri]
+        assert isinstance(stored, GraphArtifact)
+        if stored.artifact_id != artifact.artifact_id:
+            raise ValueError("graph manifest mismatch")
+        for record in artifact.files:
+            data = self.objects[f"gs://memory/{artifact.prefix}/files/{record.path}"]
+            assert isinstance(data, (bytes, bytearray))
+            if len(data) != record.size_bytes or sha256(data).hexdigest() != record.sha256:
+                raise ValueError(f"graph artifact integrity failure: {record.path}")
+            target = destination / record.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+
+    def persist_graph_ready_manifest(self, lineage: SourceLineage, manifest: GraphReadyManifest) -> str:
+        self.graph_manifest_writes += 1
+        uri = f"gs://memory/sources/{lineage.source_lineage_id}/graph/manifest.json"
+        self.objects[uri] = manifest.model_copy()
+        return uri
+
+    def load_graph_ready_manifest(self, uri: str) -> GraphReadyManifest:
+        manifest = self.objects[uri]
+        assert isinstance(manifest, GraphReadyManifest)
+        return manifest.model_copy()

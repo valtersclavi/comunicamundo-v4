@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib.metadata import version
 from pathlib import Path
 
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
@@ -47,6 +48,14 @@ class GraphExtractionRuntime:
     max_tokens: int
 
 
+@dataclass(frozen=True, slots=True)
+class GraphIndexingRuntime:
+    embed_model: object
+    model: str
+    package_version: str
+    config: dict[str, object]
+
+
 @dataclass(slots=True)
 class HefestoRuntime:
     graph_llm: object
@@ -82,6 +91,26 @@ def build_graph_extraction_runtime(settings: VertexRuntimeSettings) -> GraphExtr
         model=settings.graph_model,
         context_window=settings.context_window,
         max_tokens=settings.graph_max_tokens,
+    )
+
+
+def build_graph_indexing_runtime(settings: VertexRuntimeSettings) -> GraphIndexingRuntime:
+    """Construct only the embedding client required to index a persisted PropertyGraph."""
+    if not settings.embedding_model.strip():
+        raise ValueError("graph indexing requires an explicit embedding_model")
+    embed_model = GoogleGenAIEmbedding(
+        model_name=settings.embedding_model,
+        vertexai_config={"project": settings.project, "location": settings.location},
+    )
+    return GraphIndexingRuntime(
+        embed_model=embed_model,
+        model=settings.embedding_model,
+        package_version=version("llama-index-embeddings-google-genai"),
+        config={
+            "model_name": settings.embedding_model,
+            "location": settings.location,
+            "embed_kg_nodes": True,
+        },
     )
 
 

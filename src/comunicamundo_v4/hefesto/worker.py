@@ -72,6 +72,14 @@ def _graph_extraction_runtime():
     return build_graph_extraction_runtime(VertexRuntimeSettings(project=project, location=location))
 
 
+def _graph_indexing_runtime():
+    from .runtime import VertexRuntimeSettings, build_graph_indexing_runtime
+
+    project = _required("GOOGLE_CLOUD_PROJECT")
+    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    return build_graph_indexing_runtime(VertexRuntimeSettings(project=project, location=location))
+
+
 def run_extract_graph_command(source_lineage_id: UUID) -> SourceLineage:
     from .graph_extraction import GraphExtractionOrchestrator, LlamaIndexChunkGraphExtractor
 
@@ -79,6 +87,14 @@ def run_extract_graph_command(source_lineage_id: UUID) -> SourceLineage:
     runtime = _graph_extraction_runtime()
     extractor = LlamaIndexChunkGraphExtractor(runtime)
     return GraphExtractionOrchestrator(persistence, extractor, model=runtime.model).execute(source_lineage_id)
+
+
+def run_index_graph_command(source_lineage_id: UUID) -> SourceLineage:
+    from .graph_assembly import GraphAssemblyOrchestrator
+
+    persistence = _planning_persistence()
+    runtime = _graph_indexing_runtime()
+    return GraphAssemblyOrchestrator(persistence, runtime).execute(source_lineage_id)
 
 
 def run_plan_command(location: str) -> PlanningRun:
@@ -109,6 +125,10 @@ async def _run(args: argparse.Namespace) -> None:
         result = run_extract_graph_command(args.source_lineage_id)
         print(result.model_dump_json())
         return
+    if args.command == "index-graph":
+        result = run_index_graph_command(args.source_lineage_id)
+        print(result.model_dump_json())
+        return
     app = _application()
     if args.command == "revise-axis":
         result = await app.revise_axis(args.narrative_axis_id, _feedback(args.feedback_b64))
@@ -132,6 +152,8 @@ def _parser() -> argparse.ArgumentParser:
     plan.add_argument("--request", required=True)
     extract_graph = commands.add_parser("extract-graph", help="extract one persisted chunk at a time until graph_extractions_ready")
     extract_graph.add_argument("--source-lineage-id", type=UUID, required=True)
+    index_graph = commands.add_parser("index-graph", help="assemble persisted graph extractions and index until graph_ready")
+    index_graph.add_argument("--source-lineage-id", type=UUID, required=True)
     revise_axis = commands.add_parser("revise-axis")
     revise_axis.add_argument("--narrative-axis-id", type=UUID, required=True)
     revise_axis.add_argument("--feedback-b64", required=True)

@@ -7,10 +7,40 @@ from typing import Sequence
 
 from llama_index.core import Document, PropertyGraphIndex, StorageContext, load_index_from_storage
 from llama_index.core.embeddings import BaseEmbedding
+from llama_index.core.graph_stores.types import EntityNode, KG_NODES_KEY, KG_RELATIONS_KEY, Relation
 from llama_index.core.llms import LLM
+from llama_index.core.schema import TextNode, TransformComponent
 
-from .contracts import EditorialBrief, EditorialSubject, NormalizedSource
+from .contracts import EditorialBrief, EditorialSubject, GraphExtraction, NormalizedSource
 from .prompts import PROJECT_UNDERSTANDING_QUERY, SUBJECT_CONTEXT_QUERY
+
+
+class PersistedKgTransform(TransformComponent):
+    """Keep EntityNode/Relation objects already attached to node metadata.
+
+    LlamaIndex 0.14.24 treats ``kg_extractors=[]`` as missing and reconstructs
+    ``SimpleLLMPathExtractor``. A non-empty pass-through is required so assembly
+    never builds or calls a graph-extraction LLM.
+    """
+
+    @classmethod
+    def class_name(cls) -> str:
+        return "PersistedKgTransform"
+
+    def __call__(self, nodes: Sequence, **kwargs) -> list:
+        return list(nodes)
+
+
+def persisted_kg_extractors() -> list[TransformComponent]:
+    return [PersistedKgTransform()]
+
+
+def _text_for_extraction(extraction: GraphExtraction) -> str:
+    if extraction.relations:
+        return "\n".join(f"{item.source} {item.relation} {item.target}" for item in extraction.relations)
+    if extraction.entities:
+        return "\n".join(entity.name for entity in extraction.entities)
+    return extraction.chunk_id
 
 
 @dataclass(slots=True)
@@ -45,9 +75,49 @@ class ProjectGraph:
         return cls(index=index)
 
     @classmethod
-    def load(cls, directory: Path, *, llm: LLM, embed_model: BaseEmbedding) -> "ProjectGraph":
+    def from_extractions(cls, extractions: Sequence[GraphExtraction], *, embed_model: BaseEmbedding) -> "ProjectGraph":
+        """Assemble a PropertyGraphIndex from durable 2A extractions. Embedding only."""
+        from .graph_extraction import graph_extraction_to_llama
+
+        if not extractions:
+            raise ValueError("at least one persisted graph extraction is required")
+        nodes: list[TextNode] = []
+        for extraction in extractions:
+            entities, relations = graph_extraction_to_llama(extraction)
+            nodes.append(
+                TextNode(
+                    text=_text_for_extraction(extraction),
+                    id_=extraction.chunk_id,
+                    metadata={
+                        KG_NODES_KEY: entities,
+                        KG_RELATIONS_KEY: relations,
+                        "chunk_id": extraction.chunk_id,
+                        "source_id": str(extraction.source_id),
+                        "source_lineage_id": str(extraction.source_lineage_id),
+                    },
+                )
+            )
+        index = PropertyGraphIndex(
+            nodes=nodes,
+            kg_extractors=persisted_kg_extractors(),
+            embed_model=embed_model,
+            embed_kg_nodes=True,
+            use_async=False,
+            show_progress=False,
+        )
+        return cls(index=index)
+
+    @classmethod
+    def load(cls, directory: Path, *, embed_model: BaseEmbedding, llm: LLM | None = None) -> "ProjectGraph":
         storage_context = StorageContext.from_defaults(persist_dir=str(directory))
-        index = load_index_from_storage(storage_context, llm=llm, embed_model=embed_model)
+        index = load_index_from_storage(
+            storage_context,
+            llm=llm,
+            embed_model=embed_model,
+            kg_extractors=persisted_kg_extractors(),
+            embed_kg_nodes=True,
+            use_async=False,
+        )
         if not isinstance(index, PropertyGraphIndex):
             raise TypeError("persisted index is not a PropertyGraphIndex")
         return cls(index=index)
@@ -55,6 +125,12 @@ class ProjectGraph:
     def persist(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         self.index.storage_context.persist(persist_dir=str(directory))
+
+    def entity_nodes(self) -> list[EntityNode]:
+        return [node for node in self.index.property_graph_store.get() if isinstance(node, EntityNode)]
+
+    def relations(self) -> list[Relation]:
+        return [triplet[1] for triplet in self.index.property_graph_store.graph.get_triplets()]
 
     async def _retrieve(self, query: str, *, top_k: int) -> str:
         retriever = self.index.as_retriever(include_text=True, similarity_top_k=top_k)

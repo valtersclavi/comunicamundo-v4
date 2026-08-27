@@ -228,6 +228,8 @@ class SourceLineageState(StrEnum):
     CHUNKS_READY = "chunks_ready"
     GRAPH_EXTRACTIONS_IN_PROGRESS = "graph_extractions_in_progress"
     GRAPH_EXTRACTIONS_READY = "graph_extractions_ready"
+    GRAPH_INDEXING_IN_PROGRESS = "graph_indexing_in_progress"
+    GRAPH_READY = "graph_ready"
 
 
 class GraphExtractionUnitStatus(StrEnum):
@@ -302,6 +304,47 @@ class GraphExtractionManifest(StrictModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+GRAPH_ASSEMBLY_CONTRACT_VERSION = "graph-assembly.v1"
+GRAPH_INDEXER_VERSION = "hefesto.property-graph-index.v1"
+
+
+class GraphArtifactFile(StrictModel):
+    path: str = Field(min_length=1)
+    size_bytes: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class GraphArtifact(StrictModel):
+    project_id: UUID
+    artifact_id: UUID
+    bucket: str = Field(min_length=1)
+    prefix: str = Field(min_length=1)
+    manifest_uri: str = Field(pattern=r"^gs://")
+    files: list[GraphArtifactFile] = Field(min_length=1)
+    created_at: datetime
+
+
+class GraphReadyManifest(StrictModel):
+    schema_version: int = 1
+    contract_version: str = Field(min_length=1)
+    indexer_version: str = Field(min_length=1)
+    source_lineage_id: UUID
+    project_id: UUID
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    extraction_manifest_uri: str = Field(pattern=r"^gs://")
+    extraction_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    extraction_contract_version: str = Field(min_length=1)
+    extraction_extractor_version: str = Field(min_length=1)
+    extraction_model: str = Field(min_length=1)
+    embedding_model: str = Field(min_length=1)
+    embedding_package_version: str = Field(min_length=1)
+    embedding_config: dict[str, Any] = Field(default_factory=dict)
+    graph_artifact_id: UUID
+    graph_artifact_version: str = Field(min_length=1)
+    graph_artifact: GraphArtifact
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class SourceLineage(StrictModel):
     source_lineage_id: UUID = Field(default_factory=uuid4)
     project_id: UUID
@@ -312,6 +355,8 @@ class SourceLineage(StrictModel):
     graph_extractions_manifest_uri: str | None = Field(default=None, pattern=r"^gs://")
     extracted_count: int | None = Field(default=None, ge=0)
     failed_count: int | None = Field(default=None, ge=0)
+    graph_manifest_uri: str | None = Field(default=None, pattern=r"^gs://")
+    graph_artifact_id: UUID | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
