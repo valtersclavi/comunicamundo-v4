@@ -29,9 +29,23 @@ from .runtime import GraphExtractionRuntime
 
 MAX_PATHS_PER_CHUNK = 10
 
+GRAPH_EXTRACTION_IDENTITY_FIELDS = (
+    "source_lineage_id",
+    "source_id",
+    "chunk_id",
+    "chunk_sha256",
+    "contract_version",
+    "extractor_version",
+    "model",
+)
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+class GraphExtractionIdentityError(ValueError):
+    """Raised when a GraphExtraction does not belong to the requested unit and contract."""
 
 
 class ChunkGraphExtractor(Protocol):
@@ -157,21 +171,12 @@ class GraphExtractionOrchestrator:
         lineage = self._checkpoint(lineage, manifest, allow_ready=False)
         for index, entry in enumerate(list(manifest.entries)):
             chunk = self._persistence.load_chunk(entry.chunk_uri)
-            if self._reusable(entry, chunk):
+            unit = self._unit_for(lineage, chunk)
+            if self._reusable(entry, unit):
                 continue
             try:
-                extraction = self._extractor.extract(
-                    GraphExtractionUnit(
-                        source_lineage_id=lineage.source_lineage_id,
-                        chunk_id=chunk.chunk_id,
-                        source_id=chunk.source_id,
-                        text=chunk.text,
-                        content_sha256=chunk.content_sha256,
-                        source_ordinal=chunk.source_ordinal,
-                        chunk_ordinal=chunk.chunk_ordinal,
-                        sequence=chunk.sequence,
-                    )
-                )
+                extraction = self._extractor.extract(unit)
+                self._assert_identity(unit, extraction)
                 extraction_uri = self._persistence.persist_graph_extraction(lineage, extraction)
                 manifest.entries[index] = entry.model_copy(
                     update={
@@ -193,21 +198,54 @@ class GraphExtractionOrchestrator:
             lineage = self._checkpoint(lineage, manifest, allow_ready=False)
         return self._checkpoint(lineage, manifest, allow_ready=True)
 
-    def _reusable(self, entry: GraphExtractionManifestEntry, chunk: PreparedChunk) -> bool:
+    def _unit_for(self, lineage: SourceLineage, chunk: PreparedChunk) -> GraphExtractionUnit:
+        return GraphExtractionUnit(
+            source_lineage_id=lineage.source_lineage_id,
+            chunk_id=chunk.chunk_id,
+            source_id=chunk.source_id,
+            text=chunk.text,
+            content_sha256=chunk.content_sha256,
+            source_ordinal=chunk.source_ordinal,
+            chunk_ordinal=chunk.chunk_ordinal,
+            sequence=chunk.sequence,
+        )
+
+    def _expected_identity(self, unit: GraphExtractionUnit) -> dict[str, object]:
+        return {
+            "source_lineage_id": unit.source_lineage_id,
+            "source_id": unit.source_id,
+            "chunk_id": unit.chunk_id,
+            "chunk_sha256": unit.content_sha256,
+            "contract_version": self._contract_version,
+            "extractor_version": self._extractor_version,
+            "model": self._model,
+        }
+
+    def _identity_mismatches(self, unit: GraphExtractionUnit, extraction: GraphExtraction) -> dict[str, tuple[object, object]]:
+        expected = self._expected_identity(unit)
+        mismatches: dict[str, tuple[object, object]] = {}
+        for field in GRAPH_EXTRACTION_IDENTITY_FIELDS:
+            actual = getattr(extraction, field)
+            want = expected[field]
+            if actual != want:
+                mismatches[field] = (actual, want)
+        return mismatches
+
+    def _assert_identity(self, unit: GraphExtractionUnit, extraction: GraphExtraction) -> None:
+        mismatches = self._identity_mismatches(unit, extraction)
+        if not mismatches:
+            return
+        details = ", ".join(f"{field} got {actual!r} expected {expected!r}" for field, (actual, expected) in mismatches.items())
+        raise GraphExtractionIdentityError(f"graph extraction does not belong to the requested unit: {details}")
+
+    def _reusable(self, entry: GraphExtractionManifestEntry, unit: GraphExtractionUnit) -> bool:
         if entry.status is not GraphExtractionUnitStatus.EXTRACTED or entry.extraction_uri is None:
             return False
         try:
             extraction = self._persistence.load_graph_extraction(entry.extraction_uri)
         except Exception:
             return False
-        return (
-            extraction.chunk_id == chunk.chunk_id
-            and extraction.source_id == chunk.source_id
-            and extraction.chunk_sha256 == chunk.content_sha256
-            and extraction.contract_version == self._contract_version
-            and extraction.extractor_version == self._extractor_version
-            and extraction.model == self._model
-        )
+        return not self._identity_mismatches(unit, extraction)
 
     def _reconcile(self, lineage: SourceLineage, chunk_manifest: ChunkManifest) -> GraphExtractionManifest:
         existing: GraphExtractionManifest | None = None

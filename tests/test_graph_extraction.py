@@ -20,6 +20,8 @@ from comunicamundo_v4.hefesto.contracts import (
     SourceLineageState,
 )
 from comunicamundo_v4.hefesto.graph_extraction import (
+    GRAPH_EXTRACTION_IDENTITY_FIELDS,
+    GraphExtractionIdentityError,
     GraphExtractionOrchestrator,
     LlamaIndexChunkGraphExtractor,
     graph_extraction_to_llama,
@@ -86,21 +88,40 @@ def _extraction_for(unit: GraphExtractionUnit, *, model: str = FAKE_MODEL, extra
 
 
 class RecordingExtractor:
-    def __init__(self, *, fail_on: set[str] | None = None, model: str = FAKE_MODEL) -> None:
+    def __init__(self, *, fail_on: set[str] | None = None, model: str = FAKE_MODEL, rewrite=None) -> None:
         self.calls: list[GraphExtractionUnit] = []
         self.fail_on = set(fail_on or [])
         self.model = model
+        self.rewrite = rewrite
 
     def extract(self, unit: GraphExtractionUnit) -> GraphExtraction:
         assert isinstance(unit, GraphExtractionUnit)
         self.calls.append(unit)
         if unit.chunk_id in self.fail_on:
             raise RuntimeError(f"extraction failed for {unit.chunk_id}")
-        return _extraction_for(unit, model=self.model)
+        extraction = _extraction_for(unit, model=self.model)
+        if self.rewrite is not None:
+            return self.rewrite(unit, extraction)
+        return extraction
 
     @property
     def chunk_ids(self) -> list[str]:
         return [unit.chunk_id for unit in self.calls]
+
+
+def _wrong_identity_value(field: str, extraction: GraphExtraction):
+    if field in {"chunk_id", "chunk_sha256"}:
+        current = getattr(extraction, field)
+        return "0" * 64 if current != "0" * 64 else "f" * 64
+    if field in {"source_lineage_id", "source_id"}:
+        return uuid4()
+    if field == "contract_version":
+        return "graph-extraction.not-the-contract"
+    if field == "extractor_version":
+        return "hefesto.not-the-extractor"
+    if field == "model":
+        return "not-the-requested-model"
+    raise AssertionError(f"unsupported identity field: {field}")
 
 
 def _prepare_lineage(store: MemoryPlanningPersistence, *texts: str, brief: EditorialBrief | None = None, project_id=None, sources=None):
@@ -161,6 +182,60 @@ def test_failure_on_second_chunk_keeps_first_extraction_durable() -> None:
     assert extraction_manifest.entries[2].status is GraphExtractionUnitStatus.PENDING
     assert extractor.chunk_ids == [manifest.chunks[0].chunk_id, failed_id]
     assert store.extraction_writes == 1
+
+
+@pytest.mark.parametrize("field", GRAPH_EXTRACTION_IDENTITY_FIELDS)
+def test_mismatched_extractor_response_fails_unit_and_is_not_persisted(field: str) -> None:
+    store = MemoryPlanningPersistence()
+    extractor = RecordingExtractor(
+        rewrite=lambda _unit, extraction: extraction.model_copy(update={field: _wrong_identity_value(field, extraction)})
+    )
+    _run, lineage, manifest = _prepare_lineage(store, "chunk um da criança.", "chunk dois da família.", "chunk três da presença.")
+    with pytest.raises(GraphExtractionIdentityError, match=f"{field} got"):
+        _orchestrator(store, extractor).execute(lineage.source_lineage_id)
+    updated = store.get_source_lineage(lineage.source_lineage_id)
+    assert updated.state is SourceLineageState.GRAPH_EXTRACTIONS_IN_PROGRESS
+    assert updated.extracted_count == 0
+    assert updated.failed_count == 1
+    assert store.extraction_writes == 0
+    extraction_manifest = store.load_graph_extraction_manifest(updated.graph_extractions_manifest_uri)
+    assert extraction_manifest.extracted_count == 0
+    assert extraction_manifest.failed_count == 1
+    assert extraction_manifest.entries[0].status is GraphExtractionUnitStatus.FAILED
+    assert extraction_manifest.entries[0].extraction_uri is None
+    assert extraction_manifest.entries[0].error is not None
+    assert field in extraction_manifest.entries[0].error
+    assert extraction_manifest.entries[1].status is GraphExtractionUnitStatus.PENDING
+    assert extraction_manifest.entries[2].status is GraphExtractionUnitStatus.PENDING
+    assert extractor.chunk_ids == [manifest.chunks[0].chunk_id]
+    assert not any("/graph-extractions/" in uri and not uri.endswith("manifest.json") for uri in store.objects)
+
+
+def test_identity_mismatch_on_later_unit_keeps_prior_extraction() -> None:
+    store = MemoryPlanningPersistence()
+    _run, lineage, manifest = _prepare_lineage(store, "primeiro bloco.", "segundo bloco.", "terceiro bloco.")
+    target = manifest.chunks[1].chunk_id
+
+    def rewrite(_unit, extraction: GraphExtraction) -> GraphExtraction:
+        if extraction.chunk_id != target:
+            return extraction
+        return extraction.model_copy(update={"chunk_id": _wrong_identity_value("chunk_id", extraction)})
+
+    extractor = RecordingExtractor(rewrite=rewrite)
+    with pytest.raises(GraphExtractionIdentityError, match="chunk_id got"):
+        _orchestrator(store, extractor).execute(lineage.source_lineage_id)
+    updated = store.get_source_lineage(lineage.source_lineage_id)
+    assert updated.state is SourceLineageState.GRAPH_EXTRACTIONS_IN_PROGRESS
+    assert updated.extracted_count == 1
+    assert updated.failed_count == 1
+    assert store.extraction_writes == 1
+    extraction_manifest = store.load_graph_extraction_manifest(updated.graph_extractions_manifest_uri)
+    assert extraction_manifest.entries[0].status is GraphExtractionUnitStatus.EXTRACTED
+    assert store.load_graph_extraction(extraction_manifest.entries[0].extraction_uri).chunk_id == manifest.chunks[0].chunk_id
+    assert extraction_manifest.entries[1].status is GraphExtractionUnitStatus.FAILED
+    assert extraction_manifest.entries[1].extraction_uri is None
+    assert extraction_manifest.entries[2].status is GraphExtractionUnitStatus.PENDING
+    assert extractor.chunk_ids == [manifest.chunks[0].chunk_id, target]
 
 
 def test_rerun_after_failure_extracts_only_missing_and_failed_units() -> None:
