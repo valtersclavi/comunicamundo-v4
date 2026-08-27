@@ -28,9 +28,11 @@ class VertexRuntimeSettings:
     writing_model: str = "gemini-2.5-pro"
     critic_model: str = "gemini-2.5-flash"
     editing_model: str = "gemini-2.5-pro"
+    understanding_model: str = "gemini-2.5-pro"
     embedding_model: str = "gemini-embedding-001"
     context_window: int = GEMINI_2_5_CONTEXT_WINDOW
     graph_max_tokens: int = 2_048
+    understanding_max_tokens: int = 4_096
     axis_max_tokens: int = 1_200
     project_max_tokens: int = 5_000
     research_max_tokens: int = 4_096
@@ -54,6 +56,18 @@ class GraphIndexingRuntime:
     model: str
     package_version: str
     config: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class AxisProposalRuntime:
+    embed_model: object
+    understanding_llm: object
+    understanding_model: str
+    understanding_max_tokens: int
+    axis_llm: object
+    axis_model: str
+    axis_max_tokens: int
+    context_window: int
 
 
 @dataclass(slots=True)
@@ -111,6 +125,32 @@ def build_graph_indexing_runtime(settings: VertexRuntimeSettings) -> GraphIndexi
             "location": settings.location,
             "embed_kg_nodes": True,
         },
+    )
+
+
+def build_axis_proposal_runtime(settings: VertexRuntimeSettings) -> AxisProposalRuntime:
+    """Construct only understanding + axis LLMs and the embedding client to reload the graph."""
+    if settings.context_window <= 0:
+        raise ValueError("axis proposal requires an explicit context_window")
+    if settings.understanding_max_tokens <= 0:
+        raise ValueError("editorial understanding requires an explicit max_tokens budget")
+    if settings.axis_max_tokens <= 0:
+        raise ValueError("Narrative Axis proposal requires an explicit max_tokens budget")
+    if not settings.embedding_model.strip():
+        raise ValueError("axis proposal requires an explicit embedding_model to restore the PropertyGraph")
+    embed_model = GoogleGenAIEmbedding(
+        model_name=settings.embedding_model,
+        vertexai_config={"project": settings.project, "location": settings.location},
+    )
+    return AxisProposalRuntime(
+        embed_model=embed_model,
+        understanding_llm=_vertex_llm(settings, settings.understanding_model, 0.2, settings.understanding_max_tokens),
+        understanding_model=settings.understanding_model,
+        understanding_max_tokens=settings.understanding_max_tokens,
+        axis_llm=_vertex_llm(settings, settings.axis_model, 0.35, settings.axis_max_tokens),
+        axis_model=settings.axis_model,
+        axis_max_tokens=settings.axis_max_tokens,
+        context_window=settings.context_window,
     )
 
 

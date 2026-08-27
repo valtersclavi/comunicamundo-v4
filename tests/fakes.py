@@ -10,11 +10,13 @@ from uuid import UUID, uuid4
 from comunicamundo_v4.hefesto.contracts import (
     ChunkManifest,
     ChunkManifestEntry,
+    EditorialUnderstanding,
     GraphArtifact,
     GraphArtifactFile,
     GraphExtraction,
     GraphExtractionManifest,
     GraphReadyManifest,
+    PersistedNarrativeAxis,
     PlanningRequest,
     PlanningRun,
     PreparedChunk,
@@ -107,6 +109,9 @@ class MemoryPlanningPersistence:
         self.extraction_manifest_writes = 0
         self.graph_writes = 0
         self.graph_manifest_writes = 0
+        self.understanding_writes = 0
+        self.axis_writes = 0
+        self.stored_axes: dict = {}
 
     def save_run(self, run: PlanningRun) -> PlanningRun:
         updated = run.model_copy(update={"updated_at": datetime.now(UTC)})
@@ -145,6 +150,41 @@ class MemoryPlanningPersistence:
         uri = f"gs://memory/{run.planning_run_id}/request.json"
         self.objects[uri] = request.model_copy()
         return uri
+
+    def load_request(self, uri: str) -> PlanningRequest:
+        request = self.objects[uri]
+        assert isinstance(request, PlanningRequest)
+        return request.model_copy()
+
+    def persist_understanding(self, run: PlanningRun, understanding: EditorialUnderstanding) -> str:
+        self.understanding_writes += 1
+        uri = f"gs://memory/{run.planning_run_id}/understanding.json"
+        self.objects[uri] = understanding.model_copy()
+        return uri
+
+    def load_understanding(self, uri: str) -> EditorialUnderstanding:
+        understanding = self.objects[uri]
+        assert isinstance(understanding, EditorialUnderstanding)
+        return understanding.model_copy()
+
+    def persist_narrative_axis(self, run: PlanningRun, record: PersistedNarrativeAxis) -> str:
+        self.axis_writes += 1
+        uri = f"gs://memory/{run.planning_run_id}/axis.json"
+        self.objects[uri] = record.model_copy()
+        return uri
+
+    def load_narrative_axis(self, uri: str) -> PersistedNarrativeAxis:
+        record = self.objects[uri]
+        assert isinstance(record, PersistedNarrativeAxis)
+        return record.model_copy()
+
+    def save_axis(self, stored):
+        self.stored_axes[stored.narrative_axis.narrative_axis_id] = stored.model_copy()
+        return stored
+
+    def get_axis(self, axis_id):
+        stored = self.stored_axes.get(axis_id)
+        return None if stored is None else stored.model_copy()
 
     def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str:
         if lineage.chunk_manifest_uri is not None:

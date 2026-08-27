@@ -24,6 +24,8 @@ from .contracts import (
     GraphExtractionManifest,
     GraphReadyManifest,
     NarrativeAxis,
+    PersistedNarrativeAxis,
+    EditorialUnderstanding,
     PlanningRequest,
     PlanningRun,
     PreparedChunk,
@@ -411,6 +413,31 @@ class GcpEditorialPersistence:
             relative_path="request.json",
             payload=request.model_dump(mode="json"),
         )
+
+    def load_request(self, uri: str) -> PlanningRequest:
+        return PlanningRequest.model_validate(self.artifacts.load_json_uri(uri))
+
+    def persist_understanding(self, run: PlanningRun, understanding: EditorialUnderstanding) -> str:
+        return self.artifacts.persist_planning_json(
+            project_id=run.project_id,
+            planning_run_id=run.planning_run_id,
+            relative_path="understanding.json",
+            payload=understanding.model_dump(mode="json"),
+        )
+
+    def load_understanding(self, uri: str) -> EditorialUnderstanding:
+        return EditorialUnderstanding.model_validate(self.artifacts.load_json_uri(uri))
+
+    def persist_narrative_axis(self, run: PlanningRun, record: PersistedNarrativeAxis) -> str:
+        return self.artifacts.persist_planning_json(
+            project_id=run.project_id,
+            planning_run_id=run.planning_run_id,
+            relative_path="axis.json",
+            payload=record.model_dump(mode="json"),
+        )
+
+    def load_narrative_axis(self, uri: str) -> PersistedNarrativeAxis:
+        return PersistedNarrativeAxis.model_validate(self.artifacts.load_json_uri(uri))
 
     def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str:
         if lineage.chunk_manifest_uri is not None:

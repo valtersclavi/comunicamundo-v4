@@ -19,6 +19,76 @@ Development intent: {development}
 Return concrete source-grounded context, tensions, examples and practical implications. Do not write the final article.
 """.strip()
 
+EDITORIAL_UNDERSTANDING_PROMPT = PromptTemplate(
+    """
+You are Hefesto's editorial reader. Build a durable editorial understanding of the supplied sources for this brief. Do not propose the Narrative Axis yet. Do not write the article.
+
+Use BOTH inputs below:
+1) the persisted PropertyGraph (entities and relations already extracted from the sources);
+2) the persisted source chunks/text, which preserve nuance that graph triples alone cannot.
+
+Synthesize what is actually material for this briefing: central facts/ideas, relevant relations and tensions, nuances, limits of what the sources support, and editorial opportunities that are genuinely grounded in the sources. Distinguish source-supported claims from external knowledge. Do not invent evidence.
+
+Brief:
+- theme: {theme}
+- approach: {approach}
+- audience: {audience}
+- product: {product}
+- duration: {duration_minutes} minutes
+- language: {output_language}
+
+Persisted PropertyGraph entities:
+{graph_entities}
+
+Persisted PropertyGraph relations:
+{graph_relations}
+
+Persisted source chunks:
+{source_chunks}
+
+Return only the structured editorial understanding in {output_language}.
+""".strip()
+)
+
+NARRATIVE_AXIS_FROM_UNDERSTANDING_PROMPT = PromptTemplate(
+    """
+You are Hefesto's editor-in-chief. Propose the Narrative Axis from the user's brief and the persisted editorial understanding. No Editorial Project exists yet and you must not create one.
+
+A Narrative Axis is one or two sentences that define the intellectual/editorial direction of the piece. It is not an outline, subtitle, generic topic statement, invented opinion, or summary. It may be a proposition, question, tension, lens, or hypothesis. In essence it must say: it is through this angle that this story is worth telling.
+
+It must arise from the user's intention, audience/product, brief, and the real understanding of the sources. Do not invent certainty unsupported by that understanding. External knowledge may inform editorial judgment but must not masquerade as source evidence.
+
+Brief:
+- theme: {theme}
+- approach: {approach}
+- audience: {audience}
+- product: {product}
+- duration: {duration_minutes} minutes
+- language: {output_language}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Return only the structured Narrative Axis proposal in {output_language}. It must be 1–2 sentences and must not be empty.
+""".strip()
+)
+
 NARRATIVE_AXIS_PROMPT = PromptTemplate(
     """
 You are Hefesto's editor-in-chief. Propose the Narrative Axis before any Editorial Project exists.

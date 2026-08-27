@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from comunicamundo_v4.hefesto.contracts import (
     GRAPH_EXTRACTION_CONTRACT_VERSION,
     GRAPH_EXTRACTOR_VERSION,
+    AxisProposalResult,
     GraphEntity,
     GraphExtraction,
     GraphRelation,
@@ -17,7 +18,7 @@ from comunicamundo_v4.hefesto.contracts import (
     SourceLineage,
     SourceLineageState,
 )
-from comunicamundo_v4.hefesto.runtime import GraphExtractionRuntime, GraphIndexingRuntime
+from comunicamundo_v4.hefesto.runtime import AxisProposalRuntime, GraphExtractionRuntime, GraphIndexingRuntime
 from comunicamundo_v4.hefesto.worker import _feedback, _parser, main
 from fakes import MemoryPlanningPersistence
 from llama_index.core.embeddings import MockEmbedding
@@ -36,6 +37,9 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     indexed = parser.parse_args(["index-graph", "--source-lineage-id", axis_id])
     assert indexed.command == "index-graph"
     assert str(indexed.source_lineage_id) == axis_id
+    proposed = parser.parse_args(["propose-axis", "--planning-run-id", axis_id])
+    assert proposed.command == "propose-axis"
+    assert str(proposed.planning_run_id) == axis_id
 
 
 def test_feedback_is_transport_encoded_but_natural_language() -> None:
@@ -274,4 +278,155 @@ def test_index_graph_command_uses_only_embedding_runtime(monkeypatch, tmp_path, 
     assert store.extraction_writes == extract_writes
     assert embed.texts == first_texts
     assert indexing_calls == ["indexing", "indexing"]
+
+
+def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_path, capsys) -> None:
+    store = MemoryPlanningPersistence()
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._planning_persistence", lambda: store)
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._application",
+        lambda: (_ for _ in ()).throw(AssertionError("full Vertex runtime must not be built for propose-axis")),
+    )
+    path = tmp_path / "request.json"
+    _write_request(
+        path,
+        sources=[
+            {"source_id": str(uuid4()), "text": "primeiro.", "language": "pt-BR"},
+            {"source_id": str(uuid4()), "text": "segundo.", "language": "pt-BR"},
+        ],
+    )
+    main(["plan", "--request", str(path)])
+    run = PlanningRun.model_validate_json(capsys.readouterr().out)
+
+    class FakeExtractor:
+        def __init__(self, runtime) -> None:
+            assert runtime.model == "fake-graph-llm"
+
+        def extract(self, unit):
+            return GraphExtraction(
+                contract_version=GRAPH_EXTRACTION_CONTRACT_VERSION,
+                extractor_version=GRAPH_EXTRACTOR_VERSION,
+                model="fake-graph-llm",
+                source_lineage_id=unit.source_lineage_id,
+                source_id=unit.source_id,
+                chunk_id=unit.chunk_id,
+                chunk_sha256=unit.content_sha256,
+                entities=[GraphEntity(name="Criança"), GraphEntity(name="Ausência")],
+                relations=[GraphRelation(source="Criança", relation="PERCEBE", target="Ausência")],
+            )
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_extraction_runtime",
+        lambda: GraphExtractionRuntime(llm=object(), model="fake-graph-llm", context_window=1_048_576, max_tokens=2_048),
+    )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.graph_extraction.LlamaIndexChunkGraphExtractor", FakeExtractor)
+    main(["extract-graph", "--source-lineage-id", str(run.source_lineage_id)])
+    capsys.readouterr()
+    embed = _RecordingEmbed()
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_indexing_runtime",
+        lambda: GraphIndexingRuntime(
+            embed_model=embed,
+            model="fake-embed",
+            package_version="test-embed-1",
+            config={"model_name": "fake-embed", "location": "us-central1", "embed_kg_nodes": True},
+        ),
+    )
+    main(["index-graph", "--source-lineage-id", str(run.source_lineage_id)])
+    lineage = SourceLineage.model_validate_json(capsys.readouterr().out)
+    assert lineage.state is SourceLineageState.GRAPH_READY
+    extract_writes = store.extraction_writes
+    graph_writes = store.graph_writes
+
+    from comunicamundo_v4.hefesto.contracts import EditorialUnderstandingProposal, NarrativeAxisProposal
+    from comunicamundo_v4.hefesto.axis_proposal import UnderstandingMaterial
+
+    class FakeSynthesizer:
+        def __init__(self, runtime) -> None:
+            assert runtime.understanding_model == "fake-understanding"
+            assert runtime.understanding_max_tokens == 4_096
+            assert runtime.axis_max_tokens == 1_200
+            self.calls = 0
+
+        def synthesize(self, material: UnderstandingMaterial):
+            self.calls += 1
+            assert material.entities
+            assert material.chunks
+            return EditorialUnderstandingProposal(
+                central_ideas=["Ideia central persistida."],
+                relations_and_tensions=["Tensão relevante."],
+                synthesis="Compreensão editorial persistida a partir do grafo e dos chunks.",
+            )
+
+    class FakeProposer:
+        def __init__(self, runtime) -> None:
+            assert runtime.axis_model == "fake-axis"
+            self.calls = 0
+
+        def propose(self, *, brief, understanding):
+            self.calls += 1
+            assert understanding.synthesis
+            return NarrativeAxisProposal(
+                statement="A perda infantil se atravessa em relação, e a honestidade adequada à idade transforma proteção em presença."
+            )
+
+    synth_holder: list[FakeSynthesizer] = []
+    prop_holder: list[FakeProposer] = []
+
+    def make_synth(runtime):
+        synth = FakeSynthesizer(runtime)
+        synth_holder.append(synth)
+        return synth
+
+    def make_prop(runtime):
+        prop = FakeProposer(runtime)
+        prop_holder.append(prop)
+        return prop
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_extraction_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("graph extraction runtime must not be built for propose-axis")),
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_indexing_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("graph indexing runtime must not be built for propose-axis")),
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._axis_proposal_runtime",
+        lambda: AxisProposalRuntime(
+            embed_model=_RecordingEmbed(),
+            understanding_llm=object(),
+            understanding_model="fake-understanding",
+            understanding_max_tokens=4_096,
+            axis_llm=object(),
+            axis_model="fake-axis",
+            axis_max_tokens=1_200,
+            context_window=1_048_576,
+        ),
+    )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_proposal.LlamaIndexUnderstandingSynthesizer", make_synth)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_proposal.LlamaIndexAxisProposer", make_prop)
+    main(["propose-axis", "--planning-run-id", str(run.planning_run_id)])
+    result = AxisProposalResult.model_validate_json(capsys.readouterr().out)
+    assert result.planning_run.state is PlanningRunState.AXIS_PROPOSED
+    assert result.human_approval_required is True
+    assert result.editorial_project_created is False
+    assert result.narrative_axis.status.value == "proposed"
+    assert result.proposed_axis
+    assert synth_holder[0].calls == 1
+    assert prop_holder[0].calls == 1
+    assert store.extraction_writes == extract_writes
+    assert store.graph_writes == graph_writes
+    main(["propose-axis", "--planning-run-id", str(run.planning_run_id)])
+    rerun = AxisProposalResult.model_validate_json(capsys.readouterr().out)
+    assert rerun.planning_run.state is PlanningRunState.AXIS_PROPOSED
+    assert rerun.narrative_axis.narrative_axis_id == result.narrative_axis.narrative_axis_id
+    assert synth_holder[0].calls == 1
+    assert prop_holder[0].calls == 1
+    assert synth_holder[1].calls == 0
+    assert prop_holder[1].calls == 0
+    assert store.extraction_writes == extract_writes
+    assert store.graph_writes == graph_writes
+
 
