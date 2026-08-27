@@ -6,7 +6,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -361,6 +361,67 @@ class SourceLineage(StrictModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+EDITORIAL_UNDERSTANDING_CONTRACT_VERSION = "editorial-understanding.v1"
+EDITORIAL_UNDERSTANDING_PROMPT_VERSION = "hefesto.editorial-understanding.v1"
+NARRATIVE_AXIS_CONTRACT_VERSION = "narrative-axis.v1"
+NARRATIVE_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v1"
+
+
+class EditorialUnderstandingProposal(StrictModel):
+    central_ideas: list[str] = Field(min_length=1, max_length=20)
+    relations_and_tensions: list[str] = Field(min_length=1, max_length=20)
+    nuances: list[str] = Field(default_factory=list, max_length=16)
+    source_limits: list[str] = Field(default_factory=list, max_length=16)
+    editorial_opportunities: list[str] = Field(default_factory=list, max_length=16)
+    synthesis: str = Field(min_length=1, max_length=12000)
+
+
+class EditorialUnderstanding(StrictModel):
+    schema_version: int = 1
+    understanding_id: UUID = Field(default_factory=uuid4)
+    planning_run_id: UUID
+    project_id: UUID
+    source_lineage_id: UUID
+    contract_version: str = Field(min_length=1)
+    prompt_version: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    request_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    brief_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    graph_artifact_id: UUID
+    graph_manifest_uri: str = Field(pattern=r"^gs://")
+    graph_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_manifest_uri: str = Field(pattern=r"^gs://")
+    chunk_ids: list[str] = Field(min_length=1)
+    graph_entity_count: int = Field(ge=0)
+    graph_relation_count: int = Field(ge=0)
+    central_ideas: list[str] = Field(min_length=1, max_length=20)
+    relations_and_tensions: list[str] = Field(min_length=1, max_length=20)
+    nuances: list[str] = Field(default_factory=list, max_length=16)
+    source_limits: list[str] = Field(default_factory=list, max_length=16)
+    editorial_opportunities: list[str] = Field(default_factory=list, max_length=16)
+    synthesis: str = Field(min_length=1, max_length=12000)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class PersistedNarrativeAxis(StrictModel):
+    schema_version: int = 1
+    contract_version: str = Field(min_length=1)
+    prompt_version: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    planning_run_id: UUID
+    project_id: UUID
+    source_lineage_id: UUID
+    understanding_id: UUID
+    request_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    brief_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    graph_artifact_id: UUID
+    graph_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    narrative_axis: NarrativeAxis
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class PlanningArtifactRefs(StrictModel):
     request_uri: str | None = Field(default=None, pattern=r"^gs://")
     chunk_manifest_uri: str | None = Field(default=None, pattern=r"^gs://")
@@ -368,6 +429,7 @@ class PlanningArtifactRefs(StrictModel):
     graph_artifact_id: UUID | None = None
     understanding_uri: str | None = Field(default=None, pattern=r"^gs://")
     narrative_axis_id: UUID | None = None
+    narrative_axis_uri: str | None = Field(default=None, pattern=r"^gs://")
 
 
 class PlanningRun(StrictModel):
@@ -383,3 +445,31 @@ class PlanningRun(StrictModel):
     error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class AxisProposalResult(StrictModel):
+    planning_run: PlanningRun
+    editorial_understanding: EditorialUnderstanding
+    narrative_axis: NarrativeAxis
+    proposed_axis: str = Field(min_length=1, max_length=800)
+    human_approval_required: bool = True
+    editorial_project_created: bool = False
+    stopped_at: str = "axis_proposed"
+
+    @model_validator(mode="after")
+    def _stop_for_human_approval(self) -> "AxisProposalResult":
+        if self.planning_run.state is not PlanningRunState.AXIS_PROPOSED:
+            raise ValueError("PlanningRun must stop at axis_proposed")
+        if self.narrative_axis.status is not NarrativeAxisStatus.PROPOSED:
+            raise ValueError("axis_proposed cannot auto-approve the Narrative Axis")
+        if self.narrative_axis.approved_at is not None:
+            raise ValueError("axis_proposed cannot record Axis approval")
+        if self.proposed_axis != self.narrative_axis.statement:
+            raise ValueError("proposed_axis must match the persisted Narrative Axis")
+        if not self.human_approval_required:
+            raise ValueError("axis_proposed requires human approval")
+        if self.editorial_project_created:
+            raise ValueError("axis_proposed cannot create an Editorial Project")
+        if self.stopped_at != "axis_proposed":
+            raise ValueError("entrega 3 must stop at axis_proposed")
+        return self

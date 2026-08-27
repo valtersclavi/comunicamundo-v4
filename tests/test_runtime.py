@@ -97,3 +97,37 @@ def test_graph_indexing_runtime_builds_only_embedding_client(monkeypatch) -> Non
     assert built.config["embed_kg_nodes"] is True
     assert built.package_version
     assert built.embed_model is not None
+
+
+def test_axis_proposal_runtime_builds_only_understanding_and_axis_llms_with_explicit_budgets(monkeypatch) -> None:
+    llm_calls: list[dict] = []
+    embed_calls: list[dict] = []
+
+    class FakeGoogleGenAI:
+        def __init__(self, **kwargs):
+            llm_calls.append(kwargs)
+
+    class FakeEmbedding:
+        def __init__(self, **kwargs):
+            embed_calls.append(kwargs)
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(runtime, "GoogleGenAI", FakeGoogleGenAI)
+    monkeypatch.setattr(runtime, "GoogleGenAIEmbedding", FakeEmbedding)
+
+    settings = runtime.VertexRuntimeSettings(project="test-project")
+    built = runtime.build_axis_proposal_runtime(settings)
+
+    assert len(embed_calls) == 1
+    assert embed_calls[0]["model_name"] == settings.embedding_model
+    assert len(llm_calls) == 2
+    assert [(call["model"], call["max_tokens"]) for call in llm_calls] == [
+        (settings.understanding_model, settings.understanding_max_tokens),
+        (settings.axis_model, settings.axis_max_tokens),
+    ]
+    assert all(call["context_window"] == runtime.GEMINI_2_5_CONTEXT_WINDOW for call in llm_calls)
+    assert built.understanding_max_tokens == settings.understanding_max_tokens
+    assert built.axis_max_tokens == settings.axis_max_tokens
+    assert built.context_window == settings.context_window
+    assert {call["max_tokens"] for call in llm_calls} == {settings.understanding_max_tokens, settings.axis_max_tokens}
+    assert settings.understanding_max_tokens != settings.axis_max_tokens
