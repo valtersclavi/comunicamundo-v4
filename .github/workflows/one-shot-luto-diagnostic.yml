@@ -1,0 +1,124 @@
+name: one-shot-luto-diagnostic
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: hefesto-v4-luto-diagnostic
+  cancel-in-progress: false
+env:
+  PROJECT_ID: comunicamundo-v4
+  REGION: us-central1
+  JOB_NAME: hefesto-v4-rebuild
+  DIAG_SERVICE: hefesto-v4-luto-diagnostic
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+jobs:
+  diagnose:
+    if: ${{ contains(github.event.head_commit.message, '[luto-diagnostic]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Prepare diagnostic service
+        run: |
+          set -euo pipefail
+          image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          token="$(openssl rand -hex 32)"
+          cat > /tmp/diag.py <<'PY'
+          import hmac, json, os
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from comunicamundo_v4.hefesto.worker import run_plan_command, _planning_persistence
+
+          REQUEST_URI=os.environ['PROOF_REQUEST_URI']
+          TOKEN=os.environ['PROOF_TOKEN']
+
+          def inspect_state():
+              run=run_plan_command(REQUEST_URI)
+              p=_planning_persistence()
+              lineage=p.repository.get_source_lineage(run.source_lineage_id)
+              out={
+                  'planning_run_id': str(run.planning_run_id),
+                  'planning_state': run.state.value,
+                  'planning_error': run.error,
+                  'planning_artifacts': run.artifacts.model_dump(mode='json'),
+                  'source_lineage_id': str(run.source_lineage_id),
+                  'lineage_state': lineage.state.value if lineage else None,
+                  'chunk_count': lineage.chunk_count if lineage else None,
+                  'extracted_count': lineage.extracted_count if lineage else None,
+                  'failed_count': lineage.failed_count if lineage else None,
+                  'graph_extractions_manifest_uri': lineage.graph_extractions_manifest_uri if lineage else None,
+                  'graph_manifest_uri': lineage.graph_manifest_uri if lineage else None,
+                  'graph_artifact_id': str(lineage.graph_artifact_id) if lineage and lineage.graph_artifact_id else None,
+              }
+              if lineage and lineage.graph_extractions_manifest_uri:
+                  m=p.load_graph_extraction_manifest(lineage.graph_extractions_manifest_uri)
+                  out['extraction_manifest']={
+                      'chunk_count': m.chunk_count,
+                      'extracted_count': m.extracted_count,
+                      'failed_count': m.failed_count,
+                      'model': m.model,
+                      'entries': [
+                          {
+                              'chunk_id': e.chunk_id,
+                              'status': e.status.value,
+                              'error': e.error,
+                              'extraction_uri': e.extraction_uri,
+                          }
+                          for e in m.entries
+                      ],
+                  }
+              if run.artifacts.understanding_uri:
+                  u=p.artifacts.load_json_uri(run.artifacts.understanding_uri)
+                  out['understanding_present']=True
+                  out['understanding_uri']=run.artifacts.understanding_uri
+                  out['understanding_synthesis_chars']=len(u.get('synthesis',''))
+              else:
+                  out['understanding_present']=False
+              return out
+
+          class H(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  if not hmac.compare_digest(self.headers.get('X-Proof-Token',''), TOKEN):
+                      self.send_response(403); self.end_headers(); return
+                  try:
+                      body=json.dumps(inspect_state(), ensure_ascii=False).encode()
+                      self.send_response(200); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+                  except Exception as exc:
+                      body=json.dumps({'error':type(exc).__name__,'message':str(exc)}, ensure_ascii=False).encode()
+                      self.send_response(500); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+              def log_message(self,*args): pass
+          ThreadingHTTPServer(('0.0.0.0', int(os.environ.get('PORT','8080'))), H).serve_forever()
+          PY
+          script="$(base64 -w0 /tmp/diag.py)"
+          gcloud run services delete "${DIAG_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet >/dev/null 2>&1 || true
+          gcloud run deploy "${DIAG_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --image="${image}" --service-account="${RUNTIME_SA}" --command=python --args=-c,"import base64,os;exec(base64.b64decode(os.environ['PROOF_SCRIPT_B64']))" --cpu=1 --memory=1Gi --max-instances=1 --min-instances=0 --concurrency=1 --timeout=300 --allow-unauthenticated --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},PROOF_REQUEST_URI=${REQUEST_URI},PROOF_TOKEN=${token},PROOF_SCRIPT_B64=${script}" --quiet
+          url="$(gcloud run services describe "${DIAG_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          echo "DIAG_URL=${url}" >> "${GITHUB_ENV}"
+          echo "DIAG_TOKEN=${token}" >> "${GITHUB_ENV}"
+      - name: Read durable state
+        run: |
+          set -euo pipefail
+          curl -fsS -H "X-Proof-Token: ${DIAG_TOKEN}" "${DIAG_URL}/" | tee /tmp/diag.json
+          jq . /tmp/diag.json
+      - name: Result
+        if: always()
+        run: |
+          if [ -f /tmp/diag.json ]; then
+            echo '```json' >> "${GITHUB_STEP_SUMMARY}"
+            cat /tmp/diag.json >> "${GITHUB_STEP_SUMMARY}"
+            echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          fi
+      - name: Cleanup
+        if: always()
+        run: gcloud run services delete "${DIAG_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
