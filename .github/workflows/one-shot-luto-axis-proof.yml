@@ -1,0 +1,183 @@
+name: one-shot-luto-axis-proof
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: hefesto-v4-luto-axis-proof
+  cancel-in-progress: false
+env:
+  PROJECT_ID: comunicamundo-v4
+  REGION: us-central1
+  JOB_NAME: hefesto-v4-rebuild
+  PROOF_JOB: hefesto-v4-luto-axis-proof
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+jobs:
+  prove-luto-axis:
+    if: ${{ contains(github.event.head_commit.message, '[luto-axis-proof]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Verify canonical request is readable before model calls
+        run: |
+          set -euo pipefail
+          gcloud storage cat "${REQUEST_URI}" >/dev/null
+      - name: Prepare exact canonical proof job
+        run: |
+          set -euo pipefail
+          pinned_image="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test -n "${pinned_image}"
+          deployed_sa="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.serviceAccountName)')"
+          test "${deployed_sa}" = "${RUNTIME_SA}"
+          result_object="proofs/luto-axis/${GITHUB_SHA}.json"
+          cat > /tmp/proof.py <<'PY'
+          import json
+          import os
+          from google.cloud import storage
+          from comunicamundo_v4.hefesto.contracts import NarrativeAxisStatus, PlanningRunState, SourceLineageState
+          from comunicamundo_v4.hefesto.worker import (
+              load_planning_request,
+              run_extract_graph_command,
+              run_index_graph_command,
+              run_plan_command,
+              run_propose_axis_command,
+          )
+
+          request_uri = os.environ["PROOF_REQUEST_URI"]
+          project = os.environ["GOOGLE_CLOUD_PROJECT"]
+          bucket_name = os.environ["HEFESTO_GCS_BUCKET"]
+          result_object = os.environ["PROOF_RESULT_OBJECT"]
+
+          request = load_planning_request(request_uri, project=project)
+          assert str(request.project_id) == "13101c35-723d-43fe-9b45-0082b49c0a76"
+
+          run = run_plan_command(request_uri)
+          lineage = run_extract_graph_command(run.source_lineage_id)
+          assert lineage.state is SourceLineageState.GRAPH_EXTRACTIONS_READY, lineage
+          assert lineage.failed_count == 0, lineage
+
+          lineage = run_index_graph_command(run.source_lineage_id)
+          assert lineage.state is SourceLineageState.GRAPH_READY, lineage
+          assert lineage.graph_manifest_uri, lineage
+          assert lineage.graph_artifact_id, lineage
+
+          result = run_propose_axis_command(run.planning_run_id)
+          assert result.planning_run.state is PlanningRunState.AXIS_PROPOSED, result
+          assert result.narrative_axis.status is NarrativeAxisStatus.PROPOSED, result
+          assert result.human_approval_required is True, result
+          assert result.editorial_project_created is False, result
+          assert result.stopped_at == "axis_proposed", result
+
+          proof = {
+              "LUTO_AXIS_PROOF": "SUCCESS",
+              "request_uri": request_uri,
+              "project_id": str(request.project_id),
+              "brief": request.brief.model_dump(mode="json"),
+              "sources": [
+                  {
+                      "source_id": str(source.source_id),
+                      "title": source.title,
+                      "language": source.language,
+                      "characters": len(source.text),
+                  }
+                  for source in request.sources
+              ],
+              "planning_run_id": str(run.planning_run_id),
+              "source_lineage_id": str(run.source_lineage_id),
+              "chunk_count": lineage.chunk_count,
+              "graph_state": lineage.state.value,
+              "understanding_id": str(result.editorial_understanding.understanding_id),
+              "narrative_axis_id": str(result.narrative_axis.narrative_axis_id),
+              "axis_status": result.narrative_axis.status.value,
+              "proposed_axis": result.proposed_axis,
+              "human_approval_required": result.human_approval_required,
+              "editorial_project_created": result.editorial_project_created,
+              "stopped_at": result.stopped_at,
+          }
+          payload = json.dumps(proof, ensure_ascii=False, indent=2).encode("utf-8")
+          storage.Client(project=project).bucket(bucket_name).blob(result_object).upload_from_string(
+              payload, content_type="application/json; charset=utf-8"
+          )
+          print(json.dumps({"LUTO_AXIS_PROOF": "SUCCESS", "result_object": result_object}, ensure_ascii=False))
+          PY
+          proof_b64="$(base64 -w0 /tmp/proof.py)"
+          gcloud run jobs delete "${PROOF_JOB}" --project="${PROJECT_ID}" --region="${REGION}" --quiet >/dev/null 2>&1 || true
+          gcloud run jobs create "${PROOF_JOB}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --image="${pinned_image}" \
+            --service-account="${RUNTIME_SA}" \
+            --command=python \
+            --args=-c,"import base64;import os;exec(base64.b64decode(os.environ['PROOF_SCRIPT_B64']))" \
+            --cpu=4 \
+            --memory=8Gi \
+            --task-timeout=2400s \
+            --max-retries=0 \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},PROOF_REQUEST_URI=${REQUEST_URI},PROOF_RESULT_OBJECT=${result_object},PROOF_SCRIPT_B64=${proof_b64}" \
+            --quiet
+          echo "PINNED_IMAGE=${pinned_image}" >> "${GITHUB_ENV}"
+          echo "RESULT_OBJECT=${result_object}" >> "${GITHUB_ENV}"
+      - name: Execute canonical luto pipeline to axis_proposed
+        run: |
+          set -euo pipefail
+          execution="$(gcloud run jobs execute "${PROOF_JOB}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --wait \
+            --format='value(metadata.name)')"
+          test -n "${execution}"
+          echo "PROOF_EXECUTION=${execution}" >> "${GITHUB_ENV}"
+      - name: Verify execution and read the proposed Axis
+        run: |
+          set -euo pipefail
+          completed="$(gcloud run jobs executions describe "${PROOF_EXECUTION}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(status.succeededCount)')"
+          failed="$(gcloud run jobs executions describe "${PROOF_EXECUTION}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(status.failedCount)')"
+          test "${completed}" = "1"
+          test -z "${failed}" || test "${failed}" = "0"
+          gcloud storage cat "gs://${BUCKET}/${RESULT_OBJECT}" | tee /tmp/luto-axis-result.json
+          test "$(jq -r '.LUTO_AXIS_PROOF' /tmp/luto-axis-result.json)" = "SUCCESS"
+          test "$(jq -r '.stopped_at' /tmp/luto-axis-result.json)" = "axis_proposed"
+          test "$(jq -r '.axis_status' /tmp/luto-axis-result.json)" = "proposed"
+          test "$(jq -r '.editorial_project_created' /tmp/luto-axis-result.json)" = "false"
+          axis="$(jq -r '.proposed_axis' /tmp/luto-axis-result.json)"
+          test -n "${axis}"
+          echo "PROPOSED_AXIS=${axis}" >> "${GITHUB_ENV}"
+      - name: Result
+        if: always()
+        run: |
+          {
+            echo '# Canonical luto infantil → Narrative Axis proof'
+            echo "- Request: \`${REQUEST_URI}\`"
+            echo "- Canonical image: \`${PINNED_IMAGE:-NOT_RESOLVED}\`"
+            echo "- Execution: \`${PROOF_EXECUTION:-NOT_RUN}\`"
+            echo "- Result object: \`gs://${BUCKET}/${RESULT_OBJECT:-NOT_WRITTEN}\`"
+            echo "- Stopped at: \`axis_proposed\`"
+            echo "- Editorial Project created: no"
+            if [ -n "${PROPOSED_AXIS:-}" ]; then
+              echo ''
+              echo '## Eixo Narrativo proposto'
+              echo "${PROPOSED_AXIS}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Cleanup temporary proof job
+        if: always()
+        run: |
+          gcloud run jobs delete "${PROOF_JOB}" --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
