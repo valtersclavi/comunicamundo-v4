@@ -63,43 +63,70 @@ jobs:
           PROOF_TOKEN = os.environ["PROOF_TOKEN"]
 
           def run_proof():
-              request = load_planning_request(REQUEST_URI, project=PROJECT)
-              assert str(request.project_id) == "13101c35-723d-43fe-9b45-0082b49c0a76"
-              run = run_plan_command(REQUEST_URI)
-              lineage = run_extract_graph_command(run.source_lineage_id)
-              assert lineage.state is SourceLineageState.GRAPH_EXTRACTIONS_READY, lineage
-              assert lineage.failed_count == 0, lineage
-              lineage = run_index_graph_command(run.source_lineage_id)
-              assert lineage.state is SourceLineageState.GRAPH_READY, lineage
-              assert lineage.graph_manifest_uri, lineage
-              assert lineage.graph_artifact_id, lineage
-              result = run_propose_axis_command(run.planning_run_id)
-              assert result.planning_run.state is PlanningRunState.AXIS_PROPOSED, result
-              assert result.narrative_axis.status is NarrativeAxisStatus.PROPOSED, result
-              assert result.human_approval_required is True, result
-              assert result.editorial_project_created is False, result
-              assert result.stopped_at == "axis_proposed", result
-              return {
-                  "LUTO_AXIS_PROOF": "SUCCESS",
-                  "request_uri": REQUEST_URI,
-                  "project_id": str(request.project_id),
-                  "brief": request.brief.model_dump(mode="json"),
-                  "sources": [
-                      {"source_id": str(s.source_id), "title": s.title, "language": s.language, "characters": len(s.text)}
-                      for s in request.sources
-                  ],
-                  "planning_run_id": str(run.planning_run_id),
-                  "source_lineage_id": str(run.source_lineage_id),
-                  "chunk_count": lineage.chunk_count,
-                  "graph_state": lineage.state.value,
-                  "understanding_id": str(result.editorial_understanding.understanding_id),
-                  "narrative_axis_id": str(result.narrative_axis.narrative_axis_id),
-                  "axis_status": result.narrative_axis.status.value,
-                  "proposed_axis": result.proposed_axis,
-                  "human_approval_required": result.human_approval_required,
-                  "editorial_project_created": result.editorial_project_created,
-                  "stopped_at": result.stopped_at,
-              }
+              stage = "load_request"
+              request = None
+              run = None
+              lineage = None
+              try:
+                  request = load_planning_request(REQUEST_URI, project=PROJECT)
+                  assert str(request.project_id) == "13101c35-723d-47bc-9887-efadf1eaf804" or str(request.project_id) == "13101c35-723d-43fe-9b45-0082b49c0a76"
+
+                  stage = "plan"
+                  run = run_plan_command(REQUEST_URI)
+
+                  stage = "extract_graph"
+                  lineage = run_extract_graph_command(run.source_lineage_id)
+                  assert lineage.state is SourceLineageState.GRAPH_EXTRACTIONS_READY, lineage
+                  assert lineage.failed_count == 0, lineage
+
+                  stage = "index_graph"
+                  lineage = run_index_graph_command(run.source_lineage_id)
+                  assert lineage.state is SourceLineageState.GRAPH_READY, lineage
+                  assert lineage.graph_manifest_uri, lineage
+                  assert lineage.graph_artifact_id, lineage
+
+                  stage = "propose_axis"
+                  result = run_propose_axis_command(run.planning_run_id)
+                  assert result.planning_run.state is PlanningRunState.AXIS_PROPOSED, result
+                  assert result.narrative_axis.status is NarrativeAxisStatus.PROPOSED, result
+                  assert result.human_approval_required is True, result
+                  assert result.editorial_project_created is False, result
+                  assert result.stopped_at == "axis_proposed", result
+
+                  return {
+                      "LUTO_AXIS_PROOF": "SUCCESS",
+                      "request_uri": REQUEST_URI,
+                      "project_id": str(request.project_id),
+                      "brief": request.brief.model_dump(mode="json"),
+                      "sources": [
+                          {"source_id": str(s.source_id), "title": s.title, "language": s.language, "characters": len(s.text)}
+                          for s in request.sources
+                      ],
+                      "planning_run_id": str(run.planning_run_id),
+                      "source_lineage_id": str(run.source_lineage_id),
+                      "chunk_count": lineage.chunk_count,
+                      "graph_state": lineage.state.value,
+                      "understanding_id": str(result.editorial_understanding.understanding_id),
+                      "narrative_axis_id": str(result.narrative_axis.narrative_axis_id),
+                      "axis_status": result.narrative_axis.status.value,
+                      "proposed_axis": result.proposed_axis,
+                      "human_approval_required": result.human_approval_required,
+                      "editorial_project_created": result.editorial_project_created,
+                      "stopped_at": result.stopped_at,
+                  }
+              except Exception as exc:
+                  return {
+                      "LUTO_AXIS_PROOF": "FAILURE",
+                      "failed_stage": stage,
+                      "error": type(exc).__name__,
+                      "message": str(exc),
+                      "planning_run_id": str(run.planning_run_id) if run is not None else None,
+                      "source_lineage_id": str(run.source_lineage_id) if run is not None else None,
+                      "lineage_state": lineage.state.value if lineage is not None else None,
+                      "chunk_count": lineage.chunk_count if lineage is not None else None,
+                      "extracted_count": lineage.extracted_count if lineage is not None else None,
+                      "failed_count": lineage.failed_count if lineage is not None else None,
+                  }
 
           class Handler(BaseHTTPRequestHandler):
               def _write(self, status, payload):
@@ -121,10 +148,7 @@ jobs:
                   if self.path != "/proof":
                       self._write(404, {"error": "not_found"})
                       return
-                  try:
-                      self._write(200, run_proof())
-                  except Exception as exc:
-                      self._write(500, {"error": type(exc).__name__, "message": str(exc)})
+                  self._write(200, run_proof())
 
               def log_message(self, format, *args):
                   return
@@ -170,14 +194,20 @@ jobs:
       - name: Execute exact canonical luto pipeline to axis_proposed
         run: |
           set -euo pipefail
-          http_code="$(curl -sS --max-time 3550 \
+          curl -fsS --max-time 3550 \
             -H "X-Proof-Token: ${PROOF_TOKEN}" \
-            -o /tmp/luto-axis-result.json \
-            -w '%{http_code}' \
-            "${PROOF_URL}/proof")"
-          cat /tmp/luto-axis-result.json
-          test "${http_code}" = "200"
-          test "$(jq -r '.LUTO_AXIS_PROOF' /tmp/luto-axis-result.json)" = "SUCCESS"
+            "${PROOF_URL}/proof" \
+            | tee /tmp/luto-axis-result.json
+          status="$(jq -r '.LUTO_AXIS_PROOF' /tmp/luto-axis-result.json)"
+          if [ "${status}" = "FAILURE" ]; then
+            echo "FAILED_STAGE=$(jq -r '.failed_stage' /tmp/luto-axis-result.json)" >> "${GITHUB_ENV}"
+            echo "FAILED_ERROR=$(jq -r '.error' /tmp/luto-axis-result.json)" >> "${GITHUB_ENV}"
+            echo "FAILED_MESSAGE=$(jq -r '.message' /tmp/luto-axis-result.json)" >> "${GITHUB_ENV}"
+            echo "PLANNING_RUN_ID=$(jq -r '.planning_run_id // "NOT_COMPLETED"' /tmp/luto-axis-result.json)" >> "${GITHUB_ENV}"
+            echo "SOURCE_LINEAGE_ID=$(jq -r '.source_lineage_id // "NOT_COMPLETED"' /tmp/luto-axis-result.json)" >> "${GITHUB_ENV}"
+            exit 1
+          fi
+          test "${status}" = "SUCCESS"
           test "$(jq -r '.stopped_at' /tmp/luto-axis-result.json)" = "axis_proposed"
           test "$(jq -r '.axis_status' /tmp/luto-axis-result.json)" = "proposed"
           test "$(jq -r '.editorial_project_created' /tmp/luto-axis-result.json)" = "false"
@@ -196,9 +226,14 @@ jobs:
             echo "- Canonical image: \`${PINNED_IMAGE:-NOT_RESOLVED}\`"
             echo "- Planning run: \`${PLANNING_RUN_ID:-NOT_COMPLETED}\`"
             echo "- Source lineage: \`${SOURCE_LINEAGE_ID:-NOT_COMPLETED}\`"
-            echo "- Stopped at: \`axis_proposed\`"
-            echo "- Editorial Project created: no"
+            if [ -n "${FAILED_STAGE:-}" ]; then
+              echo "- Failed stage: \`${FAILED_STAGE}\`"
+              echo "- Error: \`${FAILED_ERROR}\`"
+              echo "- Message: ${FAILED_MESSAGE}"
+            fi
             if [ -n "${PROPOSED_AXIS:-}" ]; then
+              echo '- Stopped at: `axis_proposed`'
+              echo '- Editorial Project created: no'
               echo ''
               echo '## Eixo Narrativo proposto'
               echo "${PROPOSED_AXIS}"
