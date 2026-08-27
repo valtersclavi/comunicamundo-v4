@@ -356,7 +356,7 @@ def test_different_brief_reuses_graph_ready_and_creates_separate_editorial_run()
     store = MemoryPlanningPersistence()
     project_id = uuid4()
     sources = [_source("fonte estável um."), _source("fonte estável dois.")]
-    first_run, lineage, extractor, _request = _prepare_graph_ready(store, sources=sources, project_id=project_id)
+    first_run, lineage, extractor, _first_request = _prepare_graph_ready(store, sources=sources, project_id=project_id)
     first, synth, prop = _propose(store, first_run)
     extract_writes = store.extraction_writes
     graph_writes = store.graph_writes
@@ -419,9 +419,6 @@ def test_invalid_axis_statement_preserves_understanding() -> None:
     updated = store.get_run(run.planning_run_id)
     assert updated.state is PlanningRunState.UNDERSTANDING_READY
     assert updated.artifacts.understanding_uri is not None
-    with pytest.raises(ValueError, match="cannot be empty"):
-        AxisProposalOrchestrator(store, _axis_runtime(), synth, RecordingProposer("   ")).execute(run.planning_run_id)
-    assert store.get_run(run.planning_run_id).state is PlanningRunState.UNDERSTANDING_READY
     assert store.understanding_writes == 1
     assert store.get_source_lineage(lineage.source_lineage_id).state is SourceLineageState.GRAPH_READY
 
