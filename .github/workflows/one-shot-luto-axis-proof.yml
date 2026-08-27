@@ -15,6 +15,7 @@ env:
   PROOF_JOB: hefesto-v4-luto-axis-proof
   BUCKET: comunicamundo-v4-hefesto-30524898837
   REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
+  PROOF_COLLECTION: hefesto_v4_rebuild_proofs
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
@@ -30,10 +31,14 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Verify canonical request is readable before model calls
+      - name: Verify Firestore proof-result bridge before model calls
         run: |
           set -euo pipefail
-          gcloud storage cat "${REQUEST_URI}" >/dev/null
+          token="$(gcloud auth print-access-token)"
+          curl -fsS \
+            -H "Authorization: Bearer ${token}" \
+            "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${PROOF_COLLECTION}?pageSize=1" \
+            >/dev/null
       - name: Prepare exact canonical proof job
         run: |
           set -euo pipefail
@@ -46,10 +51,11 @@ jobs:
             --format='value(spec.template.spec.template.spec.serviceAccountName)')"
           test "${deployed_sa}" = "${RUNTIME_SA}"
           result_object="proofs/luto-axis/${GITHUB_SHA}.json"
+          result_doc="${GITHUB_SHA}"
           cat > /tmp/proof.py <<'PY'
           import json
           import os
-          from google.cloud import storage
+          from google.cloud import firestore, storage
           from comunicamundo_v4.hefesto.contracts import NarrativeAxisStatus, PlanningRunState, SourceLineageState
           from comunicamundo_v4.hefesto.worker import (
               load_planning_request,
@@ -63,7 +69,11 @@ jobs:
           project = os.environ["GOOGLE_CLOUD_PROJECT"]
           bucket_name = os.environ["HEFESTO_GCS_BUCKET"]
           result_object = os.environ["PROOF_RESULT_OBJECT"]
+          result_doc = os.environ["PROOF_RESULT_DOC"]
+          proof_collection = os.environ["PROOF_COLLECTION"]
 
+          # The runtime identity reads the exact historical request directly from GCS.
+          # If that object is absent or incompatible, execution stops here before any model work.
           request = load_planning_request(request_uri, project=project)
           assert str(request.project_id) == "13101c35-723d-43fe-9b45-0082b49c0a76"
 
@@ -110,11 +120,14 @@ jobs:
               "editorial_project_created": result.editorial_project_created,
               "stopped_at": result.stopped_at,
           }
-          payload = json.dumps(proof, ensure_ascii=False, indent=2).encode("utf-8")
+          payload_text = json.dumps(proof, ensure_ascii=False, indent=2)
           storage.Client(project=project).bucket(bucket_name).blob(result_object).upload_from_string(
-              payload, content_type="application/json; charset=utf-8"
+              payload_text.encode("utf-8"), content_type="application/json; charset=utf-8"
           )
-          print(json.dumps({"LUTO_AXIS_PROOF": "SUCCESS", "result_object": result_object}, ensure_ascii=False))
+          firestore.Client(project=project).collection(proof_collection).document(result_doc).set(
+              {"payload_json": payload_text, "request_uri": request_uri, "status": "SUCCESS", "created_at": firestore.SERVER_TIMESTAMP}
+          )
+          print(json.dumps({"LUTO_AXIS_PROOF": "SUCCESS", "result_doc": result_doc}, ensure_ascii=False))
           PY
           proof_b64="$(base64 -w0 /tmp/proof.py)"
           gcloud run jobs delete "${PROOF_JOB}" --project="${PROJECT_ID}" --region="${REGION}" --quiet >/dev/null 2>&1 || true
@@ -129,10 +142,11 @@ jobs:
             --memory=8Gi \
             --task-timeout=2400s \
             --max-retries=0 \
-            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},PROOF_REQUEST_URI=${REQUEST_URI},PROOF_RESULT_OBJECT=${result_object},PROOF_SCRIPT_B64=${proof_b64}" \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},PROOF_REQUEST_URI=${REQUEST_URI},PROOF_RESULT_OBJECT=${result_object},PROOF_RESULT_DOC=${result_doc},PROOF_COLLECTION=${PROOF_COLLECTION},PROOF_SCRIPT_B64=${proof_b64}" \
             --quiet
           echo "PINNED_IMAGE=${pinned_image}" >> "${GITHUB_ENV}"
           echo "RESULT_OBJECT=${result_object}" >> "${GITHUB_ENV}"
+          echo "RESULT_DOC=${result_doc}" >> "${GITHUB_ENV}"
       - name: Execute canonical luto pipeline to axis_proposed
         run: |
           set -euo pipefail
@@ -152,7 +166,12 @@ jobs:
             --format='value(status.failedCount)')"
           test "${completed}" = "1"
           test -z "${failed}" || test "${failed}" = "0"
-          gcloud storage cat "gs://${BUCKET}/${RESULT_OBJECT}" | tee /tmp/luto-axis-result.json
+          token="$(gcloud auth print-access-token)"
+          curl -fsS \
+            -H "Authorization: Bearer ${token}" \
+            "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${PROOF_COLLECTION}/${RESULT_DOC}" \
+            | jq -r '.fields.payload_json.stringValue' \
+            | tee /tmp/luto-axis-result.json
           test "$(jq -r '.LUTO_AXIS_PROOF' /tmp/luto-axis-result.json)" = "SUCCESS"
           test "$(jq -r '.stopped_at' /tmp/luto-axis-result.json)" = "axis_proposed"
           test "$(jq -r '.axis_status' /tmp/luto-axis-result.json)" = "proposed"
@@ -168,7 +187,7 @@ jobs:
             echo "- Request: \`${REQUEST_URI}\`"
             echo "- Canonical image: \`${PINNED_IMAGE:-NOT_RESOLVED}\`"
             echo "- Execution: \`${PROOF_EXECUTION:-NOT_RUN}\`"
-            echo "- Result object: \`gs://${BUCKET}/${RESULT_OBJECT:-NOT_WRITTEN}\`"
+            echo "- Durable result: \`gs://${BUCKET}/${RESULT_OBJECT:-NOT_WRITTEN}\`"
             echo "- Stopped at: \`axis_proposed\`"
             echo "- Editorial Project created: no"
             if [ -n "${PROPOSED_AXIS:-}" ]; then
