@@ -18,8 +18,11 @@ from .contracts import (
     EditorialBrief,
     EditorialProject,
     FinalArticle,
+    GraphArtifact,
+    GraphArtifactFile,
     GraphExtraction,
     GraphExtractionManifest,
+    GraphReadyManifest,
     NarrativeAxis,
     PlanningRequest,
     PlanningRun,
@@ -31,22 +34,6 @@ from .contracts import (
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-class GraphArtifactFile(StrictModel):
-    path: str = Field(min_length=1)
-    size_bytes: int = Field(ge=0)
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class GraphArtifact(StrictModel):
-    project_id: UUID
-    artifact_id: UUID
-    bucket: str
-    prefix: str
-    manifest_uri: str = Field(pattern=r"^gs://")
-    files: list[GraphArtifactFile] = Field(min_length=1)
-    created_at: datetime
 
 
 class StoredNarrativeAxis(StrictModel):
@@ -112,11 +99,19 @@ class GcsArtifactStore:
             raise ValueError("root_prefix cannot be empty")
 
     def upload_graph(self, project_id: UUID, directory: Path) -> GraphArtifact:
+        artifact_id = self._id_factory()
+        prefix = f"{self._root}/projects/{project_id}/graphs/{artifact_id}"
+        return self._upload_graph_directory(project_id, directory, prefix=prefix, artifact_id=artifact_id)
+
+    def upload_source_lineage_graph(self, lineage: SourceLineage, directory: Path) -> GraphArtifact:
+        artifact_id = self._id_factory()
+        prefix = f"{self._root}/projects/{lineage.project_id}/sources/{lineage.source_lineage_id}/graph/{artifact_id}"
+        return self._upload_graph_directory(lineage.project_id, directory, prefix=prefix, artifact_id=artifact_id)
+
+    def _upload_graph_directory(self, project_id: UUID, directory: Path, *, prefix: str, artifact_id: UUID) -> GraphArtifact:
         files_on_disk = sorted(p for p in directory.rglob("*") if p.is_file())
         if not files_on_disk:
             raise ValueError("graph persistence produced no files")
-        artifact_id = self._id_factory()
-        prefix = f"{self._root}/projects/{project_id}/graphs/{artifact_id}"
         records: list[GraphArtifactFile] = []
         for local in files_on_disk:
             relative = local.relative_to(directory).as_posix()
@@ -484,3 +479,20 @@ class GcpEditorialPersistence:
 
     def load_graph_extraction(self, uri: str) -> GraphExtraction:
         return GraphExtraction.model_validate(self.artifacts.load_json_uri(uri))
+
+    def persist_source_lineage_graph(self, lineage: SourceLineage, directory: Path) -> GraphArtifact:
+        return self.artifacts.upload_source_lineage_graph(lineage, directory)
+
+    def restore_source_lineage_graph(self, artifact: GraphArtifact, destination: Path) -> None:
+        self.artifacts.restore_graph(artifact, destination)
+
+    def persist_graph_ready_manifest(self, lineage: SourceLineage, manifest: GraphReadyManifest) -> str:
+        return self.artifacts.persist_source_lineage_json(
+            project_id=lineage.project_id,
+            source_lineage_id=lineage.source_lineage_id,
+            relative_path="graph/manifest.json",
+            payload=manifest.model_dump(mode="json"),
+        )
+
+    def load_graph_ready_manifest(self, uri: str) -> GraphReadyManifest:
+        return GraphReadyManifest.model_validate(self.artifacts.load_json_uri(uri))

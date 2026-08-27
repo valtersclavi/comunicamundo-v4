@@ -67,3 +67,33 @@ def test_graph_extraction_runtime_builds_only_graph_llm_with_explicit_budgets(mo
     assert built.max_tokens == settings.graph_max_tokens
     assert built.context_window == settings.context_window
     assert built.llm is not None
+
+
+def test_graph_indexing_runtime_builds_only_embedding_client(monkeypatch) -> None:
+    llm_calls: list[dict] = []
+    embed_calls: list[dict] = []
+
+    class FakeGoogleGenAI:
+        def __init__(self, **kwargs):
+            llm_calls.append(kwargs)
+
+    class FakeEmbedding:
+        def __init__(self, **kwargs):
+            embed_calls.append(kwargs)
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(runtime, "GoogleGenAI", FakeGoogleGenAI)
+    monkeypatch.setattr(runtime, "GoogleGenAIEmbedding", FakeEmbedding)
+
+    settings = runtime.VertexRuntimeSettings(project="test-project")
+    built = runtime.build_graph_indexing_runtime(settings)
+
+    assert llm_calls == []
+    assert len(embed_calls) == 1
+    assert embed_calls[0]["model_name"] == settings.embedding_model
+    assert embed_calls[0]["vertexai_config"] == {"project": settings.project, "location": settings.location}
+    assert built.model == settings.embedding_model
+    assert built.config["model_name"] == settings.embedding_model
+    assert built.config["embed_kg_nodes"] is True
+    assert built.package_version
+    assert built.embed_model is not None

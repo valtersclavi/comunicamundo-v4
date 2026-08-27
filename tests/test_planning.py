@@ -89,6 +89,8 @@ def test_canonical_planning_states_are_stable() -> None:
         "chunks_ready",
         "graph_extractions_in_progress",
         "graph_extractions_ready",
+        "graph_indexing_in_progress",
+        "graph_ready",
     ]
 
 
