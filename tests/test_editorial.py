@@ -18,7 +18,7 @@ async def test_axis_precedes_project() -> None:
         project_llm=StructuredLlm([EditorialProjectProposal(
             working_title="Quando a família aprende a perder junta",
             editorial_promise="Explicar e tornar praticável.",
-            core_subjects=[EditorialSubjectProposal(title="A experiência infantil", development="Como a criança compreende e expressa a perda.", practical_dimension="Como conversar sem esconder nem sobrecarregar.")],
+            core_subjects=[EditorialSubjectProposal(title="A experiência infantil", development="Como a criança compreende e expressa a perda e como conversar sem esconder nem sobrecarregar.")],
             llm_subjects=["Diferenças por faixa etária"],
             enrichment_opportunities=["Dados longitudinais sobre luto infantil"],
         )]),
@@ -30,4 +30,3 @@ async def test_axis_precedes_project() -> None:
     project = await director.build_project(axis=axis.approve(), brief=brief, graph_context="Compreensão profunda das fontes")
     assert project.status.value == "proposed"
     assert project.narrative_axis == axis.statement
-    assert project.core_subjects[0].practical_dimension is not None
