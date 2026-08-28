@@ -445,6 +445,7 @@ class AxisProposalOrchestrator:
                 brief=request.brief,
                 graph_artifact=graph_manifest.graph_artifact,
                 graph_context=understanding.synthesis,
+                planning_run_id=run.planning_run_id,
                 updated_at=_now(),
             )
         )

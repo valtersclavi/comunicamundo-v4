@@ -28,7 +28,6 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     parser = _parser()
     axis_id = str(uuid4())
     project_id = str(uuid4())
-    assert parser.parse_args(["approve-axis", "--narrative-axis-id", axis_id]).command == "approve-axis"
     assert parser.parse_args(["approve-project", "--editorial-project-id", project_id]).command == "approve-project"
     assert parser.parse_args(["plan", "--request", "gs://bucket/request.json"]).command == "plan"
     parsed = parser.parse_args(["extract-graph", "--source-lineage-id", axis_id])
@@ -40,6 +39,44 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     proposed = parser.parse_args(["propose-axis", "--planning-run-id", axis_id])
     assert proposed.command == "propose-axis"
     assert str(proposed.planning_run_id) == axis_id
+    reviewed = parser.parse_args(
+        ["review-axis-feedback", "--planning-run-id", axis_id, "--feedback-b64", "Zg"]
+    )
+    assert reviewed.command == "review-axis-feedback"
+    assert str(reviewed.planning_run_id) == axis_id
+    resolved = parser.parse_args(
+        ["resolve-axis-feedback", "--planning-run-id", axis_id, "--choice", "decline"]
+    )
+    assert resolved.command == "resolve-axis-feedback"
+    assert resolved.choice == "decline"
+    subparsers = [action for action in parser._actions if getattr(action, "choices", None)]
+    commands = set(subparsers[0].choices)
+    assert "revise-axis" not in commands
+    assert "approve-axis" not in commands
+    assert "review-axis-feedback" in commands
+    assert "resolve-axis-feedback" in commands
+    with pytest.raises(SystemExit):
+        parser.parse_args(["revise-axis", "--narrative-axis-id", axis_id, "--feedback-b64", "Zg"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["approve-axis", "--narrative-axis-id", axis_id])
+
+
+def test_canonical_cli_cannot_rewrite_proposed_axis_without_feedback_decision() -> None:
+    parser = _parser()
+    subparsers = [action for action in parser._actions if getattr(action, "choices", None)]
+    commands = set(subparsers[0].choices)
+    assert "revise-axis" not in commands
+    assert "approve-axis" not in commands
+    assert {"review-axis-feedback", "resolve-axis-feedback"} <= commands
+    axis_feedback_commands = [
+        name
+        for name, sub in subparsers[0].choices.items()
+        if "axis" in name
+        and any(getattr(arg, "dest", None) == "feedback_b64" for arg in sub._actions)
+    ]
+    assert axis_feedback_commands == ["review-axis-feedback"]
+    with pytest.raises(SystemExit):
+        parser.parse_args(["revise-axis", "--narrative-axis-id", str(uuid4()), "--feedback-b64", "Zg"])
 
 
 def test_feedback_is_transport_encoded_but_natural_language() -> None:

@@ -31,6 +31,7 @@ from .contracts import (
     PreparedChunk,
     SourceLineage,
     StrictModel,
+    AxisFeedbackDecision,
 )
 
 
@@ -44,6 +45,7 @@ class StoredNarrativeAxis(StrictModel):
     graph_artifact: GraphArtifact
     graph_context: str = Field(min_length=1)
     editorial_project_id: UUID | None = None
+    planning_run_id: UUID | None = None
     updated_at: datetime
 
 
@@ -438,6 +440,17 @@ class GcpEditorialPersistence:
 
     def load_narrative_axis(self, uri: str) -> PersistedNarrativeAxis:
         return PersistedNarrativeAxis.model_validate(self.artifacts.load_json_uri(uri))
+
+    def persist_axis_feedback_decision(self, run: PlanningRun, record: AxisFeedbackDecision) -> str:
+        return self.artifacts.persist_planning_json(
+            project_id=run.project_id,
+            planning_run_id=run.planning_run_id,
+            relative_path=f"feedback/{record.feedback_decision_id}.json",
+            payload=record.model_dump(mode="json"),
+        )
+
+    def load_axis_feedback_decision(self, uri: str) -> AxisFeedbackDecision:
+        return AxisFeedbackDecision.model_validate(self.artifacts.load_json_uri(uri))
 
     def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str:
         if lineage.chunk_manifest_uri is not None:

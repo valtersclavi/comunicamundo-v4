@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import pytest
 from comunicamundo_v4.hefesto.application import HefestoApplication
 from comunicamundo_v4.hefesto.contracts import EditorialBrief, EditorialProject, EditorialSubject, NarrativeAxis
 from comunicamundo_v4.hefesto.persistence import GraphArtifact, GraphArtifactFile, StoredNarrativeAxis
@@ -45,6 +46,9 @@ class Persistence:
     def get_project(self, project_id):
         return self.projects.get(project_id)
 
+    def get_run(self, planning_run_id):
+        return None
+
 
 def _seed_axis(persistence: Persistence, *, project_id):
     axis = NarrativeAxis(project_id=project_id, statement="Eixo proposto")
@@ -77,3 +81,12 @@ async def test_approve_axis_builds_proposed_project_and_plan_no_longer_creates_i
     stored_project = await app.approve_axis(stored_axis.narrative_axis.narrative_axis_id)
     assert stored_project.editorial_project.status.value == "proposed"
     assert stored_axis.narrative_axis.status.value == "proposed"
+
+
+async def test_legacy_revise_axis_is_disabled() -> None:
+    persistence = Persistence()
+    app = HefestoApplication(runtime=Runtime(), persistence=persistence)
+    stored_axis = _seed_axis(persistence, project_id=uuid4())
+    with pytest.raises(ValueError, match="review-axis-feedback"):
+        await app.revise_axis(stored_axis.narrative_axis.narrative_axis_id, "Inclua outro recorte.")
+    assert persistence.axes[stored_axis.narrative_axis.narrative_axis_id].narrative_axis.statement == "Eixo proposto"

@@ -213,6 +213,202 @@ Return only the structured revised Narrative Axis.
     )
 )
 
+AXIS_FEEDBACK_DECISION_PROMPT = PromptTemplate(
+    """
+You are Hefesto's editorial intelligence. A proposed Narrative Axis already exists. A human has contributed natural-language feedback. Your job is to decide what that contribution does to the existing editorial logic, whether it can be sustained, and what should happen next. Do not write the article. Do not create an Editorial Project. Do not search for sources. Do not approve the Axis.
+
+A user contribution is not automatically another subject. Reason about meaning and consequences, not keywords, importance-sounding words, or string matching.
+
+Editorial impact — classify from what the contribution does to load-bearing premises:
+- complements: adds useful material without changing a load-bearing premise of the Axis.
+- qualifies: changes how an existing idea or practice must be interpreted or applied, but does not necessarily replace the central direction.
+- reformulates: changes a load-bearing premise or tension such that the Axis itself must be reconsidered.
+
+Identify the affected premise(s) and the downstream editorial consequences. Do not classify merely by apparent importance.
+
+Structural impact and textual space are independent. A nuance can materially change interpretation or praxis while requiring only a brief textual treatment. Do not infer section length from impact.
+
+Support — after impact, classify how the contribution can be sustained. Judge support from the persisted SOURCE EVIDENCE below, not from the editorial understanding alone. The understanding is a synthesis: it may already mention an idea that the sources themselves only touch, or that entered during synthesis from model knowledge. Classify support as sources only when the source material itself provides enough substance for the proposed editorial role. A passing mention, echo, or synthesized restatement in the understanding is not sufficient for substantial or structural development. If the sources are thin or silent on the contribution, choose model (when safe general knowledge can sustain a bounded mention) or enrichment (when responsible development needs additional reliable sources).
+- sources: the persisted source material itself can sustain the proposed editorial role.
+- model: sources are insufficient, but stable internal model knowledge is sufficient for responsible editorial use. It must not invent facts, numbers, strong causalities, rankings, contested or specialized precision, or evidence claims. External or model knowledge must never masquerade as source evidence.
+- enrichment: responsible development at the needed level requires additional reliable source material.
+
+Do not treat "the model knows something" as automatically sufficient. Do not treat "the understanding already mentions it" as source evidence. If you cannot sustain the contribution responsibly from current source material or safe model knowledge, choose enrichment.
+
+Decision:
+- keep: leave the current Axis unchanged and carry the contribution forward for the later Editorial Project.
+- revise: the Axis should be rewritten now because the impact warrants it and support is sources or model.
+- hold_for_enrichment: required when support is enrichment. Do not pretend the new idea is already sustained. Describe what evidence is missing and why it matters.
+
+If support is sources or model, you may revise when the impact warrants it. Complements often keep the Axis; qualifying or reformulating impact often warrants revision — but only when support is sufficient. If support is enrichment, axis_action must be hold_for_enrichment.
+
+treatment_scale (brief, integrated, substantial) is the later textual treatment, independent of structural impact. Importance does not imply length.
+
+If axis_action is keep, set carry_forward_intent to a durable statement of the user's intention for the later Editorial Project. If revising or holding, carry_forward_intent may be empty.
+
+Current Narrative Axis:
+{current_axis}
+
+User feedback:
+{feedback}
+
+Brief:
+- theme: {theme}
+- approach: {approach}
+- audience: {audience}
+- product: {product}
+- duration: {duration_minutes} minutes
+- language: {output_language}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Persisted source evidence (normalized chunks with provenance; this is the source material, not the synthesis):
+{source_chunks}
+
+Return only the structured feedback decision in {output_language}.
+""".strip()
+)
+
+AXIS_FEEDBACK_REVISION_PROMPT = PromptTemplate(
+    "\n\n".join(
+        [
+            """
+You are Hefesto's editor-in-chief. Revise the proposed Narrative Axis so it absorbs the human contribution at the strength and scope the decision already justified. Preserve editorial intention; do not mechanically append the feedback. Re-decide the best one- or two-sentence direction.
+
+No Editorial Project exists. Do not create one. Do not search. Do not approve the Axis.
+""".strip(),
+            NARRATIVE_AXIS_STRENGTH_CALIBRATION,
+            """
+The contribution's editorial impact is {impact}. Support is {support}. Later textual treatment should be {treatment_scale}; that scale does not dictate Axis length — the Axis remains 1–2 sentences.
+
+Affected premises:
+{affected_premises}
+
+Editorial consequences:
+{editorial_consequences}
+
+Decision rationale:
+{decision_rationale}
+
+Support rationale:
+{support_rationale}
+
+{bounded_constraint}
+
+Current Axis:
+{current_axis}
+
+User feedback:
+{feedback}
+
+Brief:
+- theme: {theme}
+- approach: {approach}
+- audience: {audience}
+- product: {product}
+- duration: {duration_minutes} minutes
+- language: {output_language}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Return only the structured revised Narrative Axis in {output_language}. It must be 1–2 sentences and must not be empty.
+""".strip(),
+        ]
+    )
+)
+
+AXIS_FEEDBACK_BOUNDED_RECALIBRATION_PROMPT = PromptTemplate(
+    """
+You are Hefesto's editorial intelligence. The user refused additional sources: stay with what we already have. Recalibrate ambition. Do not erase the user's intention. Do not fabricate support. Do not search. Do not create an Editorial Project. Do not approve the Axis.
+
+Use the persisted SOURCE EVIDENCE below plus safe model knowledge. Do not treat the editorial understanding as a substitute for source substance. sources means the source material itself can sustain the bounded role; a passing mention or synthesized restatement in the understanding is not enough. Safe model knowledge must not invent facts, numbers, strong causalities, rankings, contested or specialized precision, or evidence claims, and must never masquerade as source evidence.
+
+support may only be sources or model. axis_action may only be keep or revise. You cannot choose enrichment or hold_for_enrichment.
+
+Revise the Axis only if the contribution is still justified at this bounded level. Otherwise keep the current Axis and carry the contribution forward for the later Editorial Project at the treatment scale current support actually warrants.
+
+Structural importance does not imply section length. A load-bearing nuance may become one sentence or a disclaimer if that is all current support can responsibly sustain. treatment_scale (brief, integrated, substantial) is independent of the original impact classification, which remains {impact}.
+
+Original enrichment need that was refused:
+{enrichment_need}
+
+Original support rationale:
+{original_support_rationale}
+
+Current Narrative Axis:
+{current_axis}
+
+User feedback (preserve this intention):
+{feedback}
+
+Brief:
+- theme: {theme}
+- approach: {approach}
+- audience: {audience}
+- product: {product}
+- duration: {duration_minutes} minutes
+- language: {output_language}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Persisted source evidence (normalized chunks with provenance; this is the source material, not the synthesis):
+{source_chunks}
+
+If keeping the Axis, set carry_forward_intent to the bounded commitment for the later Editorial Project. Return only the structured bounded recalibration in {output_language}.
+""".strip()
+)
+
 EDITORIAL_PROJECT_PROMPT = PromptTemplate(
     """
 Build the compact Editorial Project governed by the APPROVED Narrative Axis below.
