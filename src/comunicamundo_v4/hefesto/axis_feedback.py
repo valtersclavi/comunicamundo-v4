@@ -64,6 +64,13 @@ def _join_lines(values: list[str]) -> str:
     return "\n".join(values) if values else "(none)"
 
 
+def _axis_uri(run: PlanningRun) -> str:
+    uri = run.artifacts.narrative_axis_uri
+    if uri is None:
+        raise ValueError("PlanningRun does not have a persisted Narrative Axis")
+    return uri
+
+
 def fingerprint_feedback(feedback: str) -> str:
     normalized = " ".join(feedback.split())
     if not normalized:
@@ -326,10 +333,13 @@ class AxisFeedbackOrchestrator:
                     previous_id=previous_id,
                     previous_uri=previous_uri,
                 )
-                return self._persist_decision(run, understanding, current_axis, decision)
+                return self._persist_decision(
+                    run, understanding, current_axis, decision, axis_uri=_axis_uri(run)
+                )
             resulting = None
+            axis_uri = _axis_uri(run)
             if proposal.axis_action is AxisAction.REVISE:
-                resulting = self._revise_axis(
+                resulting, axis_uri = self._revise_axis(
                     run=run,
                     lineage=lineage,
                     request=request,
@@ -358,7 +368,7 @@ class AxisFeedbackOrchestrator:
                 previous_uri=previous_uri,
             )
             active = current_axis if resulting is None else resulting
-            return self._persist_decision(run, understanding, active, decision)
+            return self._persist_decision(run, understanding, active, decision, axis_uri=axis_uri)
         except Exception as exc:
             self._persistence.save_run(run.model_copy(update={"error": str(exc), "updated_at": _now()}))
             raise
@@ -389,7 +399,9 @@ class AxisFeedbackOrchestrator:
                         "updated_at": _now(),
                     }
                 )
-                return self._persist_decision(run, understanding, current_axis, decision)
+                return self._persist_decision(
+                    run, understanding, current_axis, decision, axis_uri=_axis_uri(run)
+                )
             bounded = self._recalibrator.recalibrate(
                 brief=request.brief,
                 understanding=understanding,
@@ -398,8 +410,9 @@ class AxisFeedbackOrchestrator:
                 original=existing,
             )
             resulting = None
+            axis_uri = _axis_uri(run)
             if bounded.axis_action is AxisAction.REVISE:
-                resulting = self._revise_axis(
+                resulting, axis_uri = self._revise_axis(
                     run=run,
                     lineage=lineage,
                     request=request,
@@ -431,7 +444,7 @@ class AxisFeedbackOrchestrator:
                 }
             )
             active = current_axis if resulting is None else resulting
-            return self._persist_decision(run, understanding, active, decision)
+            return self._persist_decision(run, understanding, active, decision, axis_uri=axis_uri)
         except Exception as exc:
             self._persistence.save_run(run.model_copy(update={"error": str(exc), "updated_at": _now()}))
             raise
@@ -527,7 +540,7 @@ class AxisFeedbackOrchestrator:
         affected_premises: list[str],
         editorial_consequences: list[str],
         bounded: bool,
-    ) -> NarrativeAxis:
+    ) -> tuple[NarrativeAxis, str]:
         revised_proposal = self._reviser.revise(
             brief=request.brief,
             understanding=understanding,
@@ -563,7 +576,7 @@ class AxisFeedbackOrchestrator:
             graph_manifest_hash=persisted_axis.graph_manifest_hash,
             narrative_axis=new_axis,
         )
-        self._persistence.persist_narrative_axis(run, record)
+        axis_uri = self._persistence.persist_narrative_axis(run, record)
         stored = self._persistence.get_axis(current_axis.narrative_axis_id)
         if stored is not None:
             self._persistence.save_axis(
@@ -579,7 +592,7 @@ class AxisFeedbackOrchestrator:
                     updated_at=_now(),
                 )
             )
-        return new_axis
+        return new_axis, axis_uri
 
     def _build_decision(
         self,
@@ -645,12 +658,14 @@ class AxisFeedbackOrchestrator:
         understanding: EditorialUnderstanding,
         active_axis: NarrativeAxis,
         decision: AxisFeedbackDecision,
+        *,
+        axis_uri: str,
     ) -> AxisFeedbackReviewResult:
         uri = self._persistence.persist_axis_feedback_decision(run, decision)
         artifacts = run.artifacts.model_copy(
             update={
                 "narrative_axis_id": active_axis.narrative_axis_id,
-                "narrative_axis_uri": run.artifacts.narrative_axis_uri,
+                "narrative_axis_uri": axis_uri,
                 "axis_feedback_decision_id": decision.feedback_decision_id,
                 "axis_feedback_decision_uri": uri,
             }

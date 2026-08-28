@@ -148,6 +148,29 @@ def _ready(store: MemoryPlanningPersistence | None = None):
     return store, proposed, lineage, extractor, request, synth, prop
 
 
+class UniqueAxisUriPersistence(MemoryPlanningPersistence):
+    """Store each Axis at a distinct URI so a stale PlanningRun pointer cannot hide behind overwrite."""
+
+    def persist_narrative_axis(self, run, record):
+        self.axis_writes += 1
+        axis_id = record.narrative_axis.narrative_axis_id
+        uri = f"gs://memory/{run.planning_run_id}/axes/{axis_id}.json"
+        self.objects[uri] = record.model_copy()
+        return uri
+
+
+def _reload_active_axis(store: MemoryPlanningPersistence, planning_run_id):
+    run = store.get_run(planning_run_id)
+    assert run is not None
+    uri = run.artifacts.narrative_axis_uri
+    axis_id = run.artifacts.narrative_axis_id
+    assert uri is not None
+    assert axis_id is not None
+    persisted = store.load_narrative_axis(uri)
+    assert persisted.narrative_axis.narrative_axis_id == axis_id
+    return run, persisted
+
+
 def _prompt_text(prompt) -> str:
     template = getattr(prompt, "template", None)
     if isinstance(template, str) and template.strip():
@@ -282,6 +305,49 @@ def test_qualifying_feedback_can_revise_axis() -> None:
     assert store.get_axis(old_id).narrative_axis.status is NarrativeAxisStatus.SUPERSEDED
     assert store.get_axis(result.narrative_axis.narrative_axis_id).editorial_project_id is None
     assert reviewer.candidates == [REVISED_QUALIFYING]
+
+
+def test_revised_axis_id_and_uri_survive_reload_for_next_gate() -> None:
+    store, proposed, *_rest = _ready(UniqueAxisUriPersistence())
+    run_id = proposed.planning_run.planning_run_id
+    original_id = proposed.narrative_axis.narrative_axis_id
+    original_uri = proposed.planning_run.artifacts.narrative_axis_uri
+    assert original_uri is not None
+    decider = RecordingDecider(
+        _decision_proposal(
+            impact=EditorialImpactKind.QUALIFIES,
+            axis_action=AxisAction.REVISE,
+            treatment_scale=TreatmentScale.INTEGRATED,
+            carry_forward_intent=None,
+            impact_rationale="The contribution changes how the existing practice must be applied.",
+            decision_rationale="Revise the Axis so the practice is read as relational.",
+        )
+    )
+    first = _orchestrator(
+        store, decider=decider, reviser=RecordingReviser(REVISED_QUALIFYING)
+    ).review(run_id, QUALIFY_FEEDBACK)
+    new_id = first.narrative_axis.narrative_axis_id
+    new_uri = first.planning_run.artifacts.narrative_axis_uri
+    assert new_id != original_id
+    assert new_uri != original_uri
+    assert new_uri is not None
+    assert str(new_id) in new_uri
+    previous = store.load_narrative_axis(original_uri)
+    assert previous.narrative_axis.narrative_axis_id == original_id
+
+    reloaded, persisted = _reload_active_axis(store, run_id)
+    assert reloaded.artifacts.narrative_axis_uri == new_uri
+    assert persisted.narrative_axis.statement == REVISED_QUALIFYING
+
+    second = _orchestrator(store, decider=RecordingDecider(_decision_proposal())).review(
+        run_id, COMPLEMENT_FEEDBACK
+    )
+    assert second.narrative_axis.narrative_axis_id == new_id
+    assert second.planning_run.artifacts.narrative_axis_uri == new_uri
+    assert second.decision.axis_action is AxisAction.KEEP
+    follow_run, follow_axis = _reload_active_axis(store, run_id)
+    assert follow_run.artifacts.narrative_axis_id == new_id
+    assert follow_axis.narrative_axis.narrative_axis_id == new_id
 
 
 def test_reformulating_feedback_can_revise_axis() -> None:
@@ -475,6 +541,67 @@ def test_declining_enrichment_can_revise_when_bounded_support_still_warrants_it(
     assert store.get_axis(old_id).narrative_axis.status is NarrativeAxisStatus.SUPERSEDED
     assert result.stopped_at == "axis_proposed"
     assert result.search_performed is False
+
+
+def test_decline_revised_axis_id_and_uri_survive_reload_for_next_gate() -> None:
+    store, proposed, *_rest = _ready(UniqueAxisUriPersistence())
+    run_id = proposed.planning_run.planning_run_id
+    original_id = proposed.narrative_axis.narrative_axis_id
+    original_uri = proposed.planning_run.artifacts.narrative_axis_uri
+    assert original_uri is not None
+    decider = RecordingDecider(
+        _decision_proposal(
+            impact=EditorialImpactKind.QUALIFIES,
+            support=SupportKind.ENRICHMENT,
+            axis_action=AxisAction.HOLD_FOR_ENRICHMENT,
+            treatment_scale=TreatmentScale.SUBSTANTIAL,
+            carry_forward_intent=None,
+            enrichment_need="Specialized evidence is missing for a full treatment.",
+            support_rationale="Current material cannot sustain a substantial treatment.",
+            decision_rationale="Hold pending enrichment.",
+        )
+    )
+    recalibrator = RecordingRecalibrator(
+        _bounded_proposal(
+            support=SupportKind.SOURCES,
+            support_rationale="At a bounded level the current sources still warrant a modest Axis revision.",
+            axis_action=AxisAction.REVISE,
+            treatment_scale=TreatmentScale.BRIEF,
+            carry_forward_intent=None,
+            decision_rationale="Revise the Axis only as far as current sources can sustain.",
+        )
+    )
+    orchestrator = _orchestrator(
+        store,
+        decider=decider,
+        reviser=RecordingReviser(BOUNDED_REVISED),
+        recalibrator=recalibrator,
+    )
+    orchestrator.review(run_id, ENRICHMENT_FEEDBACK)
+    declined = orchestrator.resolve(run_id, EnrichmentResolutionChoice.DECLINE)
+    new_id = declined.narrative_axis.narrative_axis_id
+    new_uri = declined.planning_run.artifacts.narrative_axis_uri
+    assert declined.decision.axis_action is AxisAction.REVISE
+    assert new_id != original_id
+    assert new_uri != original_uri
+    assert new_uri is not None
+    assert str(new_id) in new_uri
+    previous = store.load_narrative_axis(original_uri)
+    assert previous.narrative_axis.narrative_axis_id == original_id
+
+    reloaded, persisted = _reload_active_axis(store, run_id)
+    assert reloaded.artifacts.narrative_axis_uri == new_uri
+    assert persisted.narrative_axis.statement == BOUNDED_REVISED
+
+    second = _orchestrator(store, decider=RecordingDecider(_decision_proposal())).review(
+        run_id, COMPLEMENT_FEEDBACK
+    )
+    assert second.narrative_axis.narrative_axis_id == new_id
+    assert second.planning_run.artifacts.narrative_axis_uri == new_uri
+    assert second.decision.axis_action is AxisAction.KEEP
+    follow_run, follow_axis = _reload_active_axis(store, run_id)
+    assert follow_run.artifacts.narrative_axis_id == new_id
+    assert follow_axis.narrative_axis.narrative_axis_id == new_id
 
 
 def test_accepting_enrichment_persists_research_needed_and_stops_without_search() -> None:
