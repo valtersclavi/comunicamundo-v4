@@ -23,7 +23,7 @@ jobs:
   inspect:
     if: ${{ contains(github.event.head_commit.message, '[luto-source-origin]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -31,85 +31,159 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Prepare runtime diagnostic service
+      - name: Prepare runtime diagnostic service using proven bootstrap
         run: |
           set -euo pipefail
-          image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
-          test -n "${image}"
-          token="$(openssl rand -hex 32)"
-          cat > /tmp/diag.py <<'PY'
-          import hmac, json, os
-          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-          from google.cloud import storage
+          pinned_image="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test -n "${pinned_image}"
+          deployed_sa="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.serviceAccountName)')"
+          test "${deployed_sa}" = "${RUNTIME_SA}"
+          proof_token="$(openssl rand -hex 32)"
+          test -n "${proof_token}"
 
-          TOKEN=os.environ['PROOF_TOKEN']
-          BUCKET=os.environ['PROOF_BUCKET']
-          REQUEST_OBJECT=os.environ['PROOF_REQUEST_OBJECT']
-          OLD_PROJECT_ID=os.environ['PROOF_OLD_PROJECT_ID']
+          cat > /tmp/proof_service.py <<'PY'
+          import hmac
+          import json
+          import os
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+          PROOF_TOKEN = os.environ["PROOF_TOKEN"]
+          BUCKET = os.environ["PROOF_BUCKET"]
+          REQUEST_OBJECT = os.environ["PROOF_REQUEST_OBJECT"]
+          OLD_PROJECT_ID = os.environ["PROOF_OLD_PROJECT_ID"]
 
           def inspect():
-              client=storage.Client(project=os.environ['GOOGLE_CLOUD_PROJECT'])
-              bucket=client.bucket(BUCKET)
-              raw=bucket.blob(REQUEST_OBJECT).download_as_text()
-              request=json.loads(raw)
-              sources=[]
-              source_ids=[]
-              for source in request.get('sources', []):
-                  source_ids.append(str(source.get('source_id','')))
-                  sources.append({
-                      'source_id': source.get('source_id'),
-                      'title': source.get('title'),
-                      'language': source.get('language'),
-                      'metadata': source.get('metadata'),
-                      'characters': len(source.get('text') or ''),
-                  })
-              candidates=[]
-              for blob in client.list_blobs(BUCKET):
-                  name=blob.name
-                  low=name.lower()
-                  if (name.endswith('.pdf') or OLD_PROJECT_ID in name or any(sid and sid in name for sid in source_ids)
-                      or any(term in low for term in ('luto','grief','original','upload','source'))):
-                      candidates.append({'gs_uri':f'gs://{BUCKET}/{name}','size':blob.size,'content_type':blob.content_type})
-              return {'project_id':request.get('project_id'),'brief':request.get('brief'),'sources':sources,'candidate_objects':candidates[:500]}
+              from google.cloud import storage
 
-          class H(BaseHTTPRequestHandler):
+              client = storage.Client(project=os.environ["GOOGLE_CLOUD_PROJECT"])
+              bucket = client.bucket(BUCKET)
+              request = json.loads(bucket.blob(REQUEST_OBJECT).download_as_text())
+              sources = []
+              source_ids = []
+              for source in request.get("sources", []):
+                  source_id = str(source.get("source_id", ""))
+                  source_ids.append(source_id)
+                  sources.append({
+                      "source_id": source.get("source_id"),
+                      "title": source.get("title"),
+                      "language": source.get("language"),
+                      "metadata": source.get("metadata"),
+                      "characters": len(source.get("text") or ""),
+                  })
+
+              candidates = []
+              for blob in client.list_blobs(BUCKET):
+                  name = blob.name
+                  low = name.lower()
+                  if (
+                      low.endswith(".pdf")
+                      or OLD_PROJECT_ID in name
+                      or any(source_id and source_id in name for source_id in source_ids)
+                      or any(term in low for term in ("luto", "grief", "original", "upload", "source"))
+                  ):
+                      candidates.append({
+                          "gs_uri": f"gs://{BUCKET}/{name}",
+                          "size": blob.size,
+                          "content_type": blob.content_type,
+                      })
+              return {
+                  "SOURCE_ORIGIN_PROOF": "SUCCESS",
+                  "project_id": request.get("project_id"),
+                  "brief": request.get("brief"),
+                  "sources": sources,
+                  "candidate_objects": candidates[:500],
+              }
+
+          class Handler(BaseHTTPRequestHandler):
+              def _write(self, status, payload):
+                  body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                  self.send_response(status)
+                  self.send_header("Content-Type", "application/json; charset=utf-8")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
               def do_GET(self):
-                  if not hmac.compare_digest(self.headers.get('X-Proof-Token',''), TOKEN):
-                      self.send_response(403); self.end_headers(); return
+                  supplied = self.headers.get("X-Proof-Token", "")
+                  if not hmac.compare_digest(supplied, PROOF_TOKEN):
+                      self._write(403, {"error": "forbidden"})
+                      return
+                  if self.path == "/health":
+                      self._write(200, {"status": "ok", "storage_access": "not_attempted"})
+                      return
+                  if self.path != "/proof":
+                      self._write(404, {"error": "not_found"})
+                      return
                   try:
-                      payload=inspect(); status=200
+                      self._write(200, inspect())
                   except Exception as exc:
-                      payload={'error':type(exc).__name__,'message':str(exc)}; status=500
-                  body=json.dumps(payload,ensure_ascii=False).encode()
-                  self.send_response(status); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
-              def log_message(self,*args): pass
-          ThreadingHTTPServer(('0.0.0.0',int(os.environ.get('PORT','8080'))),H).serve_forever()
+                      self._write(200, {
+                          "SOURCE_ORIGIN_PROOF": "FAILURE",
+                          "error": type(exc).__name__,
+                          "message": str(exc),
+                      })
+
+              def log_message(self, format, *args):
+                  return
+
+          ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8080"))), Handler).serve_forever()
           PY
-          script="$(base64 -w0 /tmp/diag.py)"
+          proof_b64="$(base64 -w0 /tmp/proof_service.py)"
           gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --quiet >/dev/null 2>&1 || true
           gcloud run deploy "${SERVICE_NAME}" \
-            --project="${PROJECT_ID}" --region="${REGION}" --image="${image}" \
-            --service-account="${RUNTIME_SA}" --command=python \
-            --args=-c,"import base64,os;exec(base64.b64decode(os.environ['PROOF_SCRIPT_B64']))" \
-            --cpu=2 --memory=4Gi --max-instances=1 --min-instances=0 --concurrency=1 --timeout=600 \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --image="${pinned_image}" \
+            --service-account="${RUNTIME_SA}" \
+            --command=python \
+            --args=-c,"import base64;import os;exec(base64.b64decode(os.environ['PROOF_SCRIPT_B64']))" \
+            --cpu=4 \
+            --memory=8Gi \
+            --concurrency=1 \
+            --max-instances=1 \
+            --min-instances=0 \
+            --timeout=3600 \
             --allow-unauthenticated \
-            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},PROOF_BUCKET=${BUCKET},PROOF_REQUEST_OBJECT=${REQUEST_OBJECT},PROOF_OLD_PROJECT_ID=${OLD_PROJECT_ID},PROOF_TOKEN=${token},PROOF_SCRIPT_B64=${script}" \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},PROOF_BUCKET=${BUCKET},PROOF_REQUEST_OBJECT=${REQUEST_OBJECT},PROOF_OLD_PROJECT_ID=${OLD_PROJECT_ID},PROOF_SCRIPT_B64=${proof_b64},PROOF_TOKEN=${proof_token}" \
             --quiet
-          url="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
-          echo "DIAG_URL=${url}" >> "${GITHUB_ENV}"
-          echo "DIAG_TOKEN=${token}" >> "${GITHUB_ENV}"
-      - name: Inspect source origin
+          proof_url="$(gcloud run services describe "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          test -n "${proof_url}"
+          service_sa="$(gcloud run services describe "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.serviceAccountName)')"
+          test "${service_sa}" = "${RUNTIME_SA}"
+          echo "PINNED_IMAGE=${pinned_image}" >> "${GITHUB_ENV}"
+          echo "PROOF_URL=${proof_url}" >> "${GITHUB_ENV}"
+          echo "PROOF_TOKEN=${proof_token}" >> "${GITHUB_ENV}"
+      - name: Prove transport without storage read
         run: |
           set -euo pipefail
-          curl -fsS --max-time 540 -H "X-Proof-Token: ${DIAG_TOKEN}" "${DIAG_URL}/" | tee /tmp/result.json
+          health="$(curl -fsS -H "X-Proof-Token: ${PROOF_TOKEN}" "${PROOF_URL}/health")"
+          test "$(printf '%s' "${health}" | jq -r '.status')" = "ok"
+          test "$(printf '%s' "${health}" | jq -r '.storage_access')" = "not_attempted"
+      - name: Inspect source origin through runtime identity
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 3550 \
+            -H "X-Proof-Token: ${PROOF_TOKEN}" \
+            "${PROOF_URL}/proof" \
+            | tee /tmp/result.json
+          test "$(jq -r '.SOURCE_ORIGIN_PROOF' /tmp/result.json)" = "SUCCESS"
           jq . /tmp/result.json
       - name: Result
         if: always()
         run: |
           {
             echo '# Luto source-origin diagnostic via runtime identity'
+            echo "- Canonical image: \`${PINNED_IMAGE:-NOT_RESOLVED}\`"
             echo '```json'
             cat /tmp/result.json 2>/dev/null || true
+            echo ''
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
       - name: Cleanup
