@@ -114,6 +114,7 @@ class MemoryPlanningPersistence:
         self.axis_writes = 0
         self.feedback_writes = 0
         self.stored_axes: dict = {}
+        self.stored_projects: dict = {}
 
     def save_run(self, run: PlanningRun) -> PlanningRun:
         updated = run.model_copy(update={"updated_at": datetime.now(UTC)})
@@ -198,6 +199,14 @@ class MemoryPlanningPersistence:
 
     def get_axis(self, axis_id):
         stored = self.stored_axes.get(axis_id)
+        return None if stored is None else stored.model_copy()
+
+    def save_project(self, stored):
+        self.stored_projects[stored.editorial_project.editorial_project_id] = stored.model_copy()
+        return stored
+
+    def get_project(self, project_id):
+        stored = self.stored_projects.get(project_id)
         return None if stored is None else stored.model_copy()
 
     def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str:

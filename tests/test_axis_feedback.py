@@ -177,6 +177,8 @@ def test_feedback_module_does_not_search_rebuild_or_create_project() -> None:
         assert token not in FEEDBACK_PY
     assert "review-axis-feedback" in WORKER_PY
     assert "resolve-axis-feedback" in WORKER_PY
+    assert "revise-axis" not in WORKER_PY
+    assert "app.revise_axis" not in WORKER_PY
     assert "--planning-run-id" in WORKER_PY
     assert "LlamaIndexAxisEvidenceReviewer" in FEEDBACK_PY or "NarrativeAxisEvidenceReviewer" in FEEDBACK_PY
     assert "build_axis_proposal_runtime" in WORKER_PY
@@ -886,7 +888,7 @@ def test_corrupt_feedback_decision_fails_closed() -> None:
     axis_id = first.narrative_axis.narrative_axis_id
     store.objects[uri] = {"not": "an axis feedback decision"}
     later_decider = RecordingDecider(_decision_proposal(carry_forward_intent="Later, mention a second note."))
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="cannot be loaded"):
         _orchestrator(store, decider=later_decider).review(
             proposed.planning_run.planning_run_id, SECOND_COMPLEMENT_FEEDBACK
         )
@@ -896,6 +898,104 @@ def test_corrupt_feedback_decision_fails_closed() -> None:
     assert updated.artifacts.axis_feedback_decision_uri == uri
     assert updated.artifacts.narrative_axis_id == axis_id
     assert updated.state is PlanningRunState.AXIS_PROPOSED
+
+
+async def test_approve_axis_blocked_while_enrichment_required_or_accepted() -> None:
+    from comunicamundo_v4.hefesto.application import HefestoApplication
+
+    store, proposed, _lineage, _extractor, _request, _synth, _prop = _ready()
+    axis_id = proposed.narrative_axis.narrative_axis_id
+    assert store.get_axis(axis_id).planning_run_id == proposed.planning_run.planning_run_id
+
+    class Director:
+        async def build_project(self, **kwargs):
+            raise AssertionError("Editorial Project must not be created while enrichment is held")
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.director = Director()
+            self.production = None
+
+    app = HefestoApplication(runtime=Runtime(), persistence=store)
+    orchestrator = _orchestrator(
+        store,
+        decider=RecordingDecider(
+            _decision_proposal(
+                support=SupportKind.ENRICHMENT,
+                axis_action=AxisAction.HOLD_FOR_ENRICHMENT,
+                carry_forward_intent=None,
+                enrichment_need="Need more evidence.",
+                support_rationale="Not currently sustainable.",
+                decision_rationale="Hold.",
+            )
+        ),
+    )
+    orchestrator.review(proposed.planning_run.planning_run_id, ENRICHMENT_FEEDBACK)
+    with pytest.raises(ValueError, match="cannot create an Editorial Project"):
+        await app.approve_axis(axis_id)
+    assert store.get_axis(axis_id).narrative_axis.status is NarrativeAxisStatus.PROPOSED
+    assert store.get_axis(axis_id).editorial_project_id is None
+    orchestrator.resolve(proposed.planning_run.planning_run_id, EnrichmentResolutionChoice.ACCEPT)
+    with pytest.raises(ValueError, match="cannot create an Editorial Project"):
+        await app.approve_axis(axis_id)
+    assert store.get_axis(axis_id).narrative_axis.status is NarrativeAxisStatus.PROPOSED
+    assert store.get_axis(axis_id).editorial_project_id is None
+    assert store.stored_projects == {}
+
+
+async def test_approve_axis_remains_possible_after_decided_or_declined_feedback() -> None:
+    from comunicamundo_v4.hefesto.application import HefestoApplication
+    from comunicamundo_v4.hefesto.contracts import EditorialProject, EditorialSubject
+
+    class Director:
+        async def build_project(self, **kwargs):
+            axis = kwargs["axis"]
+            return EditorialProject(
+                project_id=axis.project_id,
+                narrative_axis_id=axis.narrative_axis_id,
+                narrative_axis=axis.statement,
+                brief=kwargs["brief"],
+                working_title="Título",
+                editorial_promise="Promessa",
+                core_subjects=[EditorialSubject(title="Assunto", development="Desenvolvimento")],
+            )
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.director = Director()
+            self.production = None
+
+    store, proposed, _lineage, _extractor, _request, _synth, _prop = _ready()
+    _orchestrator(store, decider=RecordingDecider(_decision_proposal())).review(
+        proposed.planning_run.planning_run_id, COMPLEMENT_FEEDBACK
+    )
+    decided_project = await HefestoApplication(runtime=Runtime(), persistence=store).approve_axis(
+        proposed.narrative_axis.narrative_axis_id
+    )
+    assert decided_project.editorial_project.status.value == "proposed"
+
+    store2, proposed2, *_rest = _ready()
+    orchestrator = _orchestrator(
+        store2,
+        decider=RecordingDecider(
+            _decision_proposal(
+                support=SupportKind.ENRICHMENT,
+                axis_action=AxisAction.HOLD_FOR_ENRICHMENT,
+                carry_forward_intent=None,
+                enrichment_need="Need more evidence.",
+                support_rationale="Not currently sustainable.",
+                decision_rationale="Hold.",
+            )
+        ),
+        recalibrator=RecordingRecalibrator(_bounded_proposal()),
+    )
+    orchestrator.review(proposed2.planning_run.planning_run_id, ENRICHMENT_FEEDBACK)
+    declined = orchestrator.resolve(proposed2.planning_run.planning_run_id, EnrichmentResolutionChoice.DECLINE)
+    assert declined.decision.state is AxisFeedbackDecisionState.ENRICHMENT_DECLINED
+    declined_project = await HefestoApplication(runtime=Runtime(), persistence=store2).approve_axis(
+        proposed2.narrative_axis.narrative_axis_id
+    )
+    assert declined_project.editorial_project.status.value == "proposed"
 
 
 def test_worker_review_and_resolve_use_axis_runtime_without_rebuild(monkeypatch, capsys) -> None:

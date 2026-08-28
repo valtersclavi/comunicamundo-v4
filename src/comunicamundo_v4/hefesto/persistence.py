@@ -45,6 +45,7 @@ class StoredNarrativeAxis(StrictModel):
     graph_artifact: GraphArtifact
     graph_context: str = Field(min_length=1)
     editorial_project_id: UUID | None = None
+    planning_run_id: UUID | None = None
     updated_at: datetime
 
 

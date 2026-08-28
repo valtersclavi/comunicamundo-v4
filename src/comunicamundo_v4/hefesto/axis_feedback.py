@@ -472,9 +472,13 @@ class AxisFeedbackOrchestrator:
         return run, lineage, request, understanding, persisted_axis
 
     def _load_current_decision(self, run: PlanningRun) -> AxisFeedbackDecision | None:
-        if run.artifacts.axis_feedback_decision_uri is None:
+        uri = run.artifacts.axis_feedback_decision_uri
+        if uri is None:
             return None
-        return self._persistence.load_axis_feedback_decision(run.artifacts.axis_feedback_decision_uri)
+        try:
+            return self._persistence.load_axis_feedback_decision(uri)
+        except Exception as exc:
+            raise ValueError(f"persisted axis feedback decision cannot be loaded: {uri}") from exc
 
     def _same_submission(
         self,
@@ -571,6 +575,7 @@ class AxisFeedbackOrchestrator:
                     brief=request.brief,
                     graph_artifact=stored.graph_artifact,
                     graph_context=understanding.synthesis,
+                    planning_run_id=run.planning_run_id,
                     updated_at=_now(),
                 )
             )
