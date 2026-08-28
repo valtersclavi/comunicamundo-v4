@@ -53,6 +53,14 @@ class EditorialDirector:
             narrative_axis=axis.statement,
             brief=brief.model_dump_json(indent=2),
             graph_context=graph_context,
+            synthesis=graph_context,
+            central_ideas="(none)",
+            relations_and_tensions="(none)",
+            nuances="(none)",
+            source_limits="(none)",
+            editorial_opportunities="(none)",
+            axis_feedback_history="(none)",
+            carry_forwards="(none)",
             output_language=brief.output_language,
         )
         return self._project_from_proposal(proposal, axis=axis, brief=brief)

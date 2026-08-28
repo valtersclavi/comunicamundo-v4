@@ -283,6 +283,8 @@ class AxisProposalOrchestrator:
         run = self._persistence.get_run(planning_run_id)
         if run is None:
             raise KeyError(f"PlanningRun not found: {planning_run_id}")
+        if run.state is PlanningRunState.PROJECT_PROPOSED:
+            raise ValueError("PlanningRun already advanced past axis_proposed")
         if run.artifacts.request_uri is None:
             raise ValueError("PlanningRun does not have a persisted request")
         lineage = self._persistence.get_source_lineage(run.source_lineage_id)

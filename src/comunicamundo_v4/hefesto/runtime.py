@@ -74,6 +74,14 @@ class AxisProposalRuntime:
     context_window: int
 
 
+@dataclass(frozen=True, slots=True)
+class EditorialProjectRuntime:
+    project_llm: object
+    project_model: str
+    project_max_tokens: int
+    context_window: int
+
+
 @dataclass(slots=True)
 class HefestoRuntime:
     graph_llm: object
@@ -154,6 +162,20 @@ def build_axis_proposal_runtime(settings: VertexRuntimeSettings) -> AxisProposal
         axis_llm=_vertex_llm(settings, settings.axis_model, 0.35, settings.axis_max_tokens),
         axis_model=settings.axis_model,
         axis_max_tokens=settings.axis_max_tokens,
+        context_window=settings.context_window,
+    )
+
+
+def build_editorial_project_runtime(settings: VertexRuntimeSettings) -> EditorialProjectRuntime:
+    """Construct only the project LLM. No embeddings, graph, understanding, or search clients."""
+    if settings.context_window <= 0:
+        raise ValueError("Editorial Project requires an explicit context_window")
+    if settings.project_max_tokens <= 0:
+        raise ValueError("Editorial Project requires an explicit max_tokens budget")
+    return EditorialProjectRuntime(
+        project_llm=_vertex_llm(settings, settings.project_model, 0.35, settings.project_max_tokens),
+        project_model=settings.project_model,
+        project_max_tokens=settings.project_max_tokens,
         context_window=settings.context_window,
     )
 

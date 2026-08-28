@@ -419,10 +419,38 @@ Narrative Axis:
 Brief:
 {brief}
 
+Reuse the persisted Editorial Understanding. Do not rebuild the graph or search. Do not invent a new understanding.
+
 Internal source understanding:
 {graph_context}
 
-The user approves subjects, not an outline. Keep the document short and editorial. Do not pre-write the article.
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Synthesis:
+{synthesis}
+
+Durable Axis feedback history, oldest first. Keep provenance and ordering. A REVISE decision already absorbed into the active Axis remains inspectable. A KEEP/carry-forward commitment must survive at its recorded treatment_scale (brief, integrated, or substantial):
+{axis_feedback_history}
+
+Carry-forward commitments in history order. Honor each at its treatment_scale; do not inflate a brief commitment into a section or collapse a substantial one into a mention:
+{carry_forwards}
+
+The user approves subjects, not an outline. Keep the document short and editorial. Do not pre-write the article. Do not search. Do not rebuild understanding.
+
+Where the subject calls for how-to or operational practice, include a real practical_dimension. Treatment scale guides development, not section count.
 
 Produce:
 1) a working title and concise editorial promise;
