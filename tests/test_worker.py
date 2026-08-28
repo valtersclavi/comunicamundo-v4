@@ -552,7 +552,6 @@ def test_approve_axis_command_uses_only_project_runtime(monkeypatch, capsys) -> 
                     EditorialSubjectProposal(
                         title="Assunto",
                         development="Desenvolvimento operacional.",
-                        practical_dimension="Como praticar sem genericidade.",
                     )
                 ],
             )
@@ -581,7 +580,6 @@ def test_approve_axis_command_uses_only_project_runtime(monkeypatch, capsys) -> 
     assert result.article_created is False
     assert result.editorial_project.status.value == "proposed"
     assert result.narrative_axis.status.value == "approved"
-    assert result.editorial_project.core_subjects[0].practical_dimension is not None
     assert builder_holder[0].calls == 1
     assert store.extraction_writes == extract_writes
     assert store.graph_writes == graph_writes

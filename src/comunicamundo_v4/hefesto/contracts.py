@@ -82,7 +82,6 @@ class NarrativeAxis(StrictModel):
 class EditorialSubjectProposal(StrictModel):
     title: str = Field(min_length=1)
     development: str = Field(min_length=1)
-    practical_dimension: str | None = Field(default=None, min_length=1)
 
 
 class EditorialProjectProposal(StrictModel):
@@ -97,7 +96,6 @@ class EditorialSubject(StrictModel):
     subject_id: UUID = Field(default_factory=uuid4)
     title: str = Field(min_length=1)
     development: str = Field(min_length=1)
-    practical_dimension: str | None = Field(default=None, min_length=1)
 
 
 class EditorialProjectStatus(StrEnum):

@@ -2,7 +2,7 @@
 from llama_index.core.prompts import PromptTemplate
 
 PROJECT_UNDERSTANDING_QUERY = """
-Read the project sources as a whole in light of the user's brief. Build a deep editorial understanding, not a list of excerpts. Identify central ideas, mechanisms, tensions, concrete examples, practical implications, missing context, and relationships between ideas that matter for the requested product. Distinguish what the sources actually support from plausible external knowledge. Return a rich internal synthesis in {output_language} for an editor who will decide the intellectual direction of the piece.
+Read the project sources as a whole in light of the user's brief. Build a deep editorial understanding, not a list of excerpts. Identify central ideas, mechanisms, tensions, concrete examples, implications, missing context, and relationships between ideas that matter for the requested product. Distinguish what the sources actually support from plausible external knowledge. Return a rich internal synthesis in {output_language} for an editor who will decide the intellectual direction of the piece.
 
 Theme: {theme}
 Approach: {approach}
@@ -16,7 +16,7 @@ Recover the strongest source material relevant to the following subject while re
 Narrative Axis: {narrative_axis}
 Subject: {subject}
 Development intent: {development}
-Return concrete source-grounded context, tensions, examples and practical implications. Do not write the final article.
+Return concrete source-grounded context, tensions, examples and implications. Do not write the final article.
 """.strip()
 
 EDITORIAL_UNDERSTANDING_PROMPT = PromptTemplate(
@@ -450,15 +450,15 @@ Carry-forward commitments in history order. Honor each at its treatment_scale; d
 
 The user approves subjects, not an outline. Keep the document short and editorial. Do not pre-write the article. Do not search. Do not rebuild understanding.
 
-Where the subject calls for how-to or operational practice, include a real practical_dimension. Treatment scale guides development, not section count.
+Treatment scale guides development, not section count. Subject selection and development must follow the brief, approved Narrative Axis, source understanding, and editorial judgment rather than a fixed content checklist.
 
 Produce:
 1) a working title and concise editorial promise;
-2) core_subjects: the subjects the piece should actually develop, prioritizing what is supported by the sources and including operational/practical development where the topic calls for "how";
+2) core_subjects: the subjects the piece should actually develop to fulfill the brief under the approved Narrative Axis, prioritizing what is supported by the sources;
 3) llm_subjects: a short list of useful subjects that come mainly from model knowledge rather than the supplied sources;
 4) enrichment_opportunities: a short list of places where additional sources would materially improve the piece.
 
-Each core subject needs only a title, a compact description of what must be developed, and an optional practical_dimension. Do not turn subjects into sections, scene-by-scene instructions, or prose paragraphs of the final article.
+Each core subject needs only a title and a compact description of what must be developed. Do not turn subjects into sections, scene-by-scene instructions, or prose paragraphs of the final article.
 Return only the structured proposal in {output_language}.
 """.strip()
 )
@@ -490,7 +490,6 @@ Prepare an internal research briefing for one approved subject. Use the recovere
 Approved Narrative Axis: {narrative_axis}
 Subject: {subject}
 Development: {development}
-Practical dimension: {practical_dimension}
 Recovered source context:
 {source_context}
 
@@ -513,7 +512,7 @@ Return only the structured narrative plan.
 
 DRAFT_PROMPT = PromptTemplate(
     """
-Write the complete final article in {output_language}. Follow the approved Narrative Axis and Editorial Project, using the internal architecture and research. Preserve nuance, specificity and practical usefulness. Do not mention the internal process, the graph, prompts, or approval workflow.
+Write the complete final article in {output_language}. Follow the approved Narrative Axis and Editorial Project, using the internal architecture and research. Preserve nuance, specificity and usefulness for the intended audience. Do not mention the internal process, the graph, prompts, or approval workflow.
 
 Narrative Axis: {narrative_axis}
 Editorial Project: {project}

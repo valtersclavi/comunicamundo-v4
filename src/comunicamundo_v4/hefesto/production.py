@@ -69,7 +69,6 @@ class EditorialProduction:
             narrative_axis=project.narrative_axis,
             subject=subject.title,
             development=subject.development,
-            practical_dimension=subject.practical_dimension or "none specified",
             source_context=source_context,
             output_language=project.brief.output_language,
         )).strip()

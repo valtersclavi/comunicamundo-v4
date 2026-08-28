@@ -69,7 +69,7 @@ def _project_runtime() -> EditorialProjectRuntime:
     )
 
 
-def _proposal(*, practical: str | None = "Como tornar a presença praticável no cotidiano.") -> EditorialProjectProposal:
+def _proposal() -> EditorialProjectProposal:
     return EditorialProjectProposal(
         working_title="Presença compartilhada na perda",
         editorial_promise="Desenvolver a direção aprovada sem preescrever o artigo.",
@@ -77,7 +77,6 @@ def _proposal(*, practical: str | None = "Como tornar a presença praticável no
             EditorialSubjectProposal(
                 title="A travessia em relação",
                 development="Como a perda se atravessa em conjunto, a partir das fontes.",
-                practical_dimension=practical,
             )
         ],
         llm_subjects=["Diferenças por contexto de cuidado"],
@@ -173,7 +172,6 @@ def test_module_is_atomic_and_does_not_search_or_rebuild() -> None:
     assert "central_ideas" in text
     assert "source_limits" in text
     assert "treatment_scale" in lowered
-    assert "practical_dimension" in lowered
     assert "not an outline" in lowered
     assert "approve-axis" in WORKER_PY
     assert "--planning-run-id" in WORKER_PY
@@ -443,19 +441,6 @@ def test_idempotent_retry_does_not_create_duplicate_project() -> None:
     assert store.project_writes == writes
     assert len(store.stored_projects) == 1
 
-
-def test_practical_dimension_is_preserved() -> None:
-    store, proposed, _lineage, _extractor, _request, _synth, _prop = _ready()
-    result, _builder = _approve(
-        store,
-        proposed.planning_run.planning_run_id,
-        builder=RecordingBuilder(_proposal(practical="Como conversar sem esconder nem sobrecarregar.")),
-    )
-    assert result.editorial_project.core_subjects[0].practical_dimension == "Como conversar sem esconder nem sobrecarregar."
-    assert result.editorial_project.llm_subjects
-    assert result.editorial_project.enrichment_opportunities
-    assert result.editorial_project.working_title
-    assert result.editorial_project.editorial_promise
 
 
 def test_human_gate_remains_and_no_article_is_produced() -> None:
