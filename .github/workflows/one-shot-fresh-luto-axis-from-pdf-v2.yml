@@ -1,0 +1,310 @@
+name: one-shot-fresh-luto-axis-from-pdf-v2
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: hefesto-v4-fresh-luto-axis-from-pdf-v2
+  cancel-in-progress: false
+env:
+  PROJECT_ID: comunicamundo-v4
+  REGION: us-central1
+  JOB_NAME: hefesto-v4-rebuild
+  PROOF_SERVICE: hefesto-v4-fresh-luto-axis-pdf-v2
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  ORIGINAL_REFERENCE_PDF_SHA256: 21db1d9274ae0f72e266bce2e040ef47a754680bd24489c470c514f54c66bf17
+  EXPECTED_CANONICAL_TEXT_SHA256: a1bf3dfd229f1849790256b355e620927a42487ee037effad8ca224f78c8764b
+  EXPECTED_PDF_PAGES: '6'
+  OLD_PROJECT_ID: 13101c35-723d-43fe-9b45-0082b49c0a76
+  OLD_SOURCE_ID: 38d847b0-b30e-4270-a6f8-20563facbc70
+  OLD_PLANNING_RUN_ID: 0c25fe65-8f86-4ce1-99e7-95f80c92acba
+  OLD_SOURCE_LINEAGE_ID: b81c6f12-b82b-4c30-9c6a-f35e9094f71e
+  OLD_UNDERSTANDING_ID: 9e159ec5-66a6-4745-8336-f0b6b256a714
+  OLD_AXIS_ID: 5fbd94b9-2ba7-4584-bc38-e4d9cd2332c9
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+jobs:
+  fresh-proof:
+    if: ${{ contains(github.event.head_commit.message, '[fresh-luto-axis-proof-v2]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Fetch a PDF and prove content identity against original Library PDF
+        run: |
+          set -euo pipefail
+          if ! command -v pdfinfo >/dev/null 2>&1 || ! command -v pdftotext >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq poppler-utils
+          fi
+          urls=(
+            'https://www.researchgate.net/publication/370746895_O_vivenciar_do_luto_na_infancia/fulltext/645fe58e4353ba3b3b63156a/O-vivenciar-do-luto-na-infancia.pdf'
+            'https://sevenpubl.com.br/editora/article/download/1283/1399/3975'
+            'https://revista.faema.edu.br/index.php/Revista-FAEMA/article/download/1028/936'
+          )
+          matched=''
+          for url in "${urls[@]}"; do
+            rm -f /tmp/candidate.pdf /tmp/candidate.txt /tmp/candidate-canonical.txt
+            if ! curl -fL --retry 2 --connect-timeout 20 --max-time 120 \
+              -A 'Mozilla/5.0 Hefesto-V4-source-proof' "$url" -o /tmp/candidate.pdf; then
+              continue
+            fi
+            pages="$(pdfinfo /tmp/candidate.pdf 2>/dev/null | awk '/^Pages:/ {print $2}')"
+            sha="$(sha256sum /tmp/candidate.pdf | awk '{print $1}')"
+            echo "candidate=${url} pdf_sha256=${sha} pages=${pages} bytes=$(stat -c%s /tmp/candidate.pdf)"
+            [ "${pages}" = "${EXPECTED_PDF_PAGES}" ] || continue
+            pdftotext /tmp/candidate.pdf /tmp/candidate.txt
+            python - <<'PY'
+          import hashlib, os, re, unicodedata
+          from pathlib import Path
+          raw = Path('/tmp/candidate.txt').read_text(encoding='utf-8')
+          lines=[]
+          for line in raw.splitlines():
+              s=line.strip()
+              if s in {'Ciências da saúde e suas descobertas científicas','O vivenciar do luto na infância','CAPÍTULO','27'}:
+                  continue
+              if re.fullmatch(r'34[1-6]', s):
+                  continue
+              if s:
+                  lines.append(s)
+          canonical=unicodedata.normalize('NFKC',' '.join(lines)).lower()
+          canonical=re.sub(r'\s+',' ',canonical).strip()
+          digest=hashlib.sha256(canonical.encode()).hexdigest()
+          Path('/tmp/candidate-canonical.txt').write_text(canonical, encoding='utf-8')
+          Path('/tmp/candidate-canonical.sha').write_text(digest)
+          print(f'canonical_chars={len(canonical)} canonical_sha256={digest}')
+          PY
+            content_sha="$(cat /tmp/candidate-canonical.sha)"
+            if [ "${content_sha}" = "${EXPECTED_CANONICAL_TEXT_SHA256}" ]; then
+              cp /tmp/candidate.pdf /tmp/source.pdf
+              cp /tmp/candidate.txt /tmp/source-raw.txt
+              matched="${url}"
+              echo "SOURCE_PDF_SHA256=${sha}" >> "${GITHUB_ENV}"
+              break
+            fi
+          done
+          test -n "${matched}"
+          test "$(cat /tmp/candidate-canonical.sha)" = "${EXPECTED_CANONICAL_TEXT_SHA256}"
+          echo "PDF_URL=${matched}" >> "${GITHUB_ENV}"
+          echo "PDF_BYTES=$(stat -c%s /tmp/source.pdf)" >> "${GITHUB_ENV}"
+
+      - name: Freshly normalize the verified PDF and create a brand-new request
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, re, uuid
+          from pathlib import Path
+          raw=Path('/tmp/source-raw.txt').read_text(encoding='utf-8')
+          clean=[]
+          for line in raw.splitlines():
+              s=line.strip()
+              if s in {'Ciências da saúde e suas descobertas científicas','O vivenciar do luto na infância','CAPÍTULO','27'}:
+                  continue
+              if re.fullmatch(r'34[1-6]', s):
+                  continue
+              clean.append(line.rstrip())
+          text='\n'.join(clean)
+          text=re.sub(r'\n{3,}','\n\n',text).strip()
+          assert len(text) > 14000
+          assert 'O luto é um processo' in text
+          assert 'pai sobrevivente também passa por um processo de mudança emocional' in text
+          project_id=str(uuid.uuid4())
+          source_id=str(uuid.uuid4())
+          assert project_id != os.environ['OLD_PROJECT_ID']
+          assert source_id != os.environ['OLD_SOURCE_ID']
+          request={
+            'project_id': project_id,
+            'brief': {
+              'theme':'O vivenciar do luto na infância',
+              'approach':'Produza um blog post sobre como crianças vivenciam o luto, com sensibilidade, clareza e profundidade, usando o artigo como matéria-prima editorial.',
+              'duration_minutes':8,
+              'output_language':'pt-BR',
+              'audience':'Leitores não especialistas interessados em infância, cuidado e elaboração do luto',
+              'product':'article'
+            },
+            'sources':[{
+              'source_id':source_id,
+              'text':text,
+              'language':'pt',
+              'title':'O vivenciar do luto na infância',
+              'metadata':{
+                'original_filename':'O_vivenciar_do_luto_na_infancia(1)(1).pdf',
+                'pages':6,
+                'original_reference_pdf_sha256':os.environ['ORIGINAL_REFERENCE_PDF_SHA256'],
+                'source_pdf_sha256':os.environ['SOURCE_PDF_SHA256'],
+                'canonical_text_sha256':os.environ['EXPECTED_CANONICAL_TEXT_SHA256'],
+                'extraction':'fresh pdftotext from content-verified PDF; repeated page furniture removed',
+                'fresh_from_pdf':True
+              }
+            }]
+          }
+          Path('/tmp/fresh-request.json').write_text(json.dumps(request,ensure_ascii=False),encoding='utf-8')
+          print(json.dumps({'new_project_id':project_id,'new_source_id':source_id,'normalized_characters':len(text)},ensure_ascii=False))
+          PY
+          echo "NEW_PROJECT_ID=$(jq -r '.project_id' /tmp/fresh-request.json)" >> "${GITHUB_ENV}"
+          echo "NEW_SOURCE_ID=$(jq -r '.sources[0].source_id' /tmp/fresh-request.json)" >> "${GITHUB_ENV}"
+          echo "NORMALIZED_CHARACTERS=$(jq -r '.sources[0].text | length' /tmp/fresh-request.json)" >> "${GITHUB_ENV}"
+
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Prepare temporary runtime service
+        run: |
+          set -euo pipefail
+          pinned_image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test -n "${pinned_image}"
+          deployed_sa="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.serviceAccountName)')"
+          test "${deployed_sa}" = "${RUNTIME_SA}"
+          proof_token="$(openssl rand -hex 32)"
+          cat > /tmp/proof_service.py <<'PY'
+          import hmac, json, os
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from google.cloud import storage
+          from comunicamundo_v4.hefesto.contracts import NarrativeAxisStatus, PlanningRequest, PlanningRunState, SourceLineageState
+          from comunicamundo_v4.hefesto.worker import run_extract_graph_command, run_index_graph_command, run_plan_command, run_propose_axis_command
+
+          PROJECT=os.environ['GOOGLE_CLOUD_PROJECT']; BUCKET=os.environ['HEFESTO_GCS_BUCKET']; TOKEN=os.environ['PROOF_TOKEN']
+          OLD_PROJECT_ID=os.environ['OLD_PROJECT_ID']; OLD_SOURCE_ID=os.environ['OLD_SOURCE_ID']; OLD_RUN=os.environ['OLD_PLANNING_RUN_ID']
+          OLD_LINEAGE=os.environ['OLD_SOURCE_LINEAGE_ID']; OLD_UNDERSTANDING=os.environ['OLD_UNDERSTANDING_ID']; OLD_AXIS=os.environ['OLD_AXIS_ID']
+          EXPECTED_CONTENT=os.environ['EXPECTED_CANONICAL_TEXT_SHA256']
+
+          def run_proof(payload):
+              stage='validate_fresh_pdf_request'; run=None; lineage=None
+              try:
+                  request=PlanningRequest.model_validate(payload)
+                  assert str(request.project_id) != OLD_PROJECT_ID
+                  assert len(request.sources) == 1 and str(request.sources[0].source_id) != OLD_SOURCE_ID
+                  assert request.sources[0].metadata.get('canonical_text_sha256') == EXPECTED_CONTENT
+                  assert request.sources[0].metadata.get('fresh_from_pdf') is True
+                  assert request.brief.approach == 'Produza um blog post sobre como crianças vivenciam o luto, com sensibilidade, clareza e profundidade, usando o artigo como matéria-prima editorial.'
+                  stage='persist_fresh_request'
+                  obj=f'requests/fresh-luto-{request.project_id}.json'
+                  storage.Client(project=PROJECT).bucket(BUCKET).blob(obj).upload_from_string(request.model_dump_json(indent=2),content_type='application/json; charset=utf-8')
+                  uri=f'gs://{BUCKET}/{obj}'
+                  stage='plan'; run=run_plan_command(uri)
+                  assert str(run.planning_run_id) != OLD_RUN and str(run.source_lineage_id) != OLD_LINEAGE
+                  stage='extract_graph'; lineage=run_extract_graph_command(run.source_lineage_id)
+                  assert lineage.state is SourceLineageState.GRAPH_EXTRACTIONS_READY and lineage.failed_count == 0
+                  stage='index_graph'; lineage=run_index_graph_command(run.source_lineage_id)
+                  assert lineage.state is SourceLineageState.GRAPH_READY and lineage.graph_artifact_id and lineage.graph_manifest_uri
+                  stage='propose_axis'; result=run_propose_axis_command(run.planning_run_id)
+                  assert result.planning_run.state is PlanningRunState.AXIS_PROPOSED
+                  assert result.narrative_axis.status is NarrativeAxisStatus.PROPOSED
+                  assert str(result.editorial_understanding.understanding_id) != OLD_UNDERSTANDING
+                  assert str(result.narrative_axis.narrative_axis_id) != OLD_AXIS
+                  assert result.human_approval_required is True and result.editorial_project_created is False
+                  assert result.stopped_at == 'axis_proposed'
+                  assert result.planning_run.artifacts.editorial_project_id is None and result.planning_run.artifacts.editorial_project_uri is None
+                  return {
+                    'FRESH_LUTO_AXIS_FROM_PDF':'SUCCESS','request_uri':uri,'project_id':str(request.project_id),'source_id':str(request.sources[0].source_id),
+                    'source_characters':len(request.sources[0].text),'brief':request.brief.model_dump(mode='json'),'planning_run_id':str(run.planning_run_id),
+                    'source_lineage_id':str(run.source_lineage_id),'chunk_count':lineage.chunk_count,'extracted_count':lineage.extracted_count,
+                    'failed_count':lineage.failed_count,'graph_state':lineage.state.value,'graph_artifact_id':str(lineage.graph_artifact_id),
+                    'understanding_id':str(result.editorial_understanding.understanding_id),'narrative_axis_id':str(result.narrative_axis.narrative_axis_id),
+                    'axis_status':result.narrative_axis.status.value,'proposed_axis':result.proposed_axis,'human_approval_required':result.human_approval_required,
+                    'editorial_project_created':result.editorial_project_created,'stopped_at':result.stopped_at
+                  }
+              except Exception as exc:
+                  return {'FRESH_LUTO_AXIS_FROM_PDF':'FAILURE','failed_stage':stage,'error':type(exc).__name__,'message':str(exc),
+                          'planning_run_id':str(run.planning_run_id) if run else None,'source_lineage_id':str(run.source_lineage_id) if run else None,
+                          'lineage_state':lineage.state.value if lineage else None,'chunk_count':lineage.chunk_count if lineage else None,
+                          'extracted_count':lineage.extracted_count if lineage else None,'failed_count':lineage.failed_count if lineage else None}
+
+          class H(BaseHTTPRequestHandler):
+              def out(self,status,payload):
+                  body=json.dumps(payload,ensure_ascii=False).encode(); self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+              def ok(self): return hmac.compare_digest(self.headers.get('X-Proof-Token',''),TOKEN)
+              def do_GET(self):
+                  if not self.ok(): self.out(403,{'error':'forbidden'}); return
+                  self.out(200,{'status':'ok','model_invocation':'none'}) if self.path=='/health' else self.out(404,{'error':'not_found'})
+              def do_POST(self):
+                  if not self.ok(): self.out(403,{'error':'forbidden'}); return
+                  if self.path!='/proof': self.out(404,{'error':'not_found'}); return
+                  n=int(self.headers.get('Content-Length','0'))
+                  if n<=0 or n>2_000_000: self.out(400,{'error':'invalid_body_size'}); return
+                  try: payload=json.loads(self.rfile.read(n))
+                  except Exception as exc: self.out(400,{'error':type(exc).__name__,'message':str(exc)}); return
+                  self.out(200,run_proof(payload))
+              def log_message(self,*args): pass
+          ThreadingHTTPServer(('0.0.0.0',int(os.environ.get('PORT','8080'))),H).serve_forever()
+          PY
+          proof_b64="$(base64 -w0 /tmp/proof_service.py)"
+          gcloud run services delete "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet >/dev/null 2>&1 || true
+          gcloud run deploy "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --image="${pinned_image}" \
+            --service-account="${RUNTIME_SA}" --command=python --args=-c,"import base64;import os;exec(base64.b64decode(os.environ['PROOF_SCRIPT_B64']))" \
+            --cpu=4 --memory=8Gi --concurrency=1 --max-instances=1 --min-instances=0 --timeout=3600 --allow-unauthenticated \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},EXPECTED_CANONICAL_TEXT_SHA256=${EXPECTED_CANONICAL_TEXT_SHA256},OLD_PROJECT_ID=${OLD_PROJECT_ID},OLD_SOURCE_ID=${OLD_SOURCE_ID},OLD_PLANNING_RUN_ID=${OLD_PLANNING_RUN_ID},OLD_SOURCE_LINEAGE_ID=${OLD_SOURCE_LINEAGE_ID},OLD_UNDERSTANDING_ID=${OLD_UNDERSTANDING_ID},OLD_AXIS_ID=${OLD_AXIS_ID},PROOF_SCRIPT_B64=${proof_b64},PROOF_TOKEN=${proof_token}" --quiet
+          url="$(gcloud run services describe "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          test -n "${url}"
+          echo "PINNED_IMAGE=${pinned_image}" >> "${GITHUB_ENV}"
+          echo "PROOF_URL=${url}" >> "${GITHUB_ENV}"
+          echo "PROOF_TOKEN=${proof_token}" >> "${GITHUB_ENV}"
+
+      - name: Prove transport without model call
+        run: |
+          set -euo pipefail
+          h="$(curl -fsS -H "X-Proof-Token: ${PROOF_TOKEN}" "${PROOF_URL}/health")"
+          test "$(printf '%s' "${h}" | jq -r '.status')" = ok
+          test "$(printf '%s' "${h}" | jq -r '.model_invocation')" = none
+
+      - name: Execute fresh PDF to graph to understanding to Axis
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 3550 -H "X-Proof-Token: ${PROOF_TOKEN}" -H 'Content-Type: application/json' \
+            --data-binary @/tmp/fresh-request.json "${PROOF_URL}/proof" | tee /tmp/result.json
+          status="$(jq -r '.FRESH_LUTO_AXIS_FROM_PDF' /tmp/result.json)"
+          if [ "${status}" = FAILURE ]; then
+            echo "FAILED_STAGE=$(jq -r '.failed_stage' /tmp/result.json)" >> "${GITHUB_ENV}"
+            echo "FAILED_ERROR=$(jq -r '.error' /tmp/result.json)" >> "${GITHUB_ENV}"
+            echo "FAILED_MESSAGE=$(jq -r '.message' /tmp/result.json)" >> "${GITHUB_ENV}"
+            exit 1
+          fi
+          test "${status}" = SUCCESS
+          test "$(jq -r '.project_id' /tmp/result.json)" != "${OLD_PROJECT_ID}"
+          test "$(jq -r '.source_id' /tmp/result.json)" != "${OLD_SOURCE_ID}"
+          test "$(jq -r '.planning_run_id' /tmp/result.json)" != "${OLD_PLANNING_RUN_ID}"
+          test "$(jq -r '.source_lineage_id' /tmp/result.json)" != "${OLD_SOURCE_LINEAGE_ID}"
+          test "$(jq -r '.understanding_id' /tmp/result.json)" != "${OLD_UNDERSTANDING_ID}"
+          test "$(jq -r '.narrative_axis_id' /tmp/result.json)" != "${OLD_AXIS_ID}"
+          test "$(jq -r '.stopped_at' /tmp/result.json)" = axis_proposed
+          test "$(jq -r '.axis_status' /tmp/result.json)" = proposed
+          test "$(jq -r '.human_approval_required' /tmp/result.json)" = true
+          test "$(jq -r '.editorial_project_created' /tmp/result.json)" = false
+          echo "NEW_PLANNING_RUN_ID=$(jq -r '.planning_run_id' /tmp/result.json)" >> "${GITHUB_ENV}"
+          echo "NEW_SOURCE_LINEAGE_ID=$(jq -r '.source_lineage_id' /tmp/result.json)" >> "${GITHUB_ENV}"
+          echo "NEW_UNDERSTANDING_ID=$(jq -r '.understanding_id' /tmp/result.json)" >> "${GITHUB_ENV}"
+          echo "NEW_AXIS_ID=$(jq -r '.narrative_axis_id' /tmp/result.json)" >> "${GITHUB_ENV}"
+          echo "PROPOSED_AXIS=$(jq -r '.proposed_axis' /tmp/result.json)" >> "${GITHUB_ENV}"
+
+      - name: Result
+        if: always()
+        run: |
+          {
+            echo '# Fresh luto proof v2 — PDF → Narrative Axis'
+            echo "- Original Library PDF reference SHA-256: \`${ORIGINAL_REFERENCE_PDF_SHA256}\`"
+            echo "- Verified canonical text SHA-256: \`${EXPECTED_CANONICAL_TEXT_SHA256}\`"
+            echo "- Source PDF URL used: \`${PDF_URL:-NOT_RESOLVED}\`"
+            echo "- Source PDF binary SHA-256: \`${SOURCE_PDF_SHA256:-NOT_RESOLVED}\`"
+            echo "- Source PDF bytes: \`${PDF_BYTES:-NOT_RESOLVED}\`"
+            echo "- Normalized characters: \`${NORMALIZED_CHARACTERS:-NOT_RESOLVED}\`"
+            echo "- Canonical image: \`${PINNED_IMAGE:-NOT_RESOLVED}\`"
+            echo "- New project: \`${NEW_PROJECT_ID:-NOT_COMPLETED}\`"
+            echo "- New source: \`${NEW_SOURCE_ID:-NOT_COMPLETED}\`"
+            echo "- New planning run: \`${NEW_PLANNING_RUN_ID:-NOT_COMPLETED}\`"
+            echo "- New source lineage: \`${NEW_SOURCE_LINEAGE_ID:-NOT_COMPLETED}\`"
+            echo "- New understanding: \`${NEW_UNDERSTANDING_ID:-NOT_COMPLETED}\`"
+            echo "- New Narrative Axis: \`${NEW_AXIS_ID:-NOT_COMPLETED}\`"
+            if [ -n "${FAILED_STAGE:-}" ]; then echo "- Failed stage: \`${FAILED_STAGE}\` — \`${FAILED_ERROR}\`: ${FAILED_MESSAGE}"; fi
+            if [ -f /tmp/result.json ]; then echo; echo '## Full proof result'; echo '```json'; cat /tmp/result.json; echo; echo '```'; fi
+            if [ -n "${PROPOSED_AXIS:-}" ]; then echo; echo '## Eixo Narrativo proposto'; echo "${PROPOSED_AXIS}"; echo; echo '- STOP: human review required; no Editorial Project created.'; fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Cleanup temporary service
+        if: always()
+        run: gcloud run services delete "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
