@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from .contracts import AxisFeedbackDecisionState, EditorialProjectStatus, NarrativeAxisStatus
+from .contracts import EditorialProjectStatus, NarrativeAxisStatus
 from .persistence import GcpEditorialPersistence, StoredEditorialProject, StoredNarrativeAxis
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ class HefestoApplication:
             raise KeyError(f"Narrative Axis not found: {axis_id}")
         if stored.narrative_axis.status is NarrativeAxisStatus.SUPERSEDED:
             raise ValueError("cannot approve a superseded Narrative Axis")
-        await asyncio.to_thread(self._reject_editorial_project_if_enrichment_held, stored)
+        await asyncio.to_thread(self._reject_editorial_project_if_feedback_unconsumed, stored)
         approved = stored.narrative_axis.approve()
         stored = await asyncio.to_thread(self._persistence.save_axis, stored.model_copy(update={"narrative_axis": approved}))
         project = await self._runtime.director.build_project(axis=approved, brief=stored.brief, graph_context=stored.graph_context)
@@ -72,15 +72,15 @@ class HefestoApplication:
             article = await self._runtime.production.run(project=stored.editorial_project, graph=graph)
             return await asyncio.to_thread(self._persistence.publish_article, article)
 
-    def _reject_editorial_project_if_enrichment_held(self, stored: StoredNarrativeAxis) -> None:
+    def _reject_editorial_project_if_feedback_unconsumed(self, stored: StoredNarrativeAxis) -> None:
         if stored.planning_run_id is None:
             return
         run = self._persistence.get_run(stored.planning_run_id)
-        if run is None or run.artifacts.axis_feedback_decision_uri is None:
+        if run is None:
             return
-        decision = self._persistence.load_axis_feedback_decision(run.artifacts.axis_feedback_decision_uri)
-        if decision.state in {
-            AxisFeedbackDecisionState.ENRICHMENT_REQUIRED,
-            AxisFeedbackDecisionState.ENRICHMENT_ACCEPTED,
-        }:
-            raise ValueError("cannot create an Editorial Project while enrichment is required or accepted")
+        if run.artifacts.axis_feedback_decision_uri is None:
+            return
+        raise ValueError(
+            "cannot create an Editorial Project while a durable Axis feedback decision exists; "
+            "the next delivery must consume feedback history and carry-forward"
+        )

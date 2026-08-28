@@ -211,9 +211,7 @@ async def _run(args: argparse.Namespace) -> None:
         print(result.model_dump_json())
         return
     app = _application()
-    if args.command == "approve-axis":
-        result = await app.approve_axis(args.narrative_axis_id)
-    elif args.command == "revise-project":
+    if args.command == "revise-project":
         result = await app.revise_project(args.editorial_project_id, _feedback(args.feedback_b64))
     elif args.command == "approve-project":
         result = await app.approve_project(args.editorial_project_id)
@@ -250,8 +248,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     resolve_feedback.add_argument("--planning-run-id", type=UUID, required=True)
     resolve_feedback.add_argument("--choice", required=True, choices=["accept", "decline"])
-    approve_axis = commands.add_parser("approve-axis")
-    approve_axis.add_argument("--narrative-axis-id", type=UUID, required=True)
     revise_project = commands.add_parser("revise-project")
     revise_project.add_argument("--editorial-project-id", type=UUID, required=True)
     revise_project.add_argument("--feedback-b64", required=True)

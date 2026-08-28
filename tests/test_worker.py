@@ -28,7 +28,6 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     parser = _parser()
     axis_id = str(uuid4())
     project_id = str(uuid4())
-    assert parser.parse_args(["approve-axis", "--narrative-axis-id", axis_id]).command == "approve-axis"
     assert parser.parse_args(["approve-project", "--editorial-project-id", project_id]).command == "approve-project"
     assert parser.parse_args(["plan", "--request", "gs://bucket/request.json"]).command == "plan"
     parsed = parser.parse_args(["extract-graph", "--source-lineage-id", axis_id])
@@ -53,10 +52,13 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     subparsers = [action for action in parser._actions if getattr(action, "choices", None)]
     commands = set(subparsers[0].choices)
     assert "revise-axis" not in commands
+    assert "approve-axis" not in commands
     assert "review-axis-feedback" in commands
     assert "resolve-axis-feedback" in commands
     with pytest.raises(SystemExit):
         parser.parse_args(["revise-axis", "--narrative-axis-id", axis_id, "--feedback-b64", "Zg"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["approve-axis", "--narrative-axis-id", axis_id])
 
 
 def test_canonical_cli_cannot_rewrite_proposed_axis_without_feedback_decision() -> None:
@@ -64,6 +66,7 @@ def test_canonical_cli_cannot_rewrite_proposed_axis_without_feedback_decision() 
     subparsers = [action for action in parser._actions if getattr(action, "choices", None)]
     commands = set(subparsers[0].choices)
     assert "revise-axis" not in commands
+    assert "approve-axis" not in commands
     assert {"review-axis-feedback", "resolve-axis-feedback"} <= commands
     axis_feedback_commands = [
         name
