@@ -105,8 +105,8 @@ def _corpus(understanding) -> str:
 
 
 def _has_marker(text: str, markers: tuple[str, ...]) -> bool:
-    lowered = f" {text.lower()} "
-    return any(marker in lowered or marker in text.lower() for marker in markers)
+    lowered = text.lower()
+    return any(re.search(rf"\b{re.escape(marker)}\b", lowered) is not None for marker in markers)
 
 
 def _rewrite(text: str, rules: tuple[tuple[str, str], ...]) -> str:
