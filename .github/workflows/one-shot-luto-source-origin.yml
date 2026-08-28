@@ -1,0 +1,59 @@
+name: one-shot-luto-source-origin
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  id-token: write
+env:
+  PROJECT_ID: comunicamundo-v4
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  OLD_PROJECT_ID: 13101c35-723d-43fe-9b45-0082b49c0a76
+jobs:
+  inspect:
+    if: ${{ contains(github.event.head_commit.message, '[luto-source-origin]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Inspect request without source body
+        run: |
+          set -euo pipefail
+          gcloud storage cat "${REQUEST_URI}" > /tmp/request.json
+          jq '{project_id, brief, sources: [.sources[] | {source_id,title,language,metadata,characters:(.text|length),text_sha256:(.text|@base64)}]}' /tmp/request.json \
+            | jq '(.sources[].text_sha256) = "omitted"' \
+            | tee /tmp/request-metadata.json
+      - name: Find candidate original objects
+        run: |
+          set -euo pipefail
+          gcloud storage ls --recursive "gs://${BUCKET}/**" > /tmp/all-objects.txt
+          {
+            echo '### Objects containing old project id'
+            grep -F "${OLD_PROJECT_ID}" /tmp/all-objects.txt || true
+            echo '### PDF objects'
+            grep -Ei '\.pdf$' /tmp/all-objects.txt || true
+            echo '### Objects mentioning luto/grief/source/original/upload'
+            grep -Ei 'luto|grief|source|original|upload' /tmp/all-objects.txt | head -n 300 || true
+          } | tee /tmp/candidates.txt
+      - name: Result
+        if: always()
+        run: |
+          {
+            echo '# Luto source-origin diagnostic'
+            echo '## Request metadata'
+            echo '```json'
+            cat /tmp/request-metadata.json 2>/dev/null || true
+            echo '```'
+            echo '## Candidate bucket objects'
+            echo '```text'
+            cat /tmp/candidates.txt 2>/dev/null || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
