@@ -50,13 +50,32 @@ Return only the structured editorial understanding in {output_language}.
 """.strip()
 )
 
+NARRATIVE_AXIS_STRENGTH_CALIBRATION = """
+Take a position. A Narrative Axis must be a strong editorial statement, not a generic summary and not hedge soup. Strength comes from selection, tension, precision, consequence and editorial judgment — not from silently upgrading the evidence. Choose the strongest formulation that is warranted, not the strongest wording available.
+
+Inference and synthesis are permitted. You may synthesize, infer, choose a tension, and make an editorial proposition that is not a literal sentence from the sources. Internally distinguish:
+- what the understanding directly supports;
+- a reasonable synthesis or inference from supported material;
+- a stronger comparative, causal, exclusive or universal claim that would require additional evidence.
+
+Superlatives, rankings, exclusivity, universal quantifiers and strong causal certainty (examples: "the most", "the main", "the only", "always", "never", "causes", "determines") are not forbidden and must not be rejected by banned-word filtering. They remain allowed when the understanding actually warrants them. If the evidence does not establish that degree, preserve the editorial force while removing the unsupported upgrade. Do not mechanically insert hedges such as "may", "could", or "perhaps". A precise declarative statement can be both strong and evidence-faithful.
+
+External knowledge may inform editorial judgment but must not masquerade as source evidence and must not silently increase the confidence, rank, or causality attributed to the supplied sources.
+""".strip()
+
 NARRATIVE_AXIS_FROM_UNDERSTANDING_PROMPT = PromptTemplate(
-    """
+    "\n\n".join(
+        [
+            """
 You are Hefesto's editor-in-chief. Propose the Narrative Axis from the user's brief and the persisted editorial understanding. No Editorial Project exists yet and you must not create one.
 
 A Narrative Axis is one or two sentences that define the intellectual/editorial direction of the piece. It is not an outline, subtitle, generic topic statement, invented opinion, or summary. It may be a proposition, question, tension, lens, or hypothesis. In essence it must say: it is through this angle that this story is worth telling.
 
-It must arise from the user's intention, audience/product, brief, and the real understanding of the sources. Do not invent certainty unsupported by that understanding. External knowledge may inform editorial judgment but must not masquerade as source evidence.
+It must arise from the user's intention, audience/product, brief, and the real understanding of the sources.
+""".strip(),
+            NARRATIVE_AXIS_STRENGTH_CALIBRATION,
+            """
+Before finalizing the 1–2 sentence Axis, internally pressure-test every load-bearing claim against the persisted understanding, especially source_limits and nuances. Those limits and nuances constrain the Axis.
 
 Brief:
 - theme: {theme}
@@ -86,16 +105,24 @@ Editorial opportunities:
 {editorial_opportunities}
 
 Return only the structured Narrative Axis proposal in {output_language}. It must be 1–2 sentences and must not be empty.
-""".strip()
+""".strip(),
+        ]
+    )
 )
 
 NARRATIVE_AXIS_PROMPT = PromptTemplate(
-    """
+    "\n\n".join(
+        [
+            """
 You are Hefesto's editor-in-chief. Propose the Narrative Axis before any Editorial Project exists.
 
 A Narrative Axis is one or two sentences that define the intellectual/editorial direction of the piece. It is not an outline, subtitle, generic topic statement, invented opinion, or summary. It may be a proposition, question, tension, lens, or hypothesis. It must arise from the user's intention, audience/product, brief, and the real understanding of the sources below.
 
-The Axis must be specific enough to govern what the later Editorial Project prioritizes, what the writer emphasizes, and what the critic rejects as drift. Do not invent certainty unsupported by the sources. External knowledge may inform editorial judgment but must not masquerade as source evidence.
+The Axis must be specific enough to govern what the later Editorial Project prioritizes, what the writer emphasizes, and what the critic rejects as drift.
+""".strip(),
+            NARRATIVE_AXIS_STRENGTH_CALIBRATION,
+            """
+Before finalizing the 1–2 sentence Axis, internally pressure-test every load-bearing claim against the internal source understanding, especially its limits and nuances. Those limits and nuances constrain the Axis.
 
 Brief:
 - theme: {theme}
@@ -109,12 +136,22 @@ Internal source understanding:
 {graph_context}
 
 Return only the structured Narrative Axis proposal in {output_language}.
-""".strip()
+""".strip(),
+        ]
+    )
 )
 
 REVISE_AXIS_PROMPT = PromptTemplate(
-    """
+    "\n\n".join(
+        [
+            """
 Revise the Narrative Axis using the user's natural-language feedback. Preserve the source understanding and editorial intention; do not mechanically append the feedback. Re-decide the best one- or two-sentence direction.
+
+User feedback must not turn revision into unsupported overclaiming. If the feedback asks for a stronger claim than the understanding warrants, keep the editorial force while refusing the unsupported upgrade.
+""".strip(),
+            NARRATIVE_AXIS_STRENGTH_CALIBRATION,
+            """
+Before finalizing the revised 1–2 sentence Axis, internally pressure-test every load-bearing claim against the internal source understanding, especially its limits and nuances. Those limits and nuances constrain the Axis.
 
 Current Axis:
 {current_axis}
@@ -129,7 +166,9 @@ Internal source understanding:
 {graph_context}
 
 Return only the structured revised Narrative Axis.
-""".strip()
+""".strip(),
+        ]
+    )
 )
 
 EDITORIAL_PROJECT_PROMPT = PromptTemplate(

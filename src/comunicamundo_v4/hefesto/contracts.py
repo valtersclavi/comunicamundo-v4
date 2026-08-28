@@ -364,7 +364,7 @@ class SourceLineage(StrictModel):
 EDITORIAL_UNDERSTANDING_CONTRACT_VERSION = "editorial-understanding.v1"
 EDITORIAL_UNDERSTANDING_PROMPT_VERSION = "hefesto.editorial-understanding.v1"
 NARRATIVE_AXIS_CONTRACT_VERSION = "narrative-axis.v1"
-NARRATIVE_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v1"
+NARRATIVE_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v2"
 
 
 class EditorialUnderstandingProposal(StrictModel):
