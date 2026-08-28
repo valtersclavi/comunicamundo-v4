@@ -228,12 +228,12 @@ Identify the affected premise(s) and the downstream editorial consequences. Do n
 
 Structural impact and textual space are independent. A nuance can materially change interpretation or praxis while requiring only a brief textual treatment. Do not infer section length from impact.
 
-Support — after impact, classify how the contribution can be sustained:
-- sources: the persisted editorial understanding and current sources are sufficient.
+Support — after impact, classify how the contribution can be sustained. Judge support from the persisted SOURCE EVIDENCE below, not from the editorial understanding alone. The understanding is a synthesis: it may already mention an idea that the sources themselves only touch, or that entered during synthesis from model knowledge. Classify support as sources only when the source material itself provides enough substance for the proposed editorial role. A passing mention, echo, or synthesized restatement in the understanding is not sufficient for substantial or structural development. If the sources are thin or silent on the contribution, choose model (when safe general knowledge can sustain a bounded mention) or enrichment (when responsible development needs additional reliable sources).
+- sources: the persisted source material itself can sustain the proposed editorial role.
 - model: sources are insufficient, but stable internal model knowledge is sufficient for responsible editorial use. It must not invent facts, numbers, strong causalities, rankings, contested or specialized precision, or evidence claims. External or model knowledge must never masquerade as source evidence.
 - enrichment: responsible development at the needed level requires additional reliable source material.
 
-Do not treat "the model knows something" as automatically sufficient. If you cannot sustain the contribution responsibly from current sources or safe model knowledge, choose enrichment.
+Do not treat "the model knows something" as automatically sufficient. Do not treat "the understanding already mentions it" as source evidence. If you cannot sustain the contribution responsibly from current source material or safe model knowledge, choose enrichment.
 
 Decision:
 - keep: leave the current Axis unchanged and carry the contribution forward for the later Editorial Project.
@@ -278,6 +278,9 @@ Source limits:
 
 Editorial opportunities:
 {editorial_opportunities}
+
+Persisted source evidence (normalized chunks with provenance; this is the source material, not the synthesis):
+{source_chunks}
 
 Return only the structured feedback decision in {output_language}.
 """.strip()
@@ -352,7 +355,7 @@ AXIS_FEEDBACK_BOUNDED_RECALIBRATION_PROMPT = PromptTemplate(
     """
 You are Hefesto's editorial intelligence. The user refused additional sources: stay with what we already have. Recalibrate ambition. Do not erase the user's intention. Do not fabricate support. Do not search. Do not create an Editorial Project. Do not approve the Axis.
 
-Use only the persisted understanding (current sources) plus safe model knowledge. Safe model knowledge must not invent facts, numbers, strong causalities, rankings, contested or specialized precision, or evidence claims, and must never masquerade as source evidence.
+Use the persisted SOURCE EVIDENCE below plus safe model knowledge. Do not treat the editorial understanding as a substitute for source substance. sources means the source material itself can sustain the bounded role; a passing mention or synthesized restatement in the understanding is not enough. Safe model knowledge must not invent facts, numbers, strong causalities, rankings, contested or specialized precision, or evidence claims, and must never masquerade as source evidence.
 
 support may only be sources or model. axis_action may only be keep or revise. You cannot choose enrichment or hold_for_enrichment.
 
@@ -398,6 +401,9 @@ Source limits:
 
 Editorial opportunities:
 {editorial_opportunities}
+
+Persisted source evidence (normalized chunks with provenance; this is the source material, not the synthesis):
+{source_chunks}
 
 If keeping the Axis, set carry_forward_intent to the bounded commitment for the later Editorial Project. Return only the structured bounded recalibration in {output_language}.
 """.strip()

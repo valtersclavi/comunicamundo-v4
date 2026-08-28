@@ -11,7 +11,7 @@ from comunicamundo_v4.hefesto.axis_feedback import (
     LlamaIndexBoundedRecalibrator,
     load_axis_feedback_history,
 )
-from comunicamundo_v4.hefesto.axis_proposal import LlamaIndexAxisEvidenceReviewer
+from comunicamundo_v4.hefesto.axis_proposal import LlamaIndexAxisEvidenceReviewer, format_source_chunks
 from comunicamundo_v4.hefesto.contracts import (
     AXIS_FEEDBACK_CONTRACT_VERSION,
     AXIS_FEEDBACK_PROMPT_VERSION,
@@ -21,6 +21,7 @@ from comunicamundo_v4.hefesto.contracts import (
     AxisFeedbackReviewResult,
     BoundedRecalibrationProposal,
     EditorialImpactKind,
+    EditorialUnderstandingProposal,
     EnrichmentResolutionChoice,
     NarrativeAxisEvidenceReview,
     NarrativeAxisProposal,
@@ -61,6 +62,8 @@ ENRICHMENT_FEEDBACK = "Include the unpublished 2024 longitudinal ranking of outc
 REVISED_QUALIFYING = "The practice only holds as a shared relation, and age-fit honesty turns protection into presence."
 REVISED_REFORMULATING = "The story is worth telling through the tension between doing this work in relation and doing it alone."
 BOUNDED_REVISED = "The piece can name the adult's own grief as a bound on what the current sources support."
+THIN_SOURCE_CONCEPT = "adult caregiver's own grief"
+THIN_SOURCE_FEEDBACK = "Please treat the adult caregiver's own grief as part of the story, not only the child's."
 
 
 class RecordingDecider:
@@ -96,6 +99,76 @@ class RecordingRecalibrator:
 class FailingDecider:
     def decide(self, **kwargs):
         raise RuntimeError("decision failed")
+
+
+class ThinMentionSynthesizer:
+    def __init__(self) -> None:
+        self.materials = []
+
+    def synthesize(self, material) -> EditorialUnderstandingProposal:
+        self.materials.append(material)
+        return EditorialUnderstandingProposal(
+            central_ideas=[f"The {THIN_SOURCE_CONCEPT} already shapes the child's world."],
+            relations_and_tensions=["The adult-child relation carries the loss together."],
+            nuances=["Honesty has to fit the child's age."],
+            source_limits=["The sources do not develop the adult's interior mourning."],
+            editorial_opportunities=["Keep the child's perception central."],
+            synthesis=(
+                "The sources show the child perceives absence. The understanding also names "
+                f"the {THIN_SOURCE_CONCEPT} as a survivor of the same loss, a synthesized note "
+                "rather than sourced development."
+            ),
+        )
+
+
+class SourceGroundedSupportLlm:
+    """Classifies from source_chunks when present; understanding-only path wrongly returns sources."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def structured_predict(self, model, prompt, **kwargs):
+        self.calls.append({"model": model, "prompt": prompt, **kwargs})
+        chunks = kwargs.get("source_chunks")
+        synthesis = kwargs.get("synthesis", "")
+        in_sources = isinstance(chunks, str) and THIN_SOURCE_CONCEPT.lower() in chunks.lower()
+        in_understanding = THIN_SOURCE_CONCEPT.lower() in synthesis.lower()
+        if prompt is AXIS_FEEDBACK_DECISION_PROMPT:
+            if chunks is None:
+                proposal = _decision_proposal()
+            elif in_understanding and not in_sources:
+                proposal = _decision_proposal(
+                    support=SupportKind.ENRICHMENT,
+                    axis_action=AxisAction.HOLD_FOR_ENRICHMENT,
+                    carry_forward_intent=None,
+                    enrichment_need="The contribution needs source substance the current chunks do not provide.",
+                    support_rationale="The understanding mentions it; the source material does not sustain it.",
+                    decision_rationale="Hold pending enrichment.",
+                )
+            else:
+                proposal = _decision_proposal()
+            assert isinstance(proposal, model)
+            return proposal
+        if prompt is AXIS_FEEDBACK_BOUNDED_RECALIBRATION_PROMPT:
+            if chunks is None or (in_understanding and in_sources):
+                proposal = _bounded_proposal(support=SupportKind.SOURCES, axis_action=AxisAction.KEEP)
+            elif in_understanding and not in_sources:
+                proposal = _bounded_proposal(
+                    support=SupportKind.MODEL,
+                    support_rationale="Without source substance, only a bounded model-safe mention is responsible.",
+                    axis_action=AxisAction.KEEP,
+                )
+            else:
+                proposal = _bounded_proposal()
+            assert isinstance(proposal, model)
+            return proposal
+        raise AssertionError("unexpected prompt for support assessment")
+
+
+def _persisted_source_pack(store, lineage) -> str:
+    manifest = store.load_chunk_manifest(lineage.chunk_manifest_uri)
+    chunks = [store.load_chunk(entry.chunk_uri) for entry in manifest.chunks]
+    return format_source_chunks(tuple(sorted(chunks, key=lambda chunk: chunk.sequence)))
 
 
 def _decision_proposal(**overrides) -> AxisFeedbackDecisionProposal:
@@ -225,6 +298,14 @@ def test_feedback_prompts_require_impact_support_and_independent_treatment() -> 
     assert "sources" in decision and "enrichment" in decision
     assert "never masquerade as source evidence" in decision
     assert "as automatically sufficient" in decision
+    assert "source material itself" in decision
+    assert "passing mention" in decision
+    assert "not merely" in decision or "not treat" in decision
+    assert "{source_chunks}" in decision
+    assert "{source_chunks}" in bounded
+    assert "source material itself" in bounded
+    assert "passing mention" in bounded or "synthesized restatement" in bounded
+    assert "{source_chunks}" not in revision
     assert "not automatically another subject" in decision
     assert "hold_for_enrichment" in decision
     assert "treatment_scale" in decision
@@ -232,6 +313,121 @@ def test_feedback_prompts_require_impact_support_and_independent_treatment() -> 
     assert "do not erase the user's intention" in bounded
     assert "do not fabricate support" in bounded
     assert "importance does not imply section length" in bounded
+
+
+def test_decision_and_recalibration_receive_persisted_source_evidence() -> None:
+    store, proposed, lineage, extractor, _request, synth, _prop = _ready()
+    extract_writes = store.extraction_writes
+    graph_writes = store.graph_writes
+    understanding_writes = store.understanding_writes
+    pack = _persisted_source_pack(store, lineage)
+    assert "primeiro bloco." in pack
+    assert "segundo bloco." in pack
+    assert "source=" in pack
+    assert "id=" in pack
+    restore_calls = {"n": 0}
+    original_restore = store.restore_source_lineage_graph
+
+    def counting_restore(*args, **kwargs):
+        restore_calls["n"] += 1
+        return original_restore(*args, **kwargs)
+
+    store.restore_source_lineage_graph = counting_restore  # type: ignore[method-assign]
+    decider = RecordingDecider(
+        _decision_proposal(
+            support=SupportKind.ENRICHMENT,
+            axis_action=AxisAction.HOLD_FOR_ENRICHMENT,
+            carry_forward_intent=None,
+            enrichment_need="Need a source we do not have.",
+            support_rationale="Insufficient current support.",
+            decision_rationale="Hold.",
+        )
+    )
+    recalibrator = RecordingRecalibrator(_bounded_proposal())
+    orchestrator = _orchestrator(store, decider=decider, recalibrator=recalibrator)
+    orchestrator.review(proposed.planning_run.planning_run_id, ENRICHMENT_FEEDBACK)
+    orchestrator.resolve(proposed.planning_run.planning_run_id, EnrichmentResolutionChoice.DECLINE)
+    assert decider.calls[0]["source_chunks"] == pack
+    assert recalibrator.calls[0]["source_chunks"] == pack
+    assert restore_calls["n"] == 0
+    assert store.extraction_writes == extract_writes
+    assert store.graph_writes == graph_writes
+    assert store.understanding_writes == understanding_writes
+    assert len(synth.materials) == 1
+    assert extractor.calls
+
+
+def test_understanding_mention_without_source_substance_is_not_automatically_sources() -> None:
+    store = MemoryPlanningPersistence()
+    run, lineage, extractor, _request = _prepare_graph_ready(store, "primeiro bloco.", "segundo bloco.")
+    extract_writes = store.extraction_writes
+    graph_writes = store.graph_writes
+    synth = ThinMentionSynthesizer()
+    proposed, recorded_synth, _prop = _propose(store, run, synthesizer=synth)
+    understanding_writes = store.understanding_writes
+    pack = _persisted_source_pack(store, lineage)
+    assert THIN_SOURCE_CONCEPT in proposed.editorial_understanding.synthesis
+    assert THIN_SOURCE_CONCEPT not in pack
+    llm = SourceGroundedSupportLlm()
+    base = _axis_runtime()
+    runtime = AxisProposalRuntime(
+        embed_model=base.embed_model,
+        understanding_llm=base.understanding_llm,
+        understanding_model=base.understanding_model,
+        understanding_max_tokens=base.understanding_max_tokens,
+        axis_llm=llm,
+        axis_model=base.axis_model,
+        axis_max_tokens=base.axis_max_tokens,
+        context_window=base.context_window,
+    )
+    orchestrator = AxisFeedbackOrchestrator(
+        store,
+        runtime,
+        LlamaIndexAxisFeedbackDecider(runtime),
+        RecordingReviser(REVISED_QUALIFYING),
+        RecordingEvidenceReviewer(),
+        LlamaIndexBoundedRecalibrator(runtime),
+    )
+    held = orchestrator.review(proposed.planning_run.planning_run_id, THIN_SOURCE_FEEDBACK)
+    assert held.decision.support is SupportKind.ENRICHMENT
+    assert held.decision.axis_action is AxisAction.HOLD_FOR_ENRICHMENT
+    assert llm.calls[0]["prompt"] is AXIS_FEEDBACK_DECISION_PROMPT
+    assert THIN_SOURCE_CONCEPT in llm.calls[0]["synthesis"]
+    assert llm.calls[0]["source_chunks"] == pack
+    assert THIN_SOURCE_CONCEPT not in llm.calls[0]["source_chunks"]
+    declined = orchestrator.resolve(proposed.planning_run.planning_run_id, EnrichmentResolutionChoice.DECLINE)
+    assert declined.decision.support is SupportKind.MODEL
+    assert declined.decision.support is not SupportKind.SOURCES
+    assert llm.calls[1]["prompt"] is AXIS_FEEDBACK_BOUNDED_RECALIBRATION_PROMPT
+    assert llm.calls[1]["source_chunks"] == pack
+    assert store.extraction_writes == extract_writes
+    assert store.graph_writes == graph_writes
+    assert store.understanding_writes == understanding_writes
+    assert len(recorded_synth.materials) == 1
+    assert extractor.calls
+
+
+def test_support_evidence_that_cannot_fit_fails_closed_without_dropping() -> None:
+    store, proposed, _lineage, _extractor, _request, synth, _prop = _ready()
+    base = _axis_runtime()
+    runtime = AxisProposalRuntime(
+        embed_model=base.embed_model,
+        understanding_llm=base.understanding_llm,
+        understanding_model=base.understanding_model,
+        understanding_max_tokens=base.understanding_max_tokens,
+        axis_llm=base.axis_llm,
+        axis_model=base.axis_model,
+        axis_max_tokens=48,
+        context_window=64,
+    )
+    with pytest.raises(ValueError, match="cannot fit in the support-assessment context window"):
+        _orchestrator(store, decider=RecordingDecider(_decision_proposal()), runtime=runtime).review(
+            proposed.planning_run.planning_run_id, COMPLEMENT_FEEDBACK
+        )
+    updated = store.get_run(proposed.planning_run.planning_run_id)
+    assert updated.artifacts.axis_feedback_decision_uri is None
+    assert store.feedback_writes == 0
+    assert len(synth.materials) == 1
 
 
 def test_complement_with_source_support_keeps_axis_and_carries_forward() -> None:
@@ -875,6 +1071,11 @@ def test_structured_passes_use_existing_axis_llm_and_v3_reviewer() -> None:
         assert field in axis_llm.calls[0]
         assert field in axis_llm.calls[1]
         assert field in axis_llm.calls[2]
+    assert "source_chunks" in axis_llm.calls[0]
+    assert "primeiro bloco." in axis_llm.calls[0]["source_chunks"]
+    assert "source=" in axis_llm.calls[0]["source_chunks"]
+    assert "source_chunks" not in axis_llm.calls[1]
+    assert "source_chunks" not in axis_llm.calls[2]
     assert store.extraction_writes == extract_writes
     assert store.graph_writes == graph_writes
     assert len(synth.materials) == 1

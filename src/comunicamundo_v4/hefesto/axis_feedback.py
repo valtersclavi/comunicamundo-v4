@@ -8,6 +8,7 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 
 from .axis_proposal import (
     apply_evidence_strength_review,
+    format_source_chunks,
     validate_axis_statement,
     _understanding_prompt_fields,
 )
@@ -34,6 +35,7 @@ from .contracts import (
     PlanningRequest,
     PlanningRun,
     PlanningRunState,
+    PreparedChunk,
     SourceLineage,
     SupportKind,
 )
@@ -54,6 +56,10 @@ UNBOUNDED_REVISION_CONSTRAINT = (
     "The contribution is already classified as sustainable from current sources or safe model knowledge. "
     "Do not invent evidence and do not silently upgrade source-supported claims."
 )
+SUPPORT_EVIDENCE_OVERFLOW = (
+    "persisted source evidence cannot fit in the support-assessment context window"
+)
+_CHARS_PER_TOKEN = 4
 
 
 def _now() -> datetime:
@@ -64,11 +70,53 @@ def _join_lines(values: list[str]) -> str:
     return "\n".join(values) if values else "(none)"
 
 
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return (len(text) + _CHARS_PER_TOKEN - 1) // _CHARS_PER_TOKEN
+
+
+def _render_prompt(prompt, **kwargs) -> str:
+    template = getattr(prompt, "template", None)
+    if not isinstance(template, str) or not template.strip():
+        raise ValueError("support-assessment prompt is missing a template string")
+    return template.format(**kwargs)
+
+
+def ensure_support_evidence_fits(*, prompt, context_window: int, max_output_tokens: int, **kwargs) -> None:
+    packed = _render_prompt(prompt, **kwargs)
+    required = _estimate_tokens(packed) + max_output_tokens
+    if required > context_window:
+        raise ValueError(SUPPORT_EVIDENCE_OVERFLOW)
+
+
 def _axis_uri(run: PlanningRun) -> str:
     uri = run.artifacts.narrative_axis_uri
     if uri is None:
         raise ValueError("PlanningRun does not have a persisted Narrative Axis")
     return uri
+
+
+def _support_assessment_fields(
+    *,
+    brief: EditorialBrief,
+    understanding: EditorialUnderstanding,
+    current_axis: NarrativeAxis,
+    feedback: str,
+    source_chunks: str,
+) -> dict:
+    return {
+        "current_axis": current_axis.statement,
+        "feedback": feedback,
+        "theme": brief.theme,
+        "approach": brief.approach,
+        "audience": brief.audience or "not specified",
+        "product": brief.product,
+        "duration_minutes": brief.duration_minutes,
+        "output_language": brief.output_language,
+        "source_chunks": source_chunks,
+        **_understanding_prompt_fields(understanding),
+    }
 
 
 def fingerprint_feedback(feedback: str) -> str:
@@ -99,6 +147,7 @@ class AxisFeedbackDecider(Protocol):
         understanding: EditorialUnderstanding,
         current_axis: NarrativeAxis,
         feedback: str,
+        source_chunks: str,
     ) -> AxisFeedbackDecisionProposal: ...
 
 
@@ -127,6 +176,7 @@ class BoundedRecalibrator(Protocol):
         current_axis: NarrativeAxis,
         feedback: str,
         original: AxisFeedbackDecision,
+        source_chunks: str,
     ) -> BoundedRecalibrationProposal: ...
 
 
@@ -140,6 +190,8 @@ class AxisFeedbackPersistence(Protocol):
     def get_source_lineage(self, source_lineage_id: UUID) -> SourceLineage | None: ...
     def load_request(self, uri: str) -> PlanningRequest: ...
     def load_understanding(self, uri: str) -> EditorialUnderstanding: ...
+    def load_chunk_manifest(self, uri: str) -> object: ...
+    def load_chunk(self, uri: str) -> PreparedChunk: ...
     def load_narrative_axis(self, uri: str) -> PersistedNarrativeAxis: ...
     def persist_narrative_axis(self, run: PlanningRun, record: PersistedNarrativeAxis) -> str: ...
     def persist_axis_feedback_decision(self, run: PlanningRun, record: AxisFeedbackDecision) -> str: ...
@@ -161,19 +213,25 @@ class LlamaIndexAxisFeedbackDecider:
         understanding: EditorialUnderstanding,
         current_axis: NarrativeAxis,
         feedback: str,
+        source_chunks: str,
     ) -> AxisFeedbackDecisionProposal:
+        kwargs = _support_assessment_fields(
+            brief=brief,
+            understanding=understanding,
+            current_axis=current_axis,
+            feedback=feedback,
+            source_chunks=source_chunks,
+        )
+        ensure_support_evidence_fits(
+            prompt=AXIS_FEEDBACK_DECISION_PROMPT,
+            context_window=self._runtime.context_window,
+            max_output_tokens=self._runtime.axis_max_tokens,
+            **kwargs,
+        )
         return self._runtime.axis_llm.structured_predict(
             AxisFeedbackDecisionProposal,
             AXIS_FEEDBACK_DECISION_PROMPT,
-            current_axis=current_axis.statement,
-            feedback=feedback,
-            theme=brief.theme,
-            approach=brief.approach,
-            audience=brief.audience or "not specified",
-            product=brief.product,
-            duration_minutes=brief.duration_minutes,
-            output_language=brief.output_language,
-            **_understanding_prompt_fields(understanding),
+            **kwargs,
         )
 
 
@@ -233,22 +291,32 @@ class LlamaIndexBoundedRecalibrator:
         current_axis: NarrativeAxis,
         feedback: str,
         original: AxisFeedbackDecision,
+        source_chunks: str,
     ) -> BoundedRecalibrationProposal:
+        kwargs = _support_assessment_fields(
+            brief=brief,
+            understanding=understanding,
+            current_axis=current_axis,
+            feedback=feedback,
+            source_chunks=source_chunks,
+        )
+        kwargs.update(
+            {
+                "impact": original.impact.value,
+                "enrichment_need": original.enrichment_need or "(none)",
+                "original_support_rationale": original.support_rationale,
+            }
+        )
+        ensure_support_evidence_fits(
+            prompt=AXIS_FEEDBACK_BOUNDED_RECALIBRATION_PROMPT,
+            context_window=self._runtime.context_window,
+            max_output_tokens=self._runtime.axis_max_tokens,
+            **kwargs,
+        )
         return self._runtime.axis_llm.structured_predict(
             BoundedRecalibrationProposal,
             AXIS_FEEDBACK_BOUNDED_RECALIBRATION_PROMPT,
-            current_axis=current_axis.statement,
-            feedback=feedback,
-            impact=original.impact.value,
-            enrichment_need=original.enrichment_need or "(none)",
-            original_support_rationale=original.support_rationale,
-            theme=brief.theme,
-            approach=brief.approach,
-            audience=brief.audience or "not specified",
-            product=brief.product,
-            duration_minutes=brief.duration_minutes,
-            output_language=brief.output_language,
-            **_understanding_prompt_fields(understanding),
+            **kwargs,
         )
 
 
@@ -304,11 +372,20 @@ class AxisFeedbackOrchestrator:
                 "accepted enrichment remains a research-needed hold until the corpus/understanding changes"
             )
         try:
+            source_chunks = self._source_evidence_pack(lineage)
+            self._ensure_decision_pack_fits(
+                brief=request.brief,
+                understanding=understanding,
+                current_axis=current_axis,
+                feedback=feedback,
+                source_chunks=source_chunks,
+            )
             proposal = self._decider.decide(
                 brief=request.brief,
                 understanding=understanding,
                 current_axis=current_axis,
                 feedback=feedback,
+                source_chunks=source_chunks,
             )
             decision_id = feedback_decision_id(
                 planning_run_id=run.planning_run_id,
@@ -402,12 +479,22 @@ class AxisFeedbackOrchestrator:
                 return self._persist_decision(
                     run, understanding, current_axis, decision, axis_uri=_axis_uri(run)
                 )
+            source_chunks = self._source_evidence_pack(lineage)
+            self._ensure_recalibration_pack_fits(
+                brief=request.brief,
+                understanding=understanding,
+                current_axis=current_axis,
+                feedback=existing.feedback,
+                original=existing,
+                source_chunks=source_chunks,
+            )
             bounded = self._recalibrator.recalibrate(
                 brief=request.brief,
                 understanding=understanding,
                 current_axis=current_axis,
                 feedback=existing.feedback,
                 original=existing,
+                source_chunks=source_chunks,
             )
             resulting = None
             axis_uri = _axis_uri(run)
@@ -483,6 +570,71 @@ class AxisFeedbackOrchestrator:
             raise ValueError("axis feedback cannot run against an approved Narrative Axis")
         validate_axis_statement(persisted_axis.narrative_axis.statement)
         return run, lineage, request, understanding, persisted_axis
+
+    def _source_evidence_pack(self, lineage: SourceLineage) -> str:
+        if lineage.chunk_manifest_uri is None:
+            raise ValueError("PlanningRun does not have persisted source chunks")
+        manifest = self._persistence.load_chunk_manifest(lineage.chunk_manifest_uri)
+        loaded = [self._persistence.load_chunk(entry.chunk_uri) for entry in manifest.chunks]
+        if not loaded:
+            raise ValueError("persisted source chunks are empty")
+        pack = format_source_chunks(tuple(sorted(loaded, key=lambda chunk: chunk.sequence)))
+        if not pack.strip():
+            raise ValueError("persisted source evidence is empty")
+        return pack
+
+    def _ensure_decision_pack_fits(
+        self,
+        *,
+        brief: EditorialBrief,
+        understanding: EditorialUnderstanding,
+        current_axis: NarrativeAxis,
+        feedback: str,
+        source_chunks: str,
+    ) -> None:
+        ensure_support_evidence_fits(
+            prompt=AXIS_FEEDBACK_DECISION_PROMPT,
+            context_window=self._runtime.context_window,
+            max_output_tokens=self._runtime.axis_max_tokens,
+            **_support_assessment_fields(
+                brief=brief,
+                understanding=understanding,
+                current_axis=current_axis,
+                feedback=feedback,
+                source_chunks=source_chunks,
+            ),
+        )
+
+    def _ensure_recalibration_pack_fits(
+        self,
+        *,
+        brief: EditorialBrief,
+        understanding: EditorialUnderstanding,
+        current_axis: NarrativeAxis,
+        feedback: str,
+        original: AxisFeedbackDecision,
+        source_chunks: str,
+    ) -> None:
+        kwargs = _support_assessment_fields(
+            brief=brief,
+            understanding=understanding,
+            current_axis=current_axis,
+            feedback=feedback,
+            source_chunks=source_chunks,
+        )
+        kwargs.update(
+            {
+                "impact": original.impact.value,
+                "enrichment_need": original.enrichment_need or "(none)",
+                "original_support_rationale": original.support_rationale,
+            }
+        )
+        ensure_support_evidence_fits(
+            prompt=AXIS_FEEDBACK_BOUNDED_RECALIBRATION_PROMPT,
+            context_window=self._runtime.context_window,
+            max_output_tokens=self._runtime.axis_max_tokens,
+            **kwargs,
+        )
 
     def _load_current_decision(self, run: PlanningRun) -> AxisFeedbackDecision | None:
         uri = run.artifacts.axis_feedback_decision_uri

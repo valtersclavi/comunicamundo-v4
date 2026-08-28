@@ -379,7 +379,7 @@ EDITORIAL_UNDERSTANDING_PROMPT_VERSION = "hefesto.editorial-understanding.v1"
 NARRATIVE_AXIS_CONTRACT_VERSION = "narrative-axis.v1"
 NARRATIVE_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v3"
 AXIS_FEEDBACK_CONTRACT_VERSION = "axis-feedback.v1"
-AXIS_FEEDBACK_PROMPT_VERSION = "hefesto.axis-feedback.v1"
+AXIS_FEEDBACK_PROMPT_VERSION = "hefesto.axis-feedback.v2"
 
 
 class EditorialUnderstandingProposal(StrictModel):
