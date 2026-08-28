@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from comunicamundo_v4.hefesto.contracts import (
     GRAPH_EXTRACTION_CONTRACT_VERSION,
     GRAPH_EXTRACTOR_VERSION,
+    AxisFeedbackDecisionResult,
     AxisProposalResult,
     GraphEntity,
     GraphExtraction,
@@ -18,7 +19,7 @@ from comunicamundo_v4.hefesto.contracts import (
     SourceLineage,
     SourceLineageState,
 )
-from comunicamundo_v4.hefesto.runtime import AxisProposalRuntime, GraphExtractionRuntime, GraphIndexingRuntime
+from comunicamundo_v4.hefesto.runtime import AxisFeedbackRuntime, AxisProposalRuntime, GraphExtractionRuntime, GraphIndexingRuntime
 from comunicamundo_v4.hefesto.worker import _feedback, _parser, main
 from fakes import MemoryPlanningPersistence
 from llama_index.core.embeddings import MockEmbedding
@@ -40,6 +41,12 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     proposed = parser.parse_args(["propose-axis", "--planning-run-id", axis_id])
     assert proposed.command == "propose-axis"
     assert str(proposed.planning_run_id) == axis_id
+    decided = parser.parse_args(["decide-axis-feedback", "--planning-run-id", axis_id, "--feedback-b64", "Zg=="])
+    assert decided.command == "decide-axis-feedback"
+    refused = parser.parse_args(["refuse-axis-enrichment", "--planning-run-id", axis_id])
+    assert refused.command == "refuse-axis-enrichment"
+    awaited = parser.parse_args(["await-axis-enrichment", "--planning-run-id", axis_id])
+    assert awaited.command == "await-axis-enrichment"
 
 
 def test_feedback_is_transport_encoded_but_natural_language() -> None:
@@ -458,5 +465,241 @@ def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_p
     assert review_holder[1].calls == 0
     assert store.extraction_writes == extract_writes
     assert store.graph_writes == graph_writes
+
+
+def test_decide_axis_feedback_command_uses_only_feedback_runtime(monkeypatch, tmp_path, capsys) -> None:
+    store = MemoryPlanningPersistence()
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._planning_persistence", lambda: store)
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._application",
+        lambda: (_ for _ in ()).throw(AssertionError("full Vertex runtime must not be built for decide-axis-feedback")),
+    )
+    path = tmp_path / "request.json"
+    _write_request(
+        path,
+        sources=[
+            {"source_id": str(uuid4()), "text": "primeiro.", "language": "pt-BR"},
+            {"source_id": str(uuid4()), "text": "segundo.", "language": "pt-BR"},
+        ],
+    )
+    main(["plan", "--request", str(path)])
+    run = PlanningRun.model_validate_json(capsys.readouterr().out)
+
+    class FakeExtractor:
+        def __init__(self, runtime) -> None:
+            assert runtime.model == "fake-graph-llm"
+
+        def extract(self, unit):
+            return GraphExtraction(
+                contract_version=GRAPH_EXTRACTION_CONTRACT_VERSION,
+                extractor_version=GRAPH_EXTRACTOR_VERSION,
+                model="fake-graph-llm",
+                source_lineage_id=unit.source_lineage_id,
+                source_id=unit.source_id,
+                chunk_id=unit.chunk_id,
+                chunk_sha256=unit.content_sha256,
+                entities=[GraphEntity(name="Tema"), GraphEntity(name="Fonte")],
+                relations=[GraphRelation(source="Tema", relation="APARECE_EM", target="Fonte")],
+            )
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_extraction_runtime",
+        lambda: GraphExtractionRuntime(llm=object(), model="fake-graph-llm", context_window=1_048_576, max_tokens=2_048),
+    )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.graph_extraction.LlamaIndexChunkGraphExtractor", FakeExtractor)
+    main(["extract-graph", "--source-lineage-id", str(run.source_lineage_id)])
+    capsys.readouterr()
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_indexing_runtime",
+        lambda: GraphIndexingRuntime(
+            embed_model=_RecordingEmbed(),
+            model="fake-embed",
+            package_version="test-embed-1",
+            config={"model_name": "fake-embed", "location": "us-central1", "embed_kg_nodes": True},
+        ),
+    )
+    main(["index-graph", "--source-lineage-id", str(run.source_lineage_id)])
+    capsys.readouterr()
+
+    from comunicamundo_v4.hefesto.contracts import (
+        AxisChangeIntent,
+        AxisFeedbackImpactAssessment,
+        AxisFeedbackSupportAssessment,
+        EditorialImpactKind,
+        EditorialUnderstandingProposal,
+        NarrativeAxisEvidenceReview,
+        NarrativeAxisProposal,
+        SupportBasis,
+        TreatmentScale,
+    )
+    from comunicamundo_v4.hefesto.axis_proposal import UnderstandingMaterial
+
+    class FakeSynthesizer:
+        def __init__(self, runtime) -> None:
+            self.calls = 0
+
+        def synthesize(self, material: UnderstandingMaterial):
+            self.calls += 1
+            return EditorialUnderstandingProposal(
+                central_ideas=["Ideia central persistida."],
+                relations_and_tensions=["Tensão relevante."],
+                synthesis="Compreensão editorial persistida a partir do grafo e dos chunks.",
+            )
+
+    class FakeProposer:
+        def __init__(self, runtime) -> None:
+            self.calls = 0
+
+        def propose(self, *, brief, understanding):
+            self.calls += 1
+            return NarrativeAxisProposal(statement="A direção intelectual específica governa o recorte.")
+
+    class FakeReviewer:
+        def __init__(self, runtime) -> None:
+            self.calls = 0
+
+        def review(self, *, candidate, understanding):
+            self.calls += 1
+            return NarrativeAxisEvidenceReview(
+                candidate_statement=candidate,
+                revision_required=False,
+                unsupported_upgrades=[],
+                final_statement=candidate,
+            )
+
+    synth_holder: list[FakeSynthesizer] = []
+
+    def make_synth(runtime):
+        synth = FakeSynthesizer(runtime)
+        synth_holder.append(synth)
+        return synth
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._axis_proposal_runtime",
+        lambda: AxisProposalRuntime(
+            embed_model=_RecordingEmbed(),
+            understanding_llm=object(),
+            understanding_model="fake-understanding",
+            understanding_max_tokens=4_096,
+            axis_llm=object(),
+            axis_model="fake-axis",
+            axis_max_tokens=1_200,
+            context_window=1_048_576,
+        ),
+    )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_proposal.LlamaIndexUnderstandingSynthesizer", make_synth)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_proposal.LlamaIndexAxisProposer", FakeProposer)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_proposal.LlamaIndexAxisEvidenceReviewer", FakeReviewer)
+    main(["propose-axis", "--planning-run-id", str(run.planning_run_id)])
+    proposed = AxisProposalResult.model_validate_json(capsys.readouterr().out)
+    extract_writes = store.extraction_writes
+    graph_writes = store.graph_writes
+    understanding_writes = store.understanding_writes
+
+    class FakeImpact:
+        def __init__(self, runtime) -> None:
+            assert runtime.axis_model == "fake-axis"
+            assert runtime.axis_max_tokens == 1_200
+            self.calls = 0
+
+        def assess(self, **kwargs):
+            self.calls += 1
+            return AxisFeedbackImpactAssessment(
+                impact=EditorialImpactKind.COMPLEMENTS,
+                affected_premise="The Axis can keep its premise.",
+                editorial_consequences="Carry the contribution forward without rewriting.",
+                axis_if_supported=AxisChangeIntent.PRESERVED,
+            )
+
+    class FakeSupport:
+        def __init__(self, runtime) -> None:
+            self.calls = 0
+
+        def assess(self, **kwargs):
+            self.calls += 1
+            return AxisFeedbackSupportAssessment(
+                support_basis=SupportBasis.SOURCES,
+                support_rationale="The persisted understanding already supports a brief treatment.",
+                treatment_scale=TreatmentScale.BRIEF,
+                carried_directive="Keep the additional party present in later development.",
+            )
+
+    class FakeRecalibrator:
+        def __init__(self, runtime) -> None:
+            self.calls = 0
+
+        def recalibrate(self, **kwargs):
+            self.calls += 1
+            raise AssertionError("recalibration must not run on supported feedback")
+
+    class FakeReviser:
+        def __init__(self, runtime) -> None:
+            self.calls = 0
+
+        def revise(self, **kwargs):
+            self.calls += 1
+            raise AssertionError("supported complement must not skip to Axis rewrite")
+
+    impact_holder: list[FakeImpact] = []
+    support_holder: list[FakeSupport] = []
+    reviser_holder: list[FakeReviser] = []
+
+    def make_impact(runtime):
+        item = FakeImpact(runtime)
+        impact_holder.append(item)
+        return item
+
+    def make_support(runtime):
+        item = FakeSupport(runtime)
+        support_holder.append(item)
+        return item
+
+    def make_reviser(runtime):
+        item = FakeReviser(runtime)
+        reviser_holder.append(item)
+        return item
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._axis_proposal_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("axis proposal runtime must not be built for decide-axis-feedback")),
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_extraction_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("graph extraction runtime must not be built for decide-axis-feedback")),
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_indexing_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("graph indexing runtime must not be built for decide-axis-feedback")),
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._axis_feedback_runtime",
+        lambda: AxisFeedbackRuntime(
+            axis_llm=object(),
+            axis_model="fake-axis",
+            axis_max_tokens=1_200,
+            context_window=1_048_576,
+        ),
+    )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_feedback.LlamaIndexImpactAssessor", make_impact)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_feedback.LlamaIndexSupportAssessor", make_support)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_feedback.LlamaIndexRecalibrator", FakeRecalibrator)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_feedback.LlamaIndexDecisionReviser", make_reviser)
+    encoded = base64.urlsafe_b64encode("Keep the secondary party in view.".encode()).decode()
+    main(["decide-axis-feedback", "--planning-run-id", str(run.planning_run_id), "--feedback-b64", encoded])
+    decided = AxisFeedbackDecisionResult.model_validate_json(capsys.readouterr().out)
+    assert decided.stopped_at == "axis_proposed"
+    assert decided.decision.outcome.value == "axis_preserved"
+    assert decided.narrative_axis.narrative_axis_id == proposed.narrative_axis.narrative_axis_id
+    assert decided.human_approval_required is True
+    assert decided.editorial_project_created is False
+    assert decided.enrichment_search_performed is False
+    assert impact_holder[0].calls == 1
+    assert support_holder[0].calls == 1
+    assert reviser_holder[0].calls == 0
+    assert synth_holder[0].calls == 1
+    assert store.extraction_writes == extract_writes
+    assert store.graph_writes == graph_writes
+    assert store.understanding_writes == understanding_writes
 
 

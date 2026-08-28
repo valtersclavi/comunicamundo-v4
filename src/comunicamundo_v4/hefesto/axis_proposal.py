@@ -129,6 +129,12 @@ class UnderstandingMaterial:
     chunks: tuple[PreparedChunk, ...]
 
 
+class AxisLlmRuntime(Protocol):
+    axis_llm: object
+    axis_max_tokens: int
+    context_window: int
+
+
 class UnderstandingSynthesizer(Protocol):
     def synthesize(self, material: UnderstandingMaterial) -> EditorialUnderstandingProposal: ...
 
@@ -184,7 +190,7 @@ class LlamaIndexUnderstandingSynthesizer:
 
 
 class LlamaIndexAxisProposer:
-    def __init__(self, runtime: AxisProposalRuntime) -> None:
+    def __init__(self, runtime: AxisLlmRuntime) -> None:
         if runtime.context_window <= 0 or runtime.axis_max_tokens <= 0:
             raise ValueError("Narrative Axis runtime must declare explicit context and output budgets")
         self._runtime = runtime
@@ -204,7 +210,7 @@ class LlamaIndexAxisProposer:
 
 
 class LlamaIndexAxisEvidenceReviewer:
-    def __init__(self, runtime: AxisProposalRuntime) -> None:
+    def __init__(self, runtime: AxisLlmRuntime) -> None:
         if runtime.context_window <= 0 or runtime.axis_max_tokens <= 0:
             raise ValueError("Narrative Axis runtime must declare explicit context and output budgets")
         self._runtime = runtime

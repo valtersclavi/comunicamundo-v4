@@ -7,11 +7,20 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from .contracts import EditorialProjectStatus, NarrativeAxisStatus
+from .contracts import CarriedEditorialDirective, EditorialProjectStatus, NarrativeAxisStatus
 from .persistence import GcpEditorialPersistence, StoredEditorialProject, StoredNarrativeAxis
 
 if TYPE_CHECKING:
     from .runtime import HefestoRuntime
+
+
+def _format_carried_directives(directives: list[CarriedEditorialDirective] | None) -> str:
+    if not directives:
+        return "(none)"
+    return "\n".join(
+        f"- [{item.treatment_scale.value}/{item.support_basis.value}] {item.text}"
+        for item in directives
+    )
 
 
 class HefestoApplication:
@@ -42,7 +51,12 @@ class HefestoApplication:
             raise ValueError("cannot approve a superseded Narrative Axis")
         approved = stored.narrative_axis.approve()
         stored = await asyncio.to_thread(self._persistence.save_axis, stored.model_copy(update={"narrative_axis": approved}))
-        project = await self._runtime.director.build_project(axis=approved, brief=stored.brief, graph_context=stored.graph_context)
+        project = await self._runtime.director.build_project(
+            axis=approved,
+            brief=stored.brief,
+            graph_context=stored.graph_context,
+            carried_editorial_directives=_format_carried_directives(stored.carried_editorial_directives),
+        )
         saved = await asyncio.to_thread(self._persistence.save_project, StoredEditorialProject(
             editorial_project=project,
             graph_artifact=stored.graph_artifact,

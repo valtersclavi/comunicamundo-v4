@@ -183,6 +183,225 @@ Return only the structured Narrative Axis proposal in {output_language}.
     )
 )
 
+AXIS_FEEDBACK_IMPACT_PROMPT = PromptTemplate(
+    """
+You are Hefesto's editorial decision-maker. Before any rewrite of the Narrative Axis, assess the editorial impact of the user's natural-language feedback against the current Axis and the persisted understanding.
+
+Do not rewrite the Axis. Do not search for sources. Do not invent evidence. Do not use keyword matching or case-specific rules. Judge semantically.
+
+Classify exactly one impact:
+- complements: the contribution adds something without changing the Axis's premises;
+- qualifies: the contribution changes how relevant parts must be understood or treated, without necessarily replacing the central direction;
+- reframes: the contribution alters an important premise and requires a coherent reconsideration of the Axis.
+
+Impact structure and textual space are different dimensions. A nuance may change how the whole praxis is read and still deserve only a brief treatment later if support is limited. Decide whether, IF support later proves sufficient, the Axis statement itself should be preserved or revised. That is axis_if_supported. Do not confuse it with how many words the later product should spend.
+
+Record compactly:
+- which premise or line of reasoning is affected;
+- which editorial consequences follow;
+- whether the Axis should be preserved or revised if support is sufficient.
+
+Current Axis:
+{current_axis}
+
+User feedback:
+{feedback}
+
+Brief:
+- theme: {theme}
+- approach: {approach}
+- audience: {audience}
+- product: {product}
+- duration: {duration_minutes} minutes
+- language: {output_language}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Return only the structured impact assessment. Keep the same language as the feedback and Axis.
+""".strip()
+)
+
+AXIS_FEEDBACK_SUPPORT_PROMPT = PromptTemplate(
+    """
+You are Hefesto's editorial support reviewer. The impact of the user's feedback has already been assessed. Now classify the support basis for that contribution. Do not rewrite the Axis. Do not search for sources. Do not ingest material.
+
+Choose exactly one support_basis:
+- sources: the current sources and persisted understanding already support enough development of this contribution;
+- model: the contribution is not sufficiently developed in the sources, but stable internal model knowledge can treat it with editorial safety without inventing facts, numbers, strong causalities, hierarchies, controversies, or specialized precision that would require verification;
+- enrichment_required: giving the contribution the weight, depth, or centrality it would have in the reasoning requires additional evidence.
+
+`model` is not a license to hallucinate. External knowledge must not pretend it came from the sources. If treating the contribution at the impact's implied weight would require unverified specifics, choose enrichment_required rather than stretching model knowledge.
+
+Choose a treatment_scale coherent with the support actually available, not with a word count: structural, developed, brief, or mention_only. A structurally important nuance may still be mention_only if residual support is thin.
+
+If support_basis is enrichment_required, return a compact enrichment_need: what must be clarified or sustained, and why. Do not rewrite the Axis as if the idea were already supported.
+
+If the Axis would be preserved, return a carried_directive that carries the contribution forward for a later Editorial Project without appending it to the Axis.
+
+Impact already assessed:
+- impact: {impact}
+- affected premise: {affected_premise}
+- editorial consequences: {editorial_consequences}
+- axis if supported: {axis_if_supported}
+
+Current Axis:
+{current_axis}
+
+User feedback:
+{feedback}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Return only the structured support assessment. Keep the same language as the feedback and Axis.
+""".strip()
+)
+
+AXIS_FEEDBACK_RECALIBRATION_PROMPT = PromptTemplate(
+    """
+You are Hefesto's editorial decision-maker. The user refused additional sources. Recalibrate the pending contribution to the maximum that current sources plus safe model knowledge can sustain. Do not invent support. Do not erase the user's intention. Do not search. Do not rewrite until the orchestrator asks.
+
+Refusing enrichment reduces possible depth and weight. It does not fabricate evidence and does not automatically drop the intention.
+
+Reassess impact semantically (complements / qualifies / reframes) at this reduced ambition. Decide whether, with only residual support, the Axis statement itself still must be revised or should be preserved while the contribution is carried as a limited editorial directive.
+
+support_basis may only be:
+- sources: residual source/understanding support is enough at the reduced scale;
+- model: residual treatment is safe from stable model knowledge without inventing facts, numbers, strong causalities, hierarchies, controversies, or specialized precision.
+
+Choose a reduced treatment_scale coherent with residual support: structural, developed, brief, or mention_only.
+
+If the Axis should be preserved at this reduced scale, return a carried_directive that preserves the intention at the sustainable scale.
+
+Pending enrichment need:
+{enrichment_need}
+
+Previous impact:
+- impact: {previous_impact}
+- affected premise: {affected_premise}
+- editorial consequences: {editorial_consequences}
+
+Current Axis:
+{current_axis}
+
+Original user feedback:
+{feedback}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Return only the structured recalibration. Keep the same language as the feedback and Axis.
+""".strip()
+)
+
+REVISE_AXIS_FROM_DECISION_PROMPT = PromptTemplate(
+    "\n\n".join(
+        [
+            """
+Revise the Narrative Axis coherently from an inspectable editorial decision. Do not mechanically append the feedback. Re-decide the best one- or two-sentence direction so the Axis absorbs the contribution as a governing premise, qualification, or reframing.
+
+The decision already established impact, support basis, and treatment scale. Honor that scale: do not write as if unsupported depth were already in hand. User feedback must not turn revision into unsupported overclaiming. External knowledge may inform judgment but must not masquerade as source evidence.
+""".strip(),
+            NARRATIVE_AXIS_STRENGTH_CALIBRATION,
+            """
+Before finalizing the revised 1–2 sentence Axis, internally pressure-test every load-bearing claim against the persisted understanding, especially source_limits and nuances. Those limits and nuances constrain the Axis.
+
+Current Axis:
+{current_axis}
+
+User feedback:
+{feedback}
+
+Inspectable decision:
+- impact: {impact}
+- affected premise: {affected_premise}
+- editorial consequences: {editorial_consequences}
+- support basis: {support_basis}
+- support rationale: {support_rationale}
+- treatment scale: {treatment_scale}
+
+Brief:
+- theme: {theme}
+- approach: {approach}
+- audience: {audience}
+- product: {product}
+- duration: {duration_minutes} minutes
+- language: {output_language}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+Return only the structured revised Narrative Axis. It must be 1–2 sentences and must not be empty.
+""".strip(),
+        ]
+    )
+)
+
 REVISE_AXIS_PROMPT = PromptTemplate(
     "\n\n".join(
         [
@@ -225,6 +444,9 @@ Brief:
 
 Internal source understanding:
 {graph_context}
+
+Carried editorial directives from prior Axis feedback (honor these in later subject development; they are not a license to invent evidence, and model-supported items must not be presented as if they came from the sources):
+{carried_editorial_directives}
 
 The user approves subjects, not an outline. Keep the document short and editorial. Do not pre-write the article.
 

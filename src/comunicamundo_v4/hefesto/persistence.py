@@ -15,6 +15,8 @@ from pydantic import Field
 from .contracts import (
     ChunkManifest,
     ChunkManifestEntry,
+    CarriedEditorialDirective,
+    CarriedEditorialDirectiveSet,
     EditorialBrief,
     EditorialProject,
     FinalArticle,
@@ -26,6 +28,7 @@ from .contracts import (
     NarrativeAxis,
     PersistedNarrativeAxis,
     EditorialUnderstanding,
+    AxisFeedbackDecision,
     PlanningRequest,
     PlanningRun,
     PreparedChunk,
@@ -44,6 +47,7 @@ class StoredNarrativeAxis(StrictModel):
     graph_artifact: GraphArtifact
     graph_context: str = Field(min_length=1)
     editorial_project_id: UUID | None = None
+    carried_editorial_directives: list[CarriedEditorialDirective] = Field(default_factory=list)
     updated_at: datetime
 
 
@@ -438,6 +442,36 @@ class GcpEditorialPersistence:
 
     def load_narrative_axis(self, uri: str) -> PersistedNarrativeAxis:
         return PersistedNarrativeAxis.model_validate(self.artifacts.load_json_uri(uri))
+
+    def persist_narrative_axis_revision(self, run: PlanningRun, record: PersistedNarrativeAxis) -> str:
+        return self.artifacts.persist_planning_json(
+            project_id=run.project_id,
+            planning_run_id=run.planning_run_id,
+            relative_path=f"axes/{record.narrative_axis.narrative_axis_id}.json",
+            payload=record.model_dump(mode="json"),
+        )
+
+    def persist_axis_feedback_decision(self, run: PlanningRun, decision: AxisFeedbackDecision) -> str:
+        return self.artifacts.persist_planning_json(
+            project_id=run.project_id,
+            planning_run_id=run.planning_run_id,
+            relative_path=f"feedback-decisions/{decision.decision_id}.json",
+            payload=decision.model_dump(mode="json"),
+        )
+
+    def load_axis_feedback_decision(self, uri: str) -> AxisFeedbackDecision:
+        return AxisFeedbackDecision.model_validate(self.artifacts.load_json_uri(uri))
+
+    def persist_carried_directives(self, run: PlanningRun, directives: CarriedEditorialDirectiveSet) -> str:
+        return self.artifacts.persist_planning_json(
+            project_id=run.project_id,
+            planning_run_id=run.planning_run_id,
+            relative_path="carried-directives.json",
+            payload=directives.model_dump(mode="json"),
+        )
+
+    def load_carried_directives(self, uri: str) -> CarriedEditorialDirectiveSet:
+        return CarriedEditorialDirectiveSet.model_validate(self.artifacts.load_json_uri(uri))
 
     def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str:
         if lineage.chunk_manifest_uri is not None:

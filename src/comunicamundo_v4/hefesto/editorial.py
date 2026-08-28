@@ -44,7 +44,14 @@ class EditorialDirector:
         )
         return NarrativeAxis(project_id=current.project_id, parent_axis_id=current.narrative_axis_id, statement=proposal.statement)
 
-    async def build_project(self, *, axis: NarrativeAxis, brief: EditorialBrief, graph_context: str) -> EditorialProject:
+    async def build_project(
+        self,
+        *,
+        axis: NarrativeAxis,
+        brief: EditorialBrief,
+        graph_context: str,
+        carried_editorial_directives: str = "(none)",
+    ) -> EditorialProject:
         if axis.status.value != "approved":
             raise ValueError("Editorial Project requires an approved Narrative Axis")
         proposal = await self._project_llm.astructured_predict(
@@ -53,6 +60,7 @@ class EditorialDirector:
             narrative_axis=axis.statement,
             brief=brief.model_dump_json(indent=2),
             graph_context=graph_context,
+            carried_editorial_directives=carried_editorial_directives or "(none)",
             output_language=brief.output_language,
         )
         return self._project_from_proposal(proposal, axis=axis, brief=brief)

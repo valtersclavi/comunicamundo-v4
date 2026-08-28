@@ -11,6 +11,7 @@ from comunicamundo_v4.hefesto.prompts import (
     NARRATIVE_AXIS_FROM_UNDERSTANDING_PROMPT,
     NARRATIVE_AXIS_PROMPT,
     NARRATIVE_AXIS_STRENGTH_CALIBRATION,
+    REVISE_AXIS_FROM_DECISION_PROMPT,
     REVISE_AXIS_PROMPT,
 )
 from fakes import MemoryPlanningPersistence
@@ -49,11 +50,12 @@ def _prompt_text(prompt) -> str:
     raise AssertionError("expected a PromptTemplate with a template string")
 
 
-def _axis_prompt_texts() -> tuple[str, str, str]:
+def _axis_prompt_texts() -> tuple[str, ...]:
     return (
         _prompt_text(NARRATIVE_AXIS_FROM_UNDERSTANDING_PROMPT),
         _prompt_text(NARRATIVE_AXIS_PROMPT),
         _prompt_text(REVISE_AXIS_PROMPT),
+        _prompt_text(REVISE_AXIS_FROM_DECISION_PROMPT),
     )
 
 

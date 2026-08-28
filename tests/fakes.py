@@ -8,6 +8,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from comunicamundo_v4.hefesto.contracts import (
+    AxisFeedbackDecision,
+    CarriedEditorialDirectiveSet,
     ChunkManifest,
     ChunkManifestEntry,
     EditorialUnderstanding,
@@ -111,6 +113,8 @@ class MemoryPlanningPersistence:
         self.graph_manifest_writes = 0
         self.understanding_writes = 0
         self.axis_writes = 0
+        self.decision_writes = 0
+        self.directive_writes = 0
         self.stored_axes: dict = {}
 
     def save_run(self, run: PlanningRun) -> PlanningRun:
@@ -173,10 +177,38 @@ class MemoryPlanningPersistence:
         self.objects[uri] = record.model_copy()
         return uri
 
+    def persist_narrative_axis_revision(self, run: PlanningRun, record: PersistedNarrativeAxis) -> str:
+        self.axis_writes += 1
+        uri = f"gs://memory/{run.planning_run_id}/axes/{record.narrative_axis.narrative_axis_id}.json"
+        self.objects[uri] = record.model_copy()
+        return uri
+
     def load_narrative_axis(self, uri: str) -> PersistedNarrativeAxis:
         record = self.objects[uri]
         assert isinstance(record, PersistedNarrativeAxis)
         return record.model_copy()
+
+    def persist_axis_feedback_decision(self, run: PlanningRun, decision: AxisFeedbackDecision) -> str:
+        self.decision_writes += 1
+        uri = f"gs://memory/{run.planning_run_id}/feedback-decisions/{decision.decision_id}.json"
+        self.objects[uri] = decision.model_copy()
+        return uri
+
+    def load_axis_feedback_decision(self, uri: str) -> AxisFeedbackDecision:
+        decision = self.objects[uri]
+        assert isinstance(decision, AxisFeedbackDecision)
+        return decision.model_copy()
+
+    def persist_carried_directives(self, run: PlanningRun, directives: CarriedEditorialDirectiveSet) -> str:
+        self.directive_writes += 1
+        uri = f"gs://memory/{run.planning_run_id}/carried-directives.json"
+        self.objects[uri] = directives.model_copy()
+        return uri
+
+    def load_carried_directives(self, uri: str) -> CarriedEditorialDirectiveSet:
+        stored = self.objects[uri]
+        assert isinstance(stored, CarriedEditorialDirectiveSet)
+        return stored.model_copy()
 
     def save_axis(self, stored):
         self.stored_axes[stored.narrative_axis.narrative_axis_id] = stored.model_copy()

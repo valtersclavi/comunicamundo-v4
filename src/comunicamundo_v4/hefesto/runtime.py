@@ -74,6 +74,14 @@ class AxisProposalRuntime:
     context_window: int
 
 
+@dataclass(frozen=True, slots=True)
+class AxisFeedbackRuntime:
+    axis_llm: object
+    axis_model: str
+    axis_max_tokens: int
+    context_window: int
+
+
 @dataclass(slots=True)
 class HefestoRuntime:
     graph_llm: object
@@ -151,6 +159,20 @@ def build_axis_proposal_runtime(settings: VertexRuntimeSettings) -> AxisProposal
         understanding_llm=_vertex_llm(settings, settings.understanding_model, 0.2, settings.understanding_max_tokens),
         understanding_model=settings.understanding_model,
         understanding_max_tokens=settings.understanding_max_tokens,
+        axis_llm=_vertex_llm(settings, settings.axis_model, 0.35, settings.axis_max_tokens),
+        axis_model=settings.axis_model,
+        axis_max_tokens=settings.axis_max_tokens,
+        context_window=settings.context_window,
+    )
+
+
+def build_axis_feedback_runtime(settings: VertexRuntimeSettings) -> AxisFeedbackRuntime:
+    """Construct only the Axis LLM for inspectable feedback decisions. No embeddings, graph, or understanding clients."""
+    if settings.context_window <= 0:
+        raise ValueError("axis feedback requires an explicit context_window")
+    if settings.axis_max_tokens <= 0:
+        raise ValueError("axis feedback requires an explicit max_tokens budget")
+    return AxisFeedbackRuntime(
         axis_llm=_vertex_llm(settings, settings.axis_model, 0.35, settings.axis_max_tokens),
         axis_model=settings.axis_model,
         axis_max_tokens=settings.axis_max_tokens,

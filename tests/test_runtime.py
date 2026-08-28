@@ -99,6 +99,35 @@ def test_graph_indexing_runtime_builds_only_embedding_client(monkeypatch) -> Non
     assert built.embed_model is not None
 
 
+def test_axis_feedback_runtime_builds_only_axis_llm_without_embeddings(monkeypatch) -> None:
+    llm_calls: list[dict] = []
+    embed_calls: list[dict] = []
+
+    class FakeGoogleGenAI:
+        def __init__(self, **kwargs):
+            llm_calls.append(kwargs)
+
+    class FakeEmbedding:
+        def __init__(self, **kwargs):
+            embed_calls.append(kwargs)
+
+    monkeypatch.setattr(runtime, "GoogleGenAI", FakeGoogleGenAI)
+    monkeypatch.setattr(runtime, "GoogleGenAIEmbedding", FakeEmbedding)
+
+    settings = runtime.VertexRuntimeSettings(project="test-project")
+    built = runtime.build_axis_feedback_runtime(settings)
+
+    assert embed_calls == []
+    assert len(llm_calls) == 1
+    assert llm_calls[0]["model"] == settings.axis_model
+    assert llm_calls[0]["max_tokens"] == settings.axis_max_tokens
+    assert llm_calls[0]["context_window"] == runtime.GEMINI_2_5_CONTEXT_WINDOW
+    assert built.axis_model == settings.axis_model
+    assert built.axis_max_tokens == settings.axis_max_tokens
+    assert built.context_window == settings.context_window
+    assert built.axis_llm is not None
+
+
 def test_axis_proposal_runtime_builds_only_understanding_and_axis_llms_with_explicit_budgets(monkeypatch) -> None:
     llm_calls: list[dict] = []
     embed_calls: list[dict] = []
