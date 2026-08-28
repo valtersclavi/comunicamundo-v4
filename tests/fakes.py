@@ -22,6 +22,7 @@ from comunicamundo_v4.hefesto.contracts import (
     PreparedChunk,
     SourceLineage,
     AxisFeedbackDecision,
+    PersistedEditorialProject,
 )
 
 
@@ -113,6 +114,7 @@ class MemoryPlanningPersistence:
         self.understanding_writes = 0
         self.axis_writes = 0
         self.feedback_writes = 0
+        self.project_writes = 0
         self.stored_axes: dict = {}
         self.stored_projects: dict = {}
 
@@ -192,6 +194,17 @@ class MemoryPlanningPersistence:
         if isinstance(record, AxisFeedbackDecision):
             return record.model_copy()
         return AxisFeedbackDecision.model_validate(record)
+
+    def persist_editorial_project(self, run: PlanningRun, record: PersistedEditorialProject) -> str:
+        self.project_writes += 1
+        uri = f"gs://memory/{run.planning_run_id}/editorial-project.json"
+        self.objects[uri] = record.model_copy()
+        return uri
+
+    def load_editorial_project(self, uri: str) -> PersistedEditorialProject:
+        record = self.objects[uri]
+        assert isinstance(record, PersistedEditorialProject)
+        return record.model_copy()
 
     def save_axis(self, stored):
         self.stored_axes[stored.narrative_axis.narrative_axis_id] = stored.model_copy()

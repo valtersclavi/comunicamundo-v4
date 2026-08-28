@@ -10,6 +10,7 @@ from comunicamundo_v4.hefesto.contracts import (
     GRAPH_EXTRACTION_CONTRACT_VERSION,
     GRAPH_EXTRACTOR_VERSION,
     AxisProposalResult,
+    EditorialProjectProposalResult,
     GraphEntity,
     GraphExtraction,
     GraphRelation,
@@ -18,7 +19,7 @@ from comunicamundo_v4.hefesto.contracts import (
     SourceLineage,
     SourceLineageState,
 )
-from comunicamundo_v4.hefesto.runtime import AxisProposalRuntime, GraphExtractionRuntime, GraphIndexingRuntime
+from comunicamundo_v4.hefesto.runtime import AxisProposalRuntime, EditorialProjectRuntime, GraphExtractionRuntime, GraphIndexingRuntime
 from comunicamundo_v4.hefesto.worker import _feedback, _parser, main
 from fakes import MemoryPlanningPersistence
 from llama_index.core.embeddings import MockEmbedding
@@ -39,6 +40,12 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     proposed = parser.parse_args(["propose-axis", "--planning-run-id", axis_id])
     assert proposed.command == "propose-axis"
     assert str(proposed.planning_run_id) == axis_id
+    approved = parser.parse_args(["approve-axis", "--planning-run-id", axis_id])
+    assert approved.command == "approve-axis"
+    assert str(approved.planning_run_id) == axis_id
+    assert approved.narrative_axis_id is None
+    with_axis = parser.parse_args(["approve-axis", "--planning-run-id", axis_id, "--narrative-axis-id", project_id])
+    assert str(with_axis.narrative_axis_id) == project_id
     reviewed = parser.parse_args(
         ["review-axis-feedback", "--planning-run-id", axis_id, "--feedback-b64", "Zg"]
     )
@@ -52,7 +59,7 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     subparsers = [action for action in parser._actions if getattr(action, "choices", None)]
     commands = set(subparsers[0].choices)
     assert "revise-axis" not in commands
-    assert "approve-axis" not in commands
+    assert "approve-axis" in commands
     assert "review-axis-feedback" in commands
     assert "resolve-axis-feedback" in commands
     with pytest.raises(SystemExit):
@@ -66,7 +73,11 @@ def test_canonical_cli_cannot_rewrite_proposed_axis_without_feedback_decision() 
     subparsers = [action for action in parser._actions if getattr(action, "choices", None)]
     commands = set(subparsers[0].choices)
     assert "revise-axis" not in commands
-    assert "approve-axis" not in commands
+    assert "approve-axis" in commands
+    approve_sub = subparsers[0].choices["approve-axis"]
+    dests = {getattr(arg, "dest", None) for arg in approve_sub._actions}
+    assert "planning_run_id" in dests
+    assert "feedback_b64" not in dests
     assert {"review-axis-feedback", "resolve-axis-feedback"} <= commands
     axis_feedback_commands = [
         name
@@ -495,5 +506,93 @@ def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_p
     assert review_holder[1].calls == 0
     assert store.extraction_writes == extract_writes
     assert store.graph_writes == graph_writes
+
+
+def test_approve_axis_command_uses_only_project_runtime(monkeypatch, capsys) -> None:
+    from comunicamundo_v4.hefesto.contracts import EditorialProjectProposal, EditorialSubjectProposal
+    from test_axis_feedback import _ready
+
+    store, proposed, _lineage, _extractor, _request, _synth, _prop = _ready()
+    extract_writes = store.extraction_writes
+    graph_writes = store.graph_writes
+    understanding_writes = store.understanding_writes
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker._planning_persistence", lambda: store)
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._application",
+        lambda: (_ for _ in ()).throw(AssertionError("full Vertex runtime must not be built for approve-axis")),
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_extraction_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("graph extraction runtime must not be built for approve-axis")),
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._graph_indexing_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("graph indexing runtime must not be built for approve-axis")),
+    )
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._axis_proposal_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("axis proposal runtime must not be built for approve-axis")),
+    )
+
+    class FakeBuilder:
+        def __init__(self, runtime) -> None:
+            assert runtime.project_model == "fake-project"
+            assert runtime.project_max_tokens == 5_000
+            self.calls = 0
+
+        def build(self, **kwargs):
+            self.calls += 1
+            assert kwargs["understanding"].synthesis
+            assert kwargs["axis"].status.value == "approved"
+            return EditorialProjectProposal(
+                working_title="Título compacto",
+                editorial_promise="Promessa editorial.",
+                core_subjects=[
+                    EditorialSubjectProposal(
+                        title="Assunto",
+                        development="Desenvolvimento operacional.",
+                        practical_dimension="Como praticar sem genericidade.",
+                    )
+                ],
+            )
+
+    builder_holder: list[FakeBuilder] = []
+
+    def make_builder(runtime):
+        item = FakeBuilder(runtime)
+        builder_holder.append(item)
+        return item
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._editorial_project_runtime",
+        lambda: EditorialProjectRuntime(
+            project_llm=object(),
+            project_model="fake-project",
+            project_max_tokens=5_000,
+            context_window=1_048_576,
+        ),
+    )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.editorial_project.LlamaIndexEditorialProjectBuilder", make_builder)
+    main(["approve-axis", "--planning-run-id", str(proposed.planning_run.planning_run_id)])
+    result = EditorialProjectProposalResult.model_validate_json(capsys.readouterr().out)
+    assert result.planning_run.state is PlanningRunState.PROJECT_PROPOSED
+    assert result.human_approval_required is True
+    assert result.article_created is False
+    assert result.editorial_project.status.value == "proposed"
+    assert result.narrative_axis.status.value == "approved"
+    assert result.editorial_project.core_subjects[0].practical_dimension is not None
+    assert builder_holder[0].calls == 1
+    assert store.extraction_writes == extract_writes
+    assert store.graph_writes == graph_writes
+    assert store.understanding_writes == understanding_writes
+    main(["approve-axis", "--planning-run-id", str(proposed.planning_run.planning_run_id)])
+    rerun = EditorialProjectProposalResult.model_validate_json(capsys.readouterr().out)
+    assert rerun.editorial_project.editorial_project_id == result.editorial_project.editorial_project_id
+    assert builder_holder[0].calls == 1
+    assert builder_holder[1].calls == 0
+    assert store.extraction_writes == extract_writes
+    assert store.graph_writes == graph_writes
+    assert store.understanding_writes == understanding_writes
 
 

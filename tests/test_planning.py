@@ -83,6 +83,7 @@ def test_canonical_planning_states_are_stable() -> None:
         "graph_ready",
         "understanding_ready",
         "axis_proposed",
+        "project_proposed",
     ]
     assert [state.value for state in SourceLineageState] == [
         "created",

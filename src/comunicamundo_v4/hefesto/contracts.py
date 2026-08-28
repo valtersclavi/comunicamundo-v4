@@ -190,6 +190,7 @@ class PlanningRunState(StrEnum):
     GRAPH_READY = "graph_ready"
     UNDERSTANDING_READY = "understanding_ready"
     AXIS_PROPOSED = "axis_proposed"
+    PROJECT_PROPOSED = "project_proposed"
 
 
 class ChunkStatus(StrEnum):
@@ -380,6 +381,8 @@ NARRATIVE_AXIS_CONTRACT_VERSION = "narrative-axis.v1"
 NARRATIVE_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v3"
 AXIS_FEEDBACK_CONTRACT_VERSION = "axis-feedback.v1"
 AXIS_FEEDBACK_PROMPT_VERSION = "hefesto.axis-feedback.v2"
+EDITORIAL_PROJECT_CONTRACT_VERSION = "editorial-project.v1"
+EDITORIAL_PROJECT_PROMPT_VERSION = "hefesto.editorial-project.v1"
 
 
 class EditorialUnderstandingProposal(StrictModel):
@@ -447,6 +450,8 @@ class PlanningArtifactRefs(StrictModel):
     narrative_axis_uri: str | None = Field(default=None, pattern=r"^gs://")
     axis_feedback_decision_id: UUID | None = None
     axis_feedback_decision_uri: str | None = Field(default=None, pattern=r"^gs://")
+    editorial_project_id: UUID | None = None
+    editorial_project_uri: str | None = Field(default=None, pattern=r"^gs://")
 
 
 class PlanningRun(StrictModel):
@@ -621,6 +626,8 @@ class AxisFeedbackDecision(StrictModel):
     human_approval_required: bool = True
     editorial_project_created: bool = False
     search_performed: bool = False
+    consumed_at: datetime | None = None
+    consumed_by_editorial_project_id: UUID | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -636,6 +643,8 @@ class AxisFeedbackDecision(StrictModel):
             raise ValueError("previous feedback decision id and uri must be set together")
         if self.previous_feedback_decision_id == self.feedback_decision_id:
             raise ValueError("feedback decision cannot be its own predecessor")
+        if (self.consumed_at is None) != (self.consumed_by_editorial_project_id is None):
+            raise ValueError("consumed_at and consumed_by_editorial_project_id must be set together")
         if self.state is AxisFeedbackDecisionState.ENRICHMENT_REQUIRED:
             if self.support is not SupportKind.ENRICHMENT:
                 raise ValueError("enrichment_required requires enrichment support")
@@ -733,4 +742,92 @@ class AxisFeedbackReviewResult(StrictModel):
         elif self.narrative_axis.narrative_axis_id != self.decision.current_narrative_axis_id:
             raise ValueError("keep/hold decisions must retain the current Axis")
         return self
+
+
+class ConsumedCarryForward(StrictModel):
+    feedback_decision_id: UUID
+    previous_feedback_decision_id: UUID | None = None
+    treatment_scale: TreatmentScale
+    intent: str = Field(min_length=1, max_length=4000)
+    rationale: str = Field(min_length=1, max_length=4000)
+
+
+class PersistedEditorialProject(StrictModel):
+    schema_version: int = 1
+    contract_version: str = Field(min_length=1)
+    prompt_version: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    planning_run_id: UUID
+    project_id: UUID
+    source_lineage_id: UUID
+    understanding_id: UUID
+    narrative_axis_id: UUID
+    consumed_feedback_decision_id: UUID | None = None
+    request_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    brief_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    graph_artifact_id: UUID
+    graph_manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    editorial_project: EditorialProject
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class EditorialProjectProposalResult(StrictModel):
+    planning_run: PlanningRun
+    editorial_understanding: EditorialUnderstanding
+    narrative_axis: NarrativeAxis
+    editorial_project: EditorialProject
+    consumed_feedback_decision: AxisFeedbackDecision | None = None
+    carry_forwards: list[ConsumedCarryForward] = Field(default_factory=list)
+    human_approval_required: bool = True
+    article_created: bool = False
+    search_performed: bool = False
+    graph_reextracted: bool = False
+    understanding_rebuilt: bool = False
+    stopped_at: str = "project_proposed"
+
+    @model_validator(mode="after")
+    def _stop_for_human_approval(self) -> "EditorialProjectProposalResult":
+        if self.planning_run.state is not PlanningRunState.PROJECT_PROPOSED:
+            raise ValueError("PlanningRun must stop at project_proposed")
+        if self.narrative_axis.status is not NarrativeAxisStatus.APPROVED:
+            raise ValueError("project_proposed requires an approved Narrative Axis")
+        if self.narrative_axis.approved_at is None:
+            raise ValueError("approved Axis must record Axis approval")
+        if self.editorial_project.status is not EditorialProjectStatus.PROPOSED:
+            raise ValueError("project_proposed cannot auto-approve the Editorial Project")
+        if self.editorial_project.approved_at is not None:
+            raise ValueError("project_proposed cannot record Editorial Project approval")
+        if self.editorial_project.narrative_axis_id != self.narrative_axis.narrative_axis_id:
+            raise ValueError("Editorial Project must be governed by the approved Narrative Axis")
+        if self.editorial_project.narrative_axis != self.narrative_axis.statement:
+            raise ValueError("Editorial Project Axis statement must match the approved Axis")
+        if self.planning_run.artifacts.editorial_project_id != self.editorial_project.editorial_project_id:
+            raise ValueError("PlanningRun Editorial Project id must match the persisted project")
+        if self.planning_run.artifacts.editorial_project_uri is None:
+            raise ValueError("project_proposed requires a persisted Editorial Project")
+        if self.planning_run.artifacts.narrative_axis_id != self.narrative_axis.narrative_axis_id:
+            raise ValueError("PlanningRun Axis id must match the approved Axis")
+        if not self.human_approval_required:
+            raise ValueError("project_proposed requires human approval")
+        if self.article_created:
+            raise ValueError("project_proposed cannot create a final article")
+        if self.search_performed:
+            raise ValueError("project_proposed cannot search or retrieve sources")
+        if self.graph_reextracted:
+            raise ValueError("project_proposed cannot rebuild the graph")
+        if self.understanding_rebuilt:
+            raise ValueError("project_proposed cannot rebuild editorial understanding")
+        if self.stopped_at != "project_proposed":
+            raise ValueError("entrega must stop at project_proposed")
+        decision = self.consumed_feedback_decision
+        if decision is not None:
+            if decision.consumed_at is None or decision.consumed_by_editorial_project_id is None:
+                raise ValueError("consumed Axis feedback must record consumption")
+            if decision.consumed_by_editorial_project_id != self.editorial_project.editorial_project_id:
+                raise ValueError("consumed Axis feedback must point at this Editorial Project")
+            if decision.editorial_project_created:
+                raise ValueError("consuming Axis feedback cannot falsify editorial_project_created")
+        return self
+
 

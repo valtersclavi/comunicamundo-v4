@@ -13,7 +13,7 @@ from uuid import UUID
 
 from google.cloud import storage
 
-from .contracts import AxisFeedbackReviewResult, AxisProposalResult, EnrichmentResolutionChoice, PlanningRequest, PlanningRun, SourceLineage
+from .contracts import AxisFeedbackReviewResult, AxisProposalResult, EditorialProjectProposalResult, EnrichmentResolutionChoice, PlanningRequest, PlanningRun, SourceLineage
 from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
 from .planning import PlanningOrchestrator
 
@@ -86,6 +86,14 @@ def _axis_proposal_runtime():
     project = _required("GOOGLE_CLOUD_PROJECT")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
     return build_axis_proposal_runtime(VertexRuntimeSettings(project=project, location=location))
+
+
+def _editorial_project_runtime():
+    from .runtime import VertexRuntimeSettings, build_editorial_project_runtime
+
+    project = _required("GOOGLE_CLOUD_PROJECT")
+    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    return build_editorial_project_runtime(VertexRuntimeSettings(project=project, location=location))
 
 
 def run_extract_graph_command(source_lineage_id: UUID) -> SourceLineage:
@@ -166,6 +174,20 @@ def run_resolve_axis_feedback_command(planning_run_id: UUID, choice: EnrichmentR
     ).resolve(planning_run_id, choice)
 
 
+def run_approve_axis_command(
+    planning_run_id: UUID, narrative_axis_id: UUID | None = None
+) -> EditorialProjectProposalResult:
+    from .editorial_project import EditorialProjectOrchestrator, LlamaIndexEditorialProjectBuilder
+
+    persistence = _planning_persistence()
+    runtime = _editorial_project_runtime()
+    return EditorialProjectOrchestrator(
+        persistence,
+        runtime,
+        LlamaIndexEditorialProjectBuilder(runtime),
+    ).execute(planning_run_id, narrative_axis_id=narrative_axis_id)
+
+
 def run_plan_command(location: str) -> PlanningRun:
     project = _required("GOOGLE_CLOUD_PROJECT")
     request = load_planning_request(location, project=project)
@@ -210,6 +232,10 @@ async def _run(args: argparse.Namespace) -> None:
         result = run_resolve_axis_feedback_command(args.planning_run_id, EnrichmentResolutionChoice(args.choice))
         print(result.model_dump_json())
         return
+    if args.command == "approve-axis":
+        result = run_approve_axis_command(args.planning_run_id, args.narrative_axis_id)
+        print(result.model_dump_json())
+        return
     app = _application()
     if args.command == "revise-project":
         result = await app.revise_project(args.editorial_project_id, _feedback(args.feedback_b64))
@@ -248,6 +274,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     resolve_feedback.add_argument("--planning-run-id", type=UUID, required=True)
     resolve_feedback.add_argument("--choice", required=True, choices=["accept", "decline"])
+    # The old Axis rewrite CLI is not registered; proposed Axis feedback must go through review-axis-feedback.
+    approve_axis = commands.add_parser(
+        "approve-axis",
+        help="approve the active Narrative Axis and propose one Editorial Project; STOP for human approval",
+    )
+    approve_axis.add_argument("--planning-run-id", type=UUID, required=True)
+    approve_axis.add_argument("--narrative-axis-id", type=UUID, required=False)
     revise_project = commands.add_parser("revise-project")
     revise_project.add_argument("--editorial-project-id", type=UUID, required=True)
     revise_project.add_argument("--feedback-b64", required=True)

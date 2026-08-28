@@ -274,7 +274,7 @@ def test_feedback_module_does_not_search_rebuild_or_create_project() -> None:
     assert "review-axis-feedback" in WORKER_PY
     assert "resolve-axis-feedback" in WORKER_PY
     assert "revise-axis" not in WORKER_PY
-    assert "approve-axis" not in WORKER_PY
+    assert "approve-axis" not in FEEDBACK_PY
     assert "app.revise_axis" not in WORKER_PY
     assert "app.approve_axis" not in WORKER_PY
     assert "--planning-run-id" in WORKER_PY
