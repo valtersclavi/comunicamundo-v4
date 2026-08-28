@@ -1,0 +1,103 @@
+name: remove-practical-dimension
+on:
+  push:
+    branches:
+      - fix/remove-practical-dimension-clean-proof
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    if: ${{ !contains(github.event.head_commit.message, '[genericity-patched]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/remove-practical-dimension-clean-proof
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12.14"
+      - name: Remove dedicated praxis ontology
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          contracts = Path('src/comunicamundo_v4/hefesto/contracts.py')
+          text = contracts.read_text()
+          old = text
+          text = text.replace('    practical_dimension: str | None = Field(default=None, min_length=1)\n', '')
+          if text == old:
+              raise SystemExit('contracts.py: practical_dimension field not found')
+          contracts.write_text(text)
+
+          prompts = Path('src/comunicamundo_v4/hefesto/prompts.py')
+          text = prompts.read_text()
+          text = text.replace(
+              'Identify central ideas, mechanisms, tensions, concrete examples, practical implications, missing context, and relationships between ideas that matter for the requested product.',
+              'Identify central ideas, mechanisms, tensions, concrete examples, implications, missing context, and relationships between ideas that matter for the requested product.'
+          )
+          text = text.replace(
+              'Return concrete source-grounded context, tensions, examples and practical implications. Do not write the final article.',
+              'Return concrete source-grounded context, tensions, examples and implications. Do not write the final article.'
+          )
+          text = text.replace(
+              '\nWhere the subject calls for how-to or operational practice, include a real practical_dimension. Treatment scale guides development, not section count.\n',
+              '\nTreatment scale guides development, not section count. The subject selection and development must follow the brief, approved Narrative Axis, source understanding, and editorial judgment rather than a fixed content checklist.\n'
+          )
+          prompts.write_text(text)
+
+          project_tests = Path('tests/test_editorial_project.py')
+          text = project_tests.read_text()
+          text = re.sub(
+              r'def _proposal\(\*, practical: str \| None = "Como tornar a presença praticável no cotidiano\."\) -> EditorialProjectProposal:',
+              'def _proposal() -> EditorialProjectProposal:',
+              text,
+          )
+          text = re.sub(r'\n\s*practical_dimension=practical,', '', text)
+          text = text.replace('    assert "practical_dimension" in lowered\n', '    assert "practical_dimension" not in lowered\n')
+          text = re.sub(
+              r'\ndef test_practical_dimension_is_preserved\(\) -> None:\n.*?(?=\ndef test_human_gate_remains_and_no_article_is_produced\(\) -> None:)',
+              '\n',
+              text,
+              flags=re.S,
+          )
+          text = re.sub(r'_proposal\(practical="[^"]*"\)', '_proposal()', text)
+          project_tests.write_text(text)
+
+          worker_tests = Path('tests/test_worker.py')
+          text = worker_tests.read_text()
+          text = re.sub(r'\n\s*practical_dimension="[^"]*",', '', text)
+          text = re.sub(r'\n\s*assert result\.editorial_project\.core_subjects\[0\]\.practical_dimension is not None', '', text)
+          worker_tests.write_text(text)
+
+          # The dedicated field must disappear from generic source and tests.
+          leftovers = []
+          for root in (Path('src'), Path('tests')):
+              for path in root.rglob('*'):
+                  if path.is_file() and path.suffix in {'.py', '.md', '.json', '.yaml', '.yml'}:
+                      data = path.read_text(errors='ignore')
+                      if 'practical_dimension' in data:
+                          leftovers.append(str(path))
+          if leftovers:
+              raise SystemExit('practical_dimension still present in: ' + ', '.join(leftovers))
+          PY
+      - name: Prove package
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip==26.2.1
+          python -m pip install -e '.[dev]'
+          python -m pip check
+          pytest
+          python -m compileall -q src tests
+          python -m comunicamundo_v4.hefesto.worker --help
+      - name: Commit validated cleanup
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src tests
+          test -n "$(git status --porcelain)"
+          git commit -m "Remove dedicated practical dimension from generic editorial contract [genericity-patched]"
+          git push origin HEAD:fix/remove-practical-dimension-clean-proof
