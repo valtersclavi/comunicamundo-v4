@@ -5,18 +5,25 @@ on:
 permissions:
   contents: read
   id-token: write
+concurrency:
+  group: hefesto-v4-luto-source-origin
+  cancel-in-progress: false
 env:
   PROJECT_ID: comunicamundo-v4
+  REGION: us-central1
+  JOB_NAME: hefesto-v4-rebuild
+  SERVICE_NAME: hefesto-v4-luto-source-origin
   BUCKET: comunicamundo-v4-hefesto-30524898837
-  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
+  REQUEST_OBJECT: requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
   OLD_PROJECT_ID: 13101c35-723d-43fe-9b45-0082b49c0a76
 jobs:
   inspect:
     if: ${{ contains(github.event.head_commit.message, '[luto-source-origin]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -24,36 +31,87 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Inspect request without source body
+      - name: Prepare runtime diagnostic service
         run: |
           set -euo pipefail
-          gcloud storage cat "${REQUEST_URI}" > /tmp/request.json
-          jq '{project_id, brief, sources: [.sources[] | {source_id,title,language,metadata,characters:(.text|length),text_sha256:(.text|@base64)}]}' /tmp/request.json \
-            | jq '(.sources[].text_sha256) = "omitted"' \
-            | tee /tmp/request-metadata.json
-      - name: Find candidate original objects
+          image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test -n "${image}"
+          token="$(openssl rand -hex 32)"
+          cat > /tmp/diag.py <<'PY'
+          import hmac, json, os
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from google.cloud import storage
+
+          TOKEN=os.environ['PROOF_TOKEN']
+          BUCKET=os.environ['PROOF_BUCKET']
+          REQUEST_OBJECT=os.environ['PROOF_REQUEST_OBJECT']
+          OLD_PROJECT_ID=os.environ['PROOF_OLD_PROJECT_ID']
+
+          def inspect():
+              client=storage.Client(project=os.environ['GOOGLE_CLOUD_PROJECT'])
+              bucket=client.bucket(BUCKET)
+              raw=bucket.blob(REQUEST_OBJECT).download_as_text()
+              request=json.loads(raw)
+              sources=[]
+              source_ids=[]
+              for source in request.get('sources', []):
+                  source_ids.append(str(source.get('source_id','')))
+                  sources.append({
+                      'source_id': source.get('source_id'),
+                      'title': source.get('title'),
+                      'language': source.get('language'),
+                      'metadata': source.get('metadata'),
+                      'characters': len(source.get('text') or ''),
+                  })
+              candidates=[]
+              for blob in client.list_blobs(BUCKET):
+                  name=blob.name
+                  low=name.lower()
+                  if (name.endswith('.pdf') or OLD_PROJECT_ID in name or any(sid and sid in name for sid in source_ids)
+                      or any(term in low for term in ('luto','grief','original','upload','source'))):
+                      candidates.append({'gs_uri':f'gs://{BUCKET}/{name}','size':blob.size,'content_type':blob.content_type})
+              return {'project_id':request.get('project_id'),'brief':request.get('brief'),'sources':sources,'candidate_objects':candidates[:500]}
+
+          class H(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  if not hmac.compare_digest(self.headers.get('X-Proof-Token',''), TOKEN):
+                      self.send_response(403); self.end_headers(); return
+                  try:
+                      payload=inspect(); status=200
+                  except Exception as exc:
+                      payload={'error':type(exc).__name__,'message':str(exc)}; status=500
+                  body=json.dumps(payload,ensure_ascii=False).encode()
+                  self.send_response(status); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+              def log_message(self,*args): pass
+          ThreadingHTTPServer(('0.0.0.0',int(os.environ.get('PORT','8080'))),H).serve_forever()
+          PY
+          script="$(base64 -w0 /tmp/diag.py)"
+          gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --quiet >/dev/null 2>&1 || true
+          gcloud run deploy "${SERVICE_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --image="${image}" \
+            --service-account="${RUNTIME_SA}" --command=python \
+            --args=-c,"import base64,os;exec(base64.b64decode(os.environ['PROOF_SCRIPT_B64']))" \
+            --cpu=2 --memory=4Gi --max-instances=1 --min-instances=0 --concurrency=1 --timeout=600 \
+            --allow-unauthenticated \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},PROOF_BUCKET=${BUCKET},PROOF_REQUEST_OBJECT=${REQUEST_OBJECT},PROOF_OLD_PROJECT_ID=${OLD_PROJECT_ID},PROOF_TOKEN=${token},PROOF_SCRIPT_B64=${script}" \
+            --quiet
+          url="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          echo "DIAG_URL=${url}" >> "${GITHUB_ENV}"
+          echo "DIAG_TOKEN=${token}" >> "${GITHUB_ENV}"
+      - name: Inspect source origin
         run: |
           set -euo pipefail
-          gcloud storage ls --recursive "gs://${BUCKET}/**" > /tmp/all-objects.txt
-          {
-            echo '### Objects containing old project id'
-            grep -F "${OLD_PROJECT_ID}" /tmp/all-objects.txt || true
-            echo '### PDF objects'
-            grep -Ei '\.pdf$' /tmp/all-objects.txt || true
-            echo '### Objects mentioning luto/grief/source/original/upload'
-            grep -Ei 'luto|grief|source|original|upload' /tmp/all-objects.txt | head -n 300 || true
-          } | tee /tmp/candidates.txt
+          curl -fsS --max-time 540 -H "X-Proof-Token: ${DIAG_TOKEN}" "${DIAG_URL}/" | tee /tmp/result.json
+          jq . /tmp/result.json
       - name: Result
         if: always()
         run: |
           {
-            echo '# Luto source-origin diagnostic'
-            echo '## Request metadata'
+            echo '# Luto source-origin diagnostic via runtime identity'
             echo '```json'
-            cat /tmp/request-metadata.json 2>/dev/null || true
-            echo '```'
-            echo '## Candidate bucket objects'
-            echo '```text'
-            cat /tmp/candidates.txt 2>/dev/null || true
+            cat /tmp/result.json 2>/dev/null || true
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Cleanup
+        if: always()
+        run: gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
