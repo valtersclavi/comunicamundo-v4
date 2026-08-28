@@ -1,0 +1,4 @@
+PlanningRun: 0c25fe65-8f86-4ce1-99e7-95f80c92acba
+Purpose: approve active Narrative Axis and propose Editorial Project only.
+STOP: project_proposed.
+No search. No graph/understanding rebuild. No final article.
