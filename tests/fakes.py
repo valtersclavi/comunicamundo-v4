@@ -21,6 +21,7 @@ from comunicamundo_v4.hefesto.contracts import (
     PlanningRun,
     PreparedChunk,
     SourceLineage,
+    AxisFeedbackDecision,
 )
 
 
@@ -111,6 +112,7 @@ class MemoryPlanningPersistence:
         self.graph_manifest_writes = 0
         self.understanding_writes = 0
         self.axis_writes = 0
+        self.feedback_writes = 0
         self.stored_axes: dict = {}
 
     def save_run(self, run: PlanningRun) -> PlanningRun:
@@ -176,6 +178,17 @@ class MemoryPlanningPersistence:
     def load_narrative_axis(self, uri: str) -> PersistedNarrativeAxis:
         record = self.objects[uri]
         assert isinstance(record, PersistedNarrativeAxis)
+        return record.model_copy()
+
+    def persist_axis_feedback_decision(self, run: PlanningRun, record: AxisFeedbackDecision) -> str:
+        self.feedback_writes += 1
+        uri = f"gs://memory/{run.planning_run_id}/feedback/{record.feedback_decision_id}.json"
+        self.objects[uri] = record.model_copy()
+        return uri
+
+    def load_axis_feedback_decision(self, uri: str) -> AxisFeedbackDecision:
+        record = self.objects[uri]
+        assert isinstance(record, AxisFeedbackDecision)
         return record.model_copy()
 
     def save_axis(self, stored):

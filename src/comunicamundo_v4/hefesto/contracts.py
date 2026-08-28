@@ -378,6 +378,8 @@ EDITORIAL_UNDERSTANDING_CONTRACT_VERSION = "editorial-understanding.v1"
 EDITORIAL_UNDERSTANDING_PROMPT_VERSION = "hefesto.editorial-understanding.v1"
 NARRATIVE_AXIS_CONTRACT_VERSION = "narrative-axis.v1"
 NARRATIVE_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v3"
+AXIS_FEEDBACK_CONTRACT_VERSION = "axis-feedback.v1"
+AXIS_FEEDBACK_PROMPT_VERSION = "hefesto.axis-feedback.v1"
 
 
 class EditorialUnderstandingProposal(StrictModel):
@@ -443,6 +445,8 @@ class PlanningArtifactRefs(StrictModel):
     understanding_uri: str | None = Field(default=None, pattern=r"^gs://")
     narrative_axis_id: UUID | None = None
     narrative_axis_uri: str | None = Field(default=None, pattern=r"^gs://")
+    axis_feedback_decision_id: UUID | None = None
+    axis_feedback_decision_uri: str | None = Field(default=None, pattern=r"^gs://")
 
 
 class PlanningRun(StrictModel):
@@ -486,3 +490,241 @@ class AxisProposalResult(StrictModel):
         if self.stopped_at != "axis_proposed":
             raise ValueError("entrega 3 must stop at axis_proposed")
         return self
+
+
+class EditorialImpactKind(StrEnum):
+    COMPLEMENTS = "complements"
+    QUALIFIES = "qualifies"
+    REFORMULATES = "reformulates"
+
+
+class SupportKind(StrEnum):
+    SOURCES = "sources"
+    MODEL = "model"
+    ENRICHMENT = "enrichment"
+
+
+class AxisAction(StrEnum):
+    KEEP = "keep"
+    REVISE = "revise"
+    HOLD_FOR_ENRICHMENT = "hold_for_enrichment"
+
+
+class TreatmentScale(StrEnum):
+    BRIEF = "brief"
+    INTEGRATED = "integrated"
+    SUBSTANTIAL = "substantial"
+
+
+class AxisFeedbackDecisionState(StrEnum):
+    DECIDED = "decided"
+    ENRICHMENT_REQUIRED = "enrichment_required"
+    ENRICHMENT_ACCEPTED = "enrichment_accepted"
+    ENRICHMENT_DECLINED = "enrichment_declined"
+
+
+class EnrichmentResolutionChoice(StrEnum):
+    ACCEPT = "accept"
+    DECLINE = "decline"
+
+
+class CarryForwardCommitment(StrictModel):
+    intent: str = Field(min_length=1, max_length=4000)
+    treatment_scale: TreatmentScale
+    rationale: str = Field(min_length=1, max_length=4000)
+
+
+class AxisFeedbackDecisionProposal(StrictModel):
+    impact: EditorialImpactKind
+    affected_premises: list[str] = Field(min_length=1, max_length=12)
+    editorial_consequences: list[str] = Field(min_length=1, max_length=12)
+    impact_rationale: str = Field(min_length=1, max_length=4000)
+    support: SupportKind
+    support_rationale: str = Field(min_length=1, max_length=4000)
+    axis_action: AxisAction
+    treatment_scale: TreatmentScale
+    treatment_rationale: str = Field(min_length=1, max_length=4000)
+    enrichment_need: str | None = Field(default=None, min_length=1, max_length=4000)
+    decision_rationale: str = Field(min_length=1, max_length=4000)
+    carry_forward_intent: str | None = Field(default=None, min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def _coherent_decision(self) -> "AxisFeedbackDecisionProposal":
+        if self.support is SupportKind.ENRICHMENT:
+            if self.axis_action is not AxisAction.HOLD_FOR_ENRICHMENT:
+                raise ValueError("enrichment support must hold the Axis pending enrichment")
+            if not (self.enrichment_need and self.enrichment_need.strip()):
+                raise ValueError("enrichment support requires an enrichment_need")
+        else:
+            if self.axis_action is AxisAction.HOLD_FOR_ENRICHMENT:
+                raise ValueError("sources/model support cannot hold the Axis for enrichment")
+            if self.enrichment_need and self.enrichment_need.strip():
+                raise ValueError("enrichment_need is only valid when support is enrichment")
+        if self.axis_action is AxisAction.KEEP and not (self.carry_forward_intent and self.carry_forward_intent.strip()):
+            raise ValueError("keeping the Axis requires a carry-forward commitment")
+        return self
+
+
+class BoundedRecalibrationProposal(StrictModel):
+    support: SupportKind
+    support_rationale: str = Field(min_length=1, max_length=4000)
+    axis_action: AxisAction
+    treatment_scale: TreatmentScale
+    treatment_rationale: str = Field(min_length=1, max_length=4000)
+    decision_rationale: str = Field(min_length=1, max_length=4000)
+    carry_forward_intent: str | None = Field(default=None, min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def _bounded_support(self) -> "BoundedRecalibrationProposal":
+        if self.support is SupportKind.ENRICHMENT:
+            raise ValueError("declining enrichment cannot request enrichment again")
+        if self.axis_action is AxisAction.HOLD_FOR_ENRICHMENT:
+            raise ValueError("declining enrichment cannot hold the Axis for enrichment")
+        if self.axis_action is AxisAction.KEEP and not (self.carry_forward_intent and self.carry_forward_intent.strip()):
+            raise ValueError("keeping the Axis after decline requires a carry-forward commitment")
+        return self
+
+
+class AxisFeedbackDecision(StrictModel):
+    schema_version: int = 1
+    feedback_decision_id: UUID = Field(default_factory=uuid4)
+    contract_version: str = Field(min_length=1)
+    prompt_version: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    planning_run_id: UUID
+    project_id: UUID
+    source_lineage_id: UUID
+    understanding_id: UUID
+    current_narrative_axis_id: UUID
+    request_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    brief_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    feedback: str = Field(min_length=1, max_length=8000)
+    feedback_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    state: AxisFeedbackDecisionState
+    impact: EditorialImpactKind
+    affected_premises: list[str] = Field(min_length=1, max_length=12)
+    editorial_consequences: list[str] = Field(min_length=1, max_length=12)
+    impact_rationale: str = Field(min_length=1, max_length=4000)
+    support: SupportKind
+    support_rationale: str = Field(min_length=1, max_length=4000)
+    axis_action: AxisAction
+    treatment_scale: TreatmentScale
+    treatment_rationale: str = Field(min_length=1, max_length=4000)
+    enrichment_need: str | None = Field(default=None, min_length=1, max_length=4000)
+    decision_rationale: str = Field(min_length=1, max_length=4000)
+    carry_forward: CarryForwardCommitment | None = None
+    user_resolution: EnrichmentResolutionChoice | None = None
+    resulting_narrative_axis_id: UUID | None = None
+    human_approval_required: bool = True
+    editorial_project_created: bool = False
+    search_performed: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="after")
+    def _durable_invariants(self) -> "AxisFeedbackDecision":
+        if not self.human_approval_required:
+            raise ValueError("axis feedback cannot auto-approve")
+        if self.editorial_project_created:
+            raise ValueError("axis feedback cannot create an Editorial Project")
+        if self.search_performed:
+            raise ValueError("axis feedback cannot search or retrieve sources")
+        if self.state is AxisFeedbackDecisionState.ENRICHMENT_REQUIRED:
+            if self.support is not SupportKind.ENRICHMENT:
+                raise ValueError("enrichment_required requires enrichment support")
+            if self.axis_action is not AxisAction.HOLD_FOR_ENRICHMENT:
+                raise ValueError("enrichment_required must hold the Axis")
+            if self.user_resolution is not None:
+                raise ValueError("enrichment_required is unresolved")
+            if self.resulting_narrative_axis_id is not None:
+                raise ValueError("enrichment_required cannot revise the Axis")
+            if not (self.enrichment_need and self.enrichment_need.strip()):
+                raise ValueError("enrichment_required needs a missing-evidence description")
+        elif self.state is AxisFeedbackDecisionState.ENRICHMENT_ACCEPTED:
+            if self.user_resolution is not EnrichmentResolutionChoice.ACCEPT:
+                raise ValueError("enrichment_accepted requires user acceptance")
+            if self.support is not SupportKind.ENRICHMENT:
+                raise ValueError("accepted enrichment remains an enrichment need")
+            if self.axis_action is not AxisAction.HOLD_FOR_ENRICHMENT:
+                raise ValueError("accepted enrichment must keep the Axis held")
+            if self.resulting_narrative_axis_id is not None:
+                raise ValueError("accepted enrichment cannot revise the Axis")
+        elif self.state is AxisFeedbackDecisionState.ENRICHMENT_DECLINED:
+            if self.user_resolution is not EnrichmentResolutionChoice.DECLINE:
+                raise ValueError("enrichment_declined requires user refusal")
+            if self.support is SupportKind.ENRICHMENT:
+                raise ValueError("declining enrichment must bound support to sources or model")
+            if self.axis_action is AxisAction.HOLD_FOR_ENRICHMENT:
+                raise ValueError("declining enrichment cannot keep the Axis held")
+            if not (self.enrichment_need and self.enrichment_need.strip()):
+                raise ValueError("declined enrichment must retain the refused need")
+        elif self.state is AxisFeedbackDecisionState.DECIDED:
+            if self.user_resolution is not None:
+                raise ValueError("decided feedback has no enrichment resolution")
+            if self.support is SupportKind.ENRICHMENT or self.axis_action is AxisAction.HOLD_FOR_ENRICHMENT:
+                raise ValueError("decided feedback cannot remain pending enrichment")
+        else:
+            raise ValueError("unknown axis feedback state")
+        if self.axis_action is AxisAction.REVISE and self.resulting_narrative_axis_id is None:
+            raise ValueError("revising the Axis requires a resulting Narrative Axis id")
+        if self.axis_action is not AxisAction.REVISE and self.resulting_narrative_axis_id is not None:
+            raise ValueError("a resulting Axis is only valid when the Axis is revised")
+        if self.axis_action is AxisAction.KEEP and self.carry_forward is None:
+            raise ValueError("keeping the Axis requires a carry-forward commitment")
+        return self
+
+
+class AxisFeedbackReviewResult(StrictModel):
+    planning_run: PlanningRun
+    editorial_understanding: EditorialUnderstanding
+    narrative_axis: NarrativeAxis
+    decision: AxisFeedbackDecision
+    proposed_axis: str = Field(min_length=1, max_length=800)
+    human_approval_required: bool = True
+    editorial_project_created: bool = False
+    search_performed: bool = False
+    research_needed: bool = False
+    stopped_at: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _stop_for_human(self) -> "AxisFeedbackReviewResult":
+        if self.planning_run.state is not PlanningRunState.AXIS_PROPOSED:
+            raise ValueError("axis feedback must keep PlanningRun at axis_proposed")
+        if self.narrative_axis.status is not NarrativeAxisStatus.PROPOSED:
+            raise ValueError("axis feedback cannot auto-approve the Narrative Axis")
+        if self.narrative_axis.approved_at is not None:
+            raise ValueError("axis feedback cannot record Axis approval")
+        if self.proposed_axis != self.narrative_axis.statement:
+            raise ValueError("proposed_axis must match the active Narrative Axis")
+        if not self.human_approval_required:
+            raise ValueError("axis feedback requires human approval")
+        if self.editorial_project_created or self.decision.editorial_project_created:
+            raise ValueError("axis feedback cannot create an Editorial Project")
+        if self.search_performed or self.decision.search_performed:
+            raise ValueError("axis feedback cannot search or retrieve sources")
+        pending_enrichment = self.decision.state in {
+            AxisFeedbackDecisionState.ENRICHMENT_REQUIRED,
+            AxisFeedbackDecisionState.ENRICHMENT_ACCEPTED,
+        }
+        if pending_enrichment:
+            if self.stopped_at != "enrichment_required":
+                raise ValueError("unresolved or accepted enrichment must stop at enrichment_required")
+            if self.narrative_axis.narrative_axis_id != self.decision.current_narrative_axis_id:
+                raise ValueError("enrichment must leave the current Axis intact")
+            if self.decision.resulting_narrative_axis_id is not None:
+                raise ValueError("enrichment cannot supersede the current Axis")
+        else:
+            if self.stopped_at != "axis_proposed":
+                raise ValueError("bounded or decided feedback must remain at the Axis human-gate")
+        if self.research_needed != (self.decision.state is AxisFeedbackDecisionState.ENRICHMENT_ACCEPTED):
+            raise ValueError("research_needed is only true after accepted enrichment")
+        if self.decision.axis_action is AxisAction.REVISE:
+            if self.narrative_axis.narrative_axis_id != self.decision.resulting_narrative_axis_id:
+                raise ValueError("revised Axis must be the active Narrative Axis")
+            if self.narrative_axis.narrative_axis_id == self.decision.current_narrative_axis_id:
+                raise ValueError("a revision must persist a new Narrative Axis")
+        elif self.narrative_axis.narrative_axis_id != self.decision.current_narrative_axis_id:
+            raise ValueError("keep/hold decisions must retain the current Axis")
+        return self
+

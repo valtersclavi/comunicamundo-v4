@@ -40,6 +40,16 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     proposed = parser.parse_args(["propose-axis", "--planning-run-id", axis_id])
     assert proposed.command == "propose-axis"
     assert str(proposed.planning_run_id) == axis_id
+    reviewed = parser.parse_args(
+        ["review-axis-feedback", "--planning-run-id", axis_id, "--feedback-b64", "Zg"]
+    )
+    assert reviewed.command == "review-axis-feedback"
+    assert str(reviewed.planning_run_id) == axis_id
+    resolved = parser.parse_args(
+        ["resolve-axis-feedback", "--planning-run-id", axis_id, "--choice", "decline"]
+    )
+    assert resolved.command == "resolve-axis-feedback"
+    assert resolved.choice == "decline"
 
 
 def test_feedback_is_transport_encoded_but_natural_language() -> None:

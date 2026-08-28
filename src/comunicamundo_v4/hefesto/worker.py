@@ -13,7 +13,7 @@ from uuid import UUID
 
 from google.cloud import storage
 
-from .contracts import AxisProposalResult, PlanningRequest, PlanningRun, SourceLineage
+from .contracts import AxisFeedbackReviewResult, AxisProposalResult, EnrichmentResolutionChoice, PlanningRequest, PlanningRun, SourceLineage
 from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
 from .planning import PlanningOrchestrator
 
@@ -124,6 +124,48 @@ def run_propose_axis_command(planning_run_id: UUID) -> AxisProposalResult:
     ).execute(planning_run_id)
 
 
+def run_review_axis_feedback_command(planning_run_id: UUID, feedback: str) -> AxisFeedbackReviewResult:
+    from .axis_feedback import (
+        AxisFeedbackOrchestrator,
+        LlamaIndexAxisFeedbackDecider,
+        LlamaIndexAxisFeedbackReviser,
+        LlamaIndexBoundedRecalibrator,
+    )
+    from .axis_proposal import LlamaIndexAxisEvidenceReviewer
+
+    persistence = _planning_persistence()
+    runtime = _axis_proposal_runtime()
+    return AxisFeedbackOrchestrator(
+        persistence,
+        runtime,
+        LlamaIndexAxisFeedbackDecider(runtime),
+        LlamaIndexAxisFeedbackReviser(runtime),
+        LlamaIndexAxisEvidenceReviewer(runtime),
+        LlamaIndexBoundedRecalibrator(runtime),
+    ).review(planning_run_id, feedback)
+
+
+def run_resolve_axis_feedback_command(planning_run_id: UUID, choice: EnrichmentResolutionChoice) -> AxisFeedbackReviewResult:
+    from .axis_feedback import (
+        AxisFeedbackOrchestrator,
+        LlamaIndexAxisFeedbackDecider,
+        LlamaIndexAxisFeedbackReviser,
+        LlamaIndexBoundedRecalibrator,
+    )
+    from .axis_proposal import LlamaIndexAxisEvidenceReviewer
+
+    persistence = _planning_persistence()
+    runtime = _axis_proposal_runtime()
+    return AxisFeedbackOrchestrator(
+        persistence,
+        runtime,
+        LlamaIndexAxisFeedbackDecider(runtime),
+        LlamaIndexAxisFeedbackReviser(runtime),
+        LlamaIndexAxisEvidenceReviewer(runtime),
+        LlamaIndexBoundedRecalibrator(runtime),
+    ).resolve(planning_run_id, choice)
+
+
 def run_plan_command(location: str) -> PlanningRun:
     project = _required("GOOGLE_CLOUD_PROJECT")
     request = load_planning_request(location, project=project)
@@ -160,6 +202,14 @@ async def _run(args: argparse.Namespace) -> None:
         result = run_propose_axis_command(args.planning_run_id)
         print(result.model_dump_json())
         return
+    if args.command == "review-axis-feedback":
+        result = run_review_axis_feedback_command(args.planning_run_id, _feedback(args.feedback_b64))
+        print(result.model_dump_json())
+        return
+    if args.command == "resolve-axis-feedback":
+        result = run_resolve_axis_feedback_command(args.planning_run_id, EnrichmentResolutionChoice(args.choice))
+        print(result.model_dump_json())
+        return
     app = _application()
     if args.command == "revise-axis":
         result = await app.revise_axis(args.narrative_axis_id, _feedback(args.feedback_b64))
@@ -190,6 +240,18 @@ def _parser() -> argparse.ArgumentParser:
         help="persist editorial understanding and propose a Narrative Axis until axis_proposed",
     )
     propose_axis.add_argument("--planning-run-id", type=UUID, required=True)
+    review_feedback = commands.add_parser(
+        "review-axis-feedback",
+        help="assess human feedback against the proposed Axis without search or Editorial Project",
+    )
+    review_feedback.add_argument("--planning-run-id", type=UUID, required=True)
+    review_feedback.add_argument("--feedback-b64", required=True)
+    resolve_feedback = commands.add_parser(
+        "resolve-axis-feedback",
+        help="accept or decline an enrichment_required axis feedback decision",
+    )
+    resolve_feedback.add_argument("--planning-run-id", type=UUID, required=True)
+    resolve_feedback.add_argument("--choice", required=True, choices=["accept", "decline"])
     revise_axis = commands.add_parser("revise-axis")
     revise_axis.add_argument("--narrative-axis-id", type=UUID, required=True)
     revise_axis.add_argument("--feedback-b64", required=True)
