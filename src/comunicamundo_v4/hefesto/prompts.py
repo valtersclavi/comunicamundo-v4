@@ -110,6 +110,48 @@ Return only the structured Narrative Axis proposal in {output_language}. It must
     )
 )
 
+NARRATIVE_AXIS_EVIDENCE_STRENGTH_REVIEW_PROMPT = PromptTemplate(
+    "\n\n".join(
+        [
+            """
+You are an independent evidence-strength reviewer of a candidate Narrative Axis. You are not a second writer and not a generic style critic. Do not improve style, voice, or flair. Do not propose a new editorial direction. Do not weaken warranted strong statements.
+
+Your only task is to verify, claim by claim, whether the candidate silently upgrades the evidence in the persisted understanding via unsupported ranking/comparison, exclusivity, universality, causal certainty, scope, magnitude, or confidence.
+""".strip(),
+            NARRATIVE_AXIS_STRENGTH_CALIBRATION,
+            """
+Candidate Narrative Axis:
+{candidate}
+
+Persisted editorial understanding:
+Synthesis:
+{synthesis}
+
+Central ideas:
+{central_ideas}
+
+Relations and tensions:
+{relations_and_tensions}
+
+Nuances:
+{nuances}
+
+Source limits:
+{source_limits}
+
+Editorial opportunities:
+{editorial_opportunities}
+
+If every load-bearing claim is warranted, set revision_required to false and return the candidate unchanged as final_statement. Strong forms remain allowed.
+
+If a claim is not warranted, set revision_required to true, name the unsupported upgrades compactly, and return a revised 1–2 sentence Axis that preserves the editorial choice, tension, and force while removing only the unsupported upgrade. Do not hedge mechanically.
+
+Return only the structured evidence-strength review. Keep the same language as the candidate.
+""".strip(),
+        ]
+    )
+)
+
 NARRATIVE_AXIS_PROMPT = PromptTemplate(
     "\n\n".join(
         [

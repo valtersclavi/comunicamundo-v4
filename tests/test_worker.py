@@ -339,7 +339,11 @@ def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_p
     extract_writes = store.extraction_writes
     graph_writes = store.graph_writes
 
-    from comunicamundo_v4.hefesto.contracts import EditorialUnderstandingProposal, NarrativeAxisProposal
+    from comunicamundo_v4.hefesto.contracts import (
+        EditorialUnderstandingProposal,
+        NarrativeAxisEvidenceReview,
+        NarrativeAxisProposal,
+    )
     from comunicamundo_v4.hefesto.axis_proposal import UnderstandingMaterial
 
     class FakeSynthesizer:
@@ -371,8 +375,25 @@ def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_p
                 statement="A perda infantil se atravessa em relação, e a honestidade adequada à idade transforma proteção em presença."
             )
 
+    class FakeReviewer:
+        def __init__(self, runtime) -> None:
+            assert runtime.axis_model == "fake-axis"
+            self.calls = 0
+
+        def review(self, *, candidate, understanding):
+            self.calls += 1
+            assert candidate
+            assert understanding.synthesis
+            return NarrativeAxisEvidenceReview(
+                candidate_statement=candidate,
+                revision_required=False,
+                unsupported_upgrades=[],
+                final_statement=candidate,
+            )
+
     synth_holder: list[FakeSynthesizer] = []
     prop_holder: list[FakeProposer] = []
+    review_holder: list[FakeReviewer] = []
 
     def make_synth(runtime):
         synth = FakeSynthesizer(runtime)
@@ -383,6 +404,11 @@ def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_p
         prop = FakeProposer(runtime)
         prop_holder.append(prop)
         return prop
+
+    def make_reviewer(runtime):
+        reviewer = FakeReviewer(runtime)
+        review_holder.append(reviewer)
+        return reviewer
 
     monkeypatch.setattr(
         "comunicamundo_v4.hefesto.worker._graph_extraction_runtime",
@@ -407,6 +433,7 @@ def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_p
     )
     monkeypatch.setattr("comunicamundo_v4.hefesto.axis_proposal.LlamaIndexUnderstandingSynthesizer", make_synth)
     monkeypatch.setattr("comunicamundo_v4.hefesto.axis_proposal.LlamaIndexAxisProposer", make_prop)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.axis_proposal.LlamaIndexAxisEvidenceReviewer", make_reviewer)
     main(["propose-axis", "--planning-run-id", str(run.planning_run_id)])
     result = AxisProposalResult.model_validate_json(capsys.readouterr().out)
     assert result.planning_run.state is PlanningRunState.AXIS_PROPOSED
@@ -416,6 +443,7 @@ def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_p
     assert result.proposed_axis
     assert synth_holder[0].calls == 1
     assert prop_holder[0].calls == 1
+    assert review_holder[0].calls == 1
     assert store.extraction_writes == extract_writes
     assert store.graph_writes == graph_writes
     main(["propose-axis", "--planning-run-id", str(run.planning_run_id)])
@@ -424,8 +452,10 @@ def test_propose_axis_command_uses_only_axis_proposal_runtime(monkeypatch, tmp_p
     assert rerun.narrative_axis.narrative_axis_id == result.narrative_axis.narrative_axis_id
     assert synth_holder[0].calls == 1
     assert prop_holder[0].calls == 1
+    assert review_holder[0].calls == 1
     assert synth_holder[1].calls == 0
     assert prop_holder[1].calls == 0
+    assert review_holder[1].calls == 0
     assert store.extraction_writes == extract_writes
     assert store.graph_writes == graph_writes
 

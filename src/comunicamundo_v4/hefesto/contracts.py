@@ -40,6 +40,19 @@ class NarrativeAxisProposal(StrictModel):
     statement: str = Field(min_length=1, max_length=800)
 
 
+class NarrativeAxisEvidenceReview(StrictModel):
+    candidate_statement: str = Field(min_length=1, max_length=800)
+    revision_required: bool
+    unsupported_upgrades: list[str] = Field(default_factory=list, max_length=8)
+    final_statement: str = Field(min_length=1, max_length=800)
+
+    @model_validator(mode="after")
+    def _inspectable_decision(self) -> "NarrativeAxisEvidenceReview":
+        if self.revision_required and not [item for item in self.unsupported_upgrades if item.strip()]:
+            raise ValueError("revision requires compact unsupported-upgrade reasons")
+        return self
+
+
 class NarrativeAxis(StrictModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
 
@@ -364,7 +377,7 @@ class SourceLineage(StrictModel):
 EDITORIAL_UNDERSTANDING_CONTRACT_VERSION = "editorial-understanding.v1"
 EDITORIAL_UNDERSTANDING_PROMPT_VERSION = "hefesto.editorial-understanding.v1"
 NARRATIVE_AXIS_CONTRACT_VERSION = "narrative-axis.v1"
-NARRATIVE_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v2"
+NARRATIVE_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v3"
 
 
 class EditorialUnderstandingProposal(StrictModel):

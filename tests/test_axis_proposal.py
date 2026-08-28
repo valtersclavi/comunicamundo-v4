@@ -26,6 +26,7 @@ from comunicamundo_v4.hefesto.contracts import (
     GraphExtraction,
     GraphExtractionUnit,
     GraphRelation,
+    NarrativeAxisEvidenceReview,
     NarrativeAxisProposal,
     NarrativeAxisStatus,
     NormalizedSource,
@@ -122,6 +123,27 @@ class FailingProposer:
         raise RuntimeError("axis failed")
 
 
+class RecordingEvidenceReviewer:
+    def __init__(self) -> None:
+        self.candidates: list[str] = []
+        self.understandings = []
+
+    def review(self, *, candidate: str, understanding) -> NarrativeAxisEvidenceReview:
+        self.candidates.append(candidate)
+        self.understandings.append(understanding)
+        return NarrativeAxisEvidenceReview(
+            candidate_statement=candidate,
+            revision_required=False,
+            unsupported_upgrades=[],
+            final_statement=candidate,
+        )
+
+
+class FailingReviewer:
+    def review(self, *, candidate: str, understanding) -> NarrativeAxisEvidenceReview:
+        raise RuntimeError("review failed")
+
+
 def _brief(**overrides) -> EditorialBrief:
     payload = {"theme": "Luto infantil", "approach": "sensível e prático", "duration_minutes": 8, **overrides}
     return EditorialBrief.model_validate(payload)
@@ -192,10 +214,11 @@ def _prepare_graph_ready(store: MemoryPlanningPersistence, *texts: str, brief: E
     return run, lineage, extractor, request
 
 
-def _propose(store, run, *, synthesizer=None, proposer=None, runtime=None):
+def _propose(store, run, *, synthesizer=None, proposer=None, reviewer=None, runtime=None):
     synth = synthesizer if synthesizer is not None else RecordingSynthesizer()
     prop = proposer if proposer is not None else RecordingProposer()
-    result = AxisProposalOrchestrator(store, runtime or _axis_runtime(), synth, prop).execute(run.planning_run_id)
+    rev = reviewer if reviewer is not None else RecordingEvidenceReviewer()
+    result = AxisProposalOrchestrator(store, runtime or _axis_runtime(), synth, prop, rev).execute(run.planning_run_id)
     return result, synth, prop
 
 
@@ -218,6 +241,8 @@ def test_axis_module_does_not_reextract_or_create_editorial_project() -> None:
     assert "propose-axis" in WORKER_PY
     assert "--planning-run-id" in WORKER_PY
     assert "build_axis_proposal_runtime" in WORKER_PY
+    assert "LlamaIndexAxisEvidenceReviewer" in AXIS_PY
+    assert "LlamaIndexAxisEvidenceReviewer" in WORKER_PY
     assert "build_vertex_runtime" in WORKER_PY
 
 
@@ -278,7 +303,7 @@ def test_understanding_is_persisted_before_axis_and_axis_failure_reuses_it() -> 
     graph_writes = store.graph_writes
     synth = RecordingSynthesizer()
     with pytest.raises(RuntimeError, match="axis failed"):
-        AxisProposalOrchestrator(store, _axis_runtime(), synth, FailingProposer()).execute(run.planning_run_id)
+        AxisProposalOrchestrator(store, _axis_runtime(), synth, FailingProposer(), RecordingEvidenceReviewer()).execute(run.planning_run_id)
     updated = store.get_run(run.planning_run_id)
     assert updated.state is PlanningRunState.UNDERSTANDING_READY
     assert updated.state is not PlanningRunState.AXIS_PROPOSED
@@ -297,7 +322,7 @@ def test_understanding_is_persisted_before_axis_and_axis_failure_reuses_it() -> 
     assert extractor.calls
 
     proposer = RecordingProposer()
-    result = AxisProposalOrchestrator(store, _axis_runtime(), synth, proposer).execute(run.planning_run_id)
+    result = AxisProposalOrchestrator(store, _axis_runtime(), synth, proposer, RecordingEvidenceReviewer()).execute(run.planning_run_id)
     assert result.planning_run.state is PlanningRunState.AXIS_PROPOSED
     assert len(synth.materials) == 1
     assert store.understanding_writes == 1
@@ -312,7 +337,7 @@ def test_understanding_failure_keeps_graph_ready_and_stays_below_understanding_r
     run, lineage, extractor, _request = _prepare_graph_ready(store, "um.", "dois.")
     extract_writes = store.extraction_writes
     with pytest.raises(RuntimeError, match="understanding failed"):
-        AxisProposalOrchestrator(store, _axis_runtime(), FailingSynthesizer(), RecordingProposer()).execute(run.planning_run_id)
+        AxisProposalOrchestrator(store, _axis_runtime(), FailingSynthesizer(), RecordingProposer(), RecordingEvidenceReviewer()).execute(run.planning_run_id)
     updated = store.get_run(run.planning_run_id)
     assert updated.state is PlanningRunState.GRAPH_READY
     assert updated.state is not PlanningRunState.UNDERSTANDING_READY
@@ -331,10 +356,11 @@ def test_compatible_axis_proposed_rerun_makes_zero_model_calls() -> None:
     run, lineage, extractor, _request = _prepare_graph_ready(store, "um.", "dois.", "três.")
     extract_writes = store.extraction_writes
     graph_writes = store.graph_writes
-    first, synth, prop = _propose(store, run)
+    reviewer = RecordingEvidenceReviewer()
+    first, synth, prop = _propose(store, run, reviewer=reviewer)
     understanding_writes = store.understanding_writes
     axis_writes = store.axis_writes
-    second, synth2, prop2 = _propose(store, first.planning_run, synthesizer=synth, proposer=prop)
+    second, synth2, prop2 = _propose(store, first.planning_run, synthesizer=synth, proposer=prop, reviewer=reviewer)
     assert first.planning_run.state is PlanningRunState.AXIS_PROPOSED
     assert second.planning_run.state is PlanningRunState.AXIS_PROPOSED
     assert second.planning_run.planning_run_id == first.planning_run.planning_run_id
@@ -342,6 +368,7 @@ def test_compatible_axis_proposed_rerun_makes_zero_model_calls() -> None:
     assert second.proposed_axis == first.proposed_axis
     assert len(synth.materials) == 1
     assert len(prop.understandings) == 1
+    assert len(reviewer.candidates) == 1
     assert len(synth2.materials) == 1
     assert len(prop2.understandings) == 1
     assert store.understanding_writes == understanding_writes
@@ -415,6 +442,7 @@ def test_invalid_axis_statement_preserves_understanding() -> None:
             _axis_runtime(),
             synth,
             RecordingProposer("Uma. Duas. Três frases indevidas."),
+            RecordingEvidenceReviewer(),
         ).execute(run.planning_run_id)
     updated = store.get_run(run.planning_run_id)
     assert updated.state is PlanningRunState.UNDERSTANDING_READY

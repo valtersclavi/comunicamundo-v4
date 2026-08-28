@@ -22,6 +22,7 @@ from .contracts import (
     EditorialUnderstandingProposal,
     GraphReadyManifest,
     NarrativeAxis,
+    NarrativeAxisEvidenceReview,
     NarrativeAxisProposal,
     NarrativeAxisStatus,
     PersistedNarrativeAxis,
@@ -34,7 +35,11 @@ from .contracts import (
 )
 from .graph import ProjectGraph
 from .persistence import StoredNarrativeAxis
-from .prompts import EDITORIAL_UNDERSTANDING_PROMPT, NARRATIVE_AXIS_FROM_UNDERSTANDING_PROMPT
+from .prompts import (
+    EDITORIAL_UNDERSTANDING_PROMPT,
+    NARRATIVE_AXIS_EVIDENCE_STRENGTH_REVIEW_PROMPT,
+    NARRATIVE_AXIS_FROM_UNDERSTANDING_PROMPT,
+)
 from .runtime import AxisProposalRuntime
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -97,6 +102,25 @@ def _join_lines(values: Sequence[str]) -> str:
     return "\n".join(values) if values else "(none)"
 
 
+def _understanding_prompt_fields(understanding: EditorialUnderstanding) -> dict[str, str]:
+    return {
+        "synthesis": understanding.synthesis,
+        "central_ideas": _join_lines(understanding.central_ideas),
+        "relations_and_tensions": _join_lines(understanding.relations_and_tensions),
+        "nuances": _join_lines(understanding.nuances),
+        "source_limits": _join_lines(understanding.source_limits),
+        "editorial_opportunities": _join_lines(understanding.editorial_opportunities),
+    }
+
+
+def apply_evidence_strength_review(candidate: str, review: NarrativeAxisEvidenceReview) -> str:
+    candidate = validate_axis_statement(candidate)
+    final = validate_axis_statement(review.final_statement)
+    if not review.revision_required:
+        return candidate
+    return final
+
+
 @dataclass(frozen=True, slots=True)
 class UnderstandingMaterial:
     brief: EditorialBrief
@@ -111,6 +135,10 @@ class UnderstandingSynthesizer(Protocol):
 
 class NarrativeAxisProposer(Protocol):
     def propose(self, *, brief: EditorialBrief, understanding: EditorialUnderstanding) -> NarrativeAxisProposal: ...
+
+
+class NarrativeAxisEvidenceReviewer(Protocol):
+    def review(self, *, candidate: str, understanding: EditorialUnderstanding) -> NarrativeAxisEvidenceReview: ...
 
 
 class AxisProposalPersistence(Protocol):
@@ -171,12 +199,22 @@ class LlamaIndexAxisProposer:
             product=brief.product,
             duration_minutes=brief.duration_minutes,
             output_language=brief.output_language,
-            synthesis=understanding.synthesis,
-            central_ideas=_join_lines(understanding.central_ideas),
-            relations_and_tensions=_join_lines(understanding.relations_and_tensions),
-            nuances=_join_lines(understanding.nuances),
-            source_limits=_join_lines(understanding.source_limits),
-            editorial_opportunities=_join_lines(understanding.editorial_opportunities),
+            **_understanding_prompt_fields(understanding),
+        )
+
+
+class LlamaIndexAxisEvidenceReviewer:
+    def __init__(self, runtime: AxisProposalRuntime) -> None:
+        if runtime.context_window <= 0 or runtime.axis_max_tokens <= 0:
+            raise ValueError("Narrative Axis runtime must declare explicit context and output budgets")
+        self._runtime = runtime
+
+    def review(self, *, candidate: str, understanding: EditorialUnderstanding) -> NarrativeAxisEvidenceReview:
+        return self._runtime.axis_llm.structured_predict(
+            NarrativeAxisEvidenceReview,
+            NARRATIVE_AXIS_EVIDENCE_STRENGTH_REVIEW_PROMPT,
+            candidate=candidate,
+            **_understanding_prompt_fields(understanding),
         )
 
 
@@ -191,6 +229,7 @@ class AxisProposalOrchestrator:
         runtime: AxisProposalRuntime,
         synthesizer: UnderstandingSynthesizer,
         proposer: NarrativeAxisProposer,
+        reviewer: NarrativeAxisEvidenceReviewer,
         *,
         understanding_contract_version: str = EDITORIAL_UNDERSTANDING_CONTRACT_VERSION,
         understanding_prompt_version: str = EDITORIAL_UNDERSTANDING_PROMPT_VERSION,
@@ -201,6 +240,7 @@ class AxisProposalOrchestrator:
         self._runtime = runtime
         self._synthesizer = synthesizer
         self._proposer = proposer
+        self._reviewer = reviewer
         self._understanding_contract = understanding_contract_version
         self._understanding_prompt = understanding_prompt_version
         self._axis_contract = axis_contract_version
@@ -375,7 +415,9 @@ class AxisProposalOrchestrator:
                 )
             return existing
         proposal = self._proposer.propose(brief=request.brief, understanding=understanding)
-        statement = validate_axis_statement(proposal.statement)
+        candidate = validate_axis_statement(proposal.statement)
+        review = self._reviewer.review(candidate=candidate, understanding=understanding)
+        statement = apply_evidence_strength_review(candidate, review)
         axis = NarrativeAxis(
             project_id=run.project_id,
             statement=statement,
