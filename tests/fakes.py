@@ -188,8 +188,9 @@ class MemoryPlanningPersistence:
 
     def load_axis_feedback_decision(self, uri: str) -> AxisFeedbackDecision:
         record = self.objects[uri]
-        assert isinstance(record, AxisFeedbackDecision)
-        return record.model_copy()
+        if isinstance(record, AxisFeedbackDecision):
+            return record.model_copy()
+        return AxisFeedbackDecision.model_validate(record)
 
     def save_axis(self, stored):
         self.stored_axes[stored.narrative_axis.narrative_axis_id] = stored.model_copy()

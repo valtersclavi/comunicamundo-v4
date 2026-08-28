@@ -288,6 +288,14 @@ class AxisFeedbackOrchestrator:
                 return self._result(run, understanding, active, existing)
         if existing is not None and existing.state is AxisFeedbackDecisionState.ENRICHMENT_REQUIRED:
             raise ValueError("resolve the pending enrichment_required decision before submitting new feedback")
+        if (
+            existing is not None
+            and existing.state is AxisFeedbackDecisionState.ENRICHMENT_ACCEPTED
+            and existing.understanding_id == understanding.understanding_id
+        ):
+            raise ValueError(
+                "accepted enrichment remains a research-needed hold until the corpus/understanding changes"
+            )
         try:
             proposal = self._decider.decide(
                 brief=request.brief,
@@ -301,6 +309,8 @@ class AxisFeedbackOrchestrator:
                 understanding_id=understanding.understanding_id,
                 feedback_fingerprint=digest,
             )
+            previous_id = None if existing is None else existing.feedback_decision_id
+            previous_uri = None if existing is None else run.artifacts.axis_feedback_decision_uri
             if proposal.support is SupportKind.ENRICHMENT:
                 decision = self._build_decision(
                     decision_id=decision_id,
@@ -313,6 +323,8 @@ class AxisFeedbackOrchestrator:
                     proposal=proposal,
                     state=AxisFeedbackDecisionState.ENRICHMENT_REQUIRED,
                     resulting_axis_id=None,
+                    previous_id=previous_id,
+                    previous_uri=previous_uri,
                 )
                 return self._persist_decision(run, understanding, current_axis, decision)
             resulting = None
@@ -342,6 +354,8 @@ class AxisFeedbackOrchestrator:
                 proposal=proposal,
                 state=AxisFeedbackDecisionState.DECIDED,
                 resulting_axis_id=None if resulting is None else resulting.narrative_axis_id,
+                previous_id=previous_id,
+                previous_uri=previous_uri,
             )
             active = current_axis if resulting is None else resulting
             return self._persist_decision(run, understanding, active, decision)
@@ -460,10 +474,7 @@ class AxisFeedbackOrchestrator:
     def _load_current_decision(self, run: PlanningRun) -> AxisFeedbackDecision | None:
         if run.artifacts.axis_feedback_decision_uri is None:
             return None
-        try:
-            return self._persistence.load_axis_feedback_decision(run.artifacts.axis_feedback_decision_uri)
-        except Exception:
-            return None
+        return self._persistence.load_axis_feedback_decision(run.artifacts.axis_feedback_decision_uri)
 
     def _same_submission(
         self,
@@ -578,6 +589,8 @@ class AxisFeedbackOrchestrator:
         proposal: AxisFeedbackDecisionProposal | BoundedRecalibrationProposal,
         state: AxisFeedbackDecisionState,
         resulting_axis_id: UUID | None,
+        previous_id: UUID | None,
+        previous_uri: str | None,
     ) -> AxisFeedbackDecision:
         impact = proposal.impact if isinstance(proposal, AxisFeedbackDecisionProposal) else None
         affected = proposal.affected_premises if isinstance(proposal, AxisFeedbackDecisionProposal) else None
@@ -614,6 +627,8 @@ class AxisFeedbackOrchestrator:
             decision_rationale=proposal.decision_rationale,
             carry_forward=_carry_forward(proposal),
             resulting_narrative_axis_id=resulting_axis_id,
+            previous_feedback_decision_id=previous_id,
+            previous_feedback_decision_uri=previous_uri,
             human_approval_required=True,
             editorial_project_created=False,
             search_performed=False,
@@ -670,6 +685,23 @@ class AxisFeedbackOrchestrator:
             research_needed=decision.state is AxisFeedbackDecisionState.ENRICHMENT_ACCEPTED,
             stopped_at="enrichment_required" if pending else "axis_proposed",
         )
+
+
+def load_axis_feedback_history(persistence: AxisFeedbackPersistence, run: PlanningRun) -> tuple[AxisFeedbackDecision, ...]:
+    """Walk previous-links from the latest decision so later stages can recover every commitment in order."""
+    uri = run.artifacts.axis_feedback_decision_uri
+    if uri is None:
+        return ()
+    chain: list[AxisFeedbackDecision] = []
+    seen: set[UUID] = set()
+    while uri is not None:
+        decision = persistence.load_axis_feedback_decision(uri)
+        if decision.feedback_decision_id in seen:
+            raise ValueError("axis feedback history cycle")
+        seen.add(decision.feedback_decision_id)
+        chain.append(decision)
+        uri = decision.previous_feedback_decision_uri
+    return tuple(reversed(chain))
 
 
 def _carry_forward(

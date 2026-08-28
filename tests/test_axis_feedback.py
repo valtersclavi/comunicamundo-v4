@@ -9,6 +9,7 @@ from comunicamundo_v4.hefesto.axis_feedback import (
     LlamaIndexAxisFeedbackDecider,
     LlamaIndexAxisFeedbackReviser,
     LlamaIndexBoundedRecalibrator,
+    load_axis_feedback_history,
 )
 from comunicamundo_v4.hefesto.axis_proposal import LlamaIndexAxisEvidenceReviewer
 from comunicamundo_v4.hefesto.contracts import (
@@ -52,6 +53,7 @@ PROMPTS_PY = Path("src/comunicamundo_v4/hefesto/prompts.py").read_text()
 CANONICAL_FEEDBACK = "Não quero que esqueça que o adulto responsável pela criança também está vivendo o próprio luto."
 
 COMPLEMENT_FEEDBACK = "Also keep in view that recovery needs ordinary rest, not only the central practice."
+SECOND_COMPLEMENT_FEEDBACK = "Also keep in view that recovery needs ordinary shared time, not only the central practice."
 QUALIFY_FEEDBACK = "The existing practice only holds if it is interpreted as a shared relation, not a solo technique."
 REFORMULATE_FEEDBACK = "The load-bearing tension is not concealment versus honesty; it is whether the work is done in relation or in isolation."
 MODEL_FEEDBACK = "Generally known attention-and-sleep coupling should shape how the piece talks about daily capacity."
@@ -792,6 +794,108 @@ def test_new_feedback_is_blocked_while_enrichment_is_pending() -> None:
     orchestrator.review(proposed.planning_run.planning_run_id, ENRICHMENT_FEEDBACK)
     with pytest.raises(ValueError, match="pending enrichment_required"):
         orchestrator.review(proposed.planning_run.planning_run_id, COMPLEMENT_FEEDBACK)
+
+
+def test_sequential_feedback_preserves_earlier_carry_forward() -> None:
+    store, proposed, lineage, extractor, _request, synth, _prop = _ready()
+    extract_writes = store.extraction_writes
+    graph_writes = store.graph_writes
+    understanding_writes = store.understanding_writes
+    first_intent = "Later, mention ordinary rest as a brief supporting note beside the central practice."
+    second_intent = "Later, mention ordinary shared time as a brief supporting note beside the central practice."
+    first_decider = RecordingDecider(_decision_proposal(carry_forward_intent=first_intent))
+    first = _orchestrator(store, decider=first_decider).review(
+        proposed.planning_run.planning_run_id, COMPLEMENT_FEEDBACK
+    )
+    first_id = first.decision.feedback_decision_id
+    first_uri = first.planning_run.artifacts.axis_feedback_decision_uri
+    second_decider = RecordingDecider(
+        _decision_proposal(
+            carry_forward_intent=second_intent,
+            treatment_rationale="A second brief note is enough; the Axis need not grow.",
+            decision_rationale="Keep the Axis and carry the second contribution forward at a brief scale.",
+        )
+    )
+    second = _orchestrator(store, decider=second_decider).review(
+        proposed.planning_run.planning_run_id, SECOND_COMPLEMENT_FEEDBACK
+    )
+    assert second.decision.feedback_decision_id != first_id
+    assert second.decision.previous_feedback_decision_id == first_id
+    assert second.decision.previous_feedback_decision_uri == first_uri
+    assert second.planning_run.artifacts.axis_feedback_decision_id == second.decision.feedback_decision_id
+    assert second.planning_run.artifacts.axis_feedback_decision_uri != first_uri
+    history = load_axis_feedback_history(store, second.planning_run)
+    assert [item.feedback_decision_id for item in history] == [first_id, second.decision.feedback_decision_id]
+    assert history[0].carry_forward is not None
+    assert history[0].carry_forward.intent == first_intent
+    assert history[1].carry_forward is not None
+    assert history[1].carry_forward.intent == second_intent
+    reloaded_first = store.load_axis_feedback_decision(first_uri)
+    assert reloaded_first.carry_forward.intent == first_intent
+    assert store.extraction_writes == extract_writes
+    assert store.graph_writes == graph_writes
+    assert store.understanding_writes == understanding_writes
+    assert len(synth.materials) == 1
+    assert store.get_source_lineage(lineage.source_lineage_id).graph_artifact_id == lineage.graph_artifact_id
+    assert extractor.calls
+    assert second.editorial_project_created is False
+    assert second.search_performed is False
+
+
+def test_accepted_enrichment_blocks_new_feedback_until_understanding_changes() -> None:
+    store, proposed, _lineage, _extractor, _request, synth, _prop = _ready()
+    understanding_writes = store.understanding_writes
+    decider = RecordingDecider(
+        _decision_proposal(
+            support=SupportKind.ENRICHMENT,
+            axis_action=AxisAction.HOLD_FOR_ENRICHMENT,
+            carry_forward_intent=None,
+            enrichment_need="Need more evidence.",
+            support_rationale="Not currently sustainable.",
+            decision_rationale="Hold.",
+        )
+    )
+    complement_decider = RecordingDecider(_decision_proposal())
+    orchestrator = _orchestrator(store, decider=decider)
+    orchestrator.review(proposed.planning_run.planning_run_id, ENRICHMENT_FEEDBACK)
+    accepted = orchestrator.resolve(proposed.planning_run.planning_run_id, EnrichmentResolutionChoice.ACCEPT)
+    assert accepted.decision.state is AxisFeedbackDecisionState.ENRICHMENT_ACCEPTED
+    later = _orchestrator(store, decider=complement_decider)
+    with pytest.raises(ValueError, match="research-needed hold"):
+        later.review(proposed.planning_run.planning_run_id, COMPLEMENT_FEEDBACK)
+    assert complement_decider.calls == []
+    same = orchestrator.review(proposed.planning_run.planning_run_id, ENRICHMENT_FEEDBACK)
+    assert same.decision.feedback_decision_id == accepted.decision.feedback_decision_id
+    assert same.decision.state is AxisFeedbackDecisionState.ENRICHMENT_ACCEPTED
+    assert same.research_needed is True
+    assert same.search_performed is False
+    assert store.understanding_writes == understanding_writes
+    assert len(synth.materials) == 1
+    assert store.get_run(proposed.planning_run.planning_run_id).artifacts.axis_feedback_decision_id == (
+        accepted.decision.feedback_decision_id
+    )
+
+
+def test_corrupt_feedback_decision_fails_closed() -> None:
+    store, proposed, _lineage, _extractor, _request, _synth, _prop = _ready()
+    first = _orchestrator(store, decider=RecordingDecider(_decision_proposal())).review(
+        proposed.planning_run.planning_run_id, COMPLEMENT_FEEDBACK
+    )
+    uri = first.planning_run.artifacts.axis_feedback_decision_uri
+    assert uri is not None
+    axis_id = first.narrative_axis.narrative_axis_id
+    store.objects[uri] = {"not": "an axis feedback decision"}
+    later_decider = RecordingDecider(_decision_proposal(carry_forward_intent="Later, mention a second note."))
+    with pytest.raises(Exception):
+        _orchestrator(store, decider=later_decider).review(
+            proposed.planning_run.planning_run_id, SECOND_COMPLEMENT_FEEDBACK
+        )
+    assert later_decider.calls == []
+    assert store.feedback_writes == 1
+    updated = store.get_run(proposed.planning_run.planning_run_id)
+    assert updated.artifacts.axis_feedback_decision_uri == uri
+    assert updated.artifacts.narrative_axis_id == axis_id
+    assert updated.state is PlanningRunState.AXIS_PROPOSED
 
 
 def test_worker_review_and_resolve_use_axis_runtime_without_rebuild(monkeypatch, capsys) -> None:

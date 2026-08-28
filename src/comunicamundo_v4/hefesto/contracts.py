@@ -616,6 +616,8 @@ class AxisFeedbackDecision(StrictModel):
     carry_forward: CarryForwardCommitment | None = None
     user_resolution: EnrichmentResolutionChoice | None = None
     resulting_narrative_axis_id: UUID | None = None
+    previous_feedback_decision_id: UUID | None = None
+    previous_feedback_decision_uri: str | None = Field(default=None, pattern=r"^gs://")
     human_approval_required: bool = True
     editorial_project_created: bool = False
     search_performed: bool = False
@@ -630,6 +632,10 @@ class AxisFeedbackDecision(StrictModel):
             raise ValueError("axis feedback cannot create an Editorial Project")
         if self.search_performed:
             raise ValueError("axis feedback cannot search or retrieve sources")
+        if (self.previous_feedback_decision_id is None) != (self.previous_feedback_decision_uri is None):
+            raise ValueError("previous feedback decision id and uri must be set together")
+        if self.previous_feedback_decision_id == self.feedback_decision_id:
+            raise ValueError("feedback decision cannot be its own predecessor")
         if self.state is AxisFeedbackDecisionState.ENRICHMENT_REQUIRED:
             if self.support is not SupportKind.ENRICHMENT:
                 raise ValueError("enrichment_required requires enrichment support")
