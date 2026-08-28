@@ -1,0 +1,217 @@
+name: one-shot-luto-editorial-project-proof
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: hefesto-v4-luto-editorial-project-proof
+  cancel-in-progress: false
+env:
+  PROJECT_ID: comunicamundo-v4
+  REGION: us-central1
+  JOB_NAME: hefesto-v4-rebuild
+  PROOF_SERVICE: hefesto-v4-luto-editorial-project-proof
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  PLANNING_RUN_ID: 0c25fe65-8f86-4ce1-99e7-95f80c92acba
+  SOURCE_LINEAGE_ID: b81c6f12-b82b-4c30-9c6a-f35e9094f71e
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+jobs:
+  prove-luto-editorial-project:
+    if: ${{ contains(github.event.head_commit.message, '[luto-editorial-project-proof]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Prepare temporary proof service
+        run: |
+          set -euo pipefail
+          pinned_image="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test -n "${pinned_image}"
+          deployed_sa="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.serviceAccountName)')"
+          test "${deployed_sa}" = "${RUNTIME_SA}"
+          proof_token="$(openssl rand -hex 32)"
+          test -n "${proof_token}"
+
+          cat > /tmp/proof_service.py <<'PY'
+          import hmac
+          import json
+          import os
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from uuid import UUID
+
+          from comunicamundo_v4.hefesto.contracts import (
+              EditorialProjectStatus,
+              NarrativeAxisStatus,
+              PlanningRunState,
+          )
+          from comunicamundo_v4.hefesto.worker import run_approve_axis_command
+
+          PLANNING_RUN_ID = UUID(os.environ["PROOF_PLANNING_RUN_ID"])
+          EXPECTED_SOURCE_LINEAGE_ID = os.environ["PROOF_SOURCE_LINEAGE_ID"]
+          PROOF_TOKEN = os.environ["PROOF_TOKEN"]
+
+          def run_proof():
+              try:
+                  result = run_approve_axis_command(PLANNING_RUN_ID)
+                  assert result.planning_run.planning_run_id == PLANNING_RUN_ID, result
+                  assert str(result.planning_run.source_lineage_id) == EXPECTED_SOURCE_LINEAGE_ID, result
+                  assert result.planning_run.state is PlanningRunState.PROJECT_PROPOSED, result
+                  assert result.narrative_axis.status is NarrativeAxisStatus.APPROVED, result
+                  assert result.editorial_project.status is EditorialProjectStatus.PROPOSED, result
+                  assert result.editorial_project.approved_at is None, result
+                  assert result.human_approval_required is True, result
+                  assert result.article_created is False, result
+                  assert result.search_performed is False, result
+                  assert result.graph_reextracted is False, result
+                  assert result.understanding_rebuilt is False, result
+                  assert result.stopped_at == "project_proposed", result
+                  return {
+                      "LUTO_EDITORIAL_PROJECT_PROOF": "SUCCESS",
+                      "planning_run_id": str(result.planning_run.planning_run_id),
+                      "source_lineage_id": str(result.planning_run.source_lineage_id),
+                      "understanding_id": str(result.editorial_understanding.understanding_id),
+                      "narrative_axis": result.narrative_axis.model_dump(mode="json"),
+                      "editorial_project": result.editorial_project.model_dump(mode="json"),
+                      "consumed_feedback_decision": None if result.consumed_feedback_decision is None else result.consumed_feedback_decision.model_dump(mode="json"),
+                      "carry_forwards": [item.model_dump(mode="json") for item in result.carry_forwards],
+                      "human_approval_required": result.human_approval_required,
+                      "article_created": result.article_created,
+                      "search_performed": result.search_performed,
+                      "graph_reextracted": result.graph_reextracted,
+                      "understanding_rebuilt": result.understanding_rebuilt,
+                      "stopped_at": result.stopped_at,
+                  }
+              except Exception as exc:
+                  return {
+                      "LUTO_EDITORIAL_PROJECT_PROOF": "FAILURE",
+                      "failed_stage": "approve_axis_and_propose_editorial_project",
+                      "error": type(exc).__name__,
+                      "message": str(exc),
+                  }
+
+          class Handler(BaseHTTPRequestHandler):
+              def _write(self, status, payload):
+                  body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                  self.send_response(status)
+                  self.send_header("Content-Type", "application/json; charset=utf-8")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+              def do_GET(self):
+                  supplied = self.headers.get("X-Proof-Token", "")
+                  if not hmac.compare_digest(supplied, PROOF_TOKEN):
+                      self._write(403, {"error": "forbidden"})
+                      return
+                  if self.path == "/health":
+                      self._write(200, {"status": "ok", "model_invocation": "none"})
+                      return
+                  if self.path != "/proof":
+                      self._write(404, {"error": "not_found"})
+                      return
+                  self._write(200, run_proof())
+
+              def log_message(self, format, *args):
+                  return
+
+          ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8080"))), Handler).serve_forever()
+          PY
+          proof_b64="$(base64 -w0 /tmp/proof_service.py)"
+          gcloud run services delete "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet >/dev/null 2>&1 || true
+          gcloud run deploy "${PROOF_SERVICE}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --image="${pinned_image}" \
+            --service-account="${RUNTIME_SA}" \
+            --command=python \
+            --args=-c,"import base64;import os;exec(base64.b64decode(os.environ['PROOF_SCRIPT_B64']))" \
+            --cpu=4 \
+            --memory=8Gi \
+            --concurrency=1 \
+            --max-instances=1 \
+            --min-instances=0 \
+            --timeout=3600 \
+            --allow-unauthenticated \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},PROOF_PLANNING_RUN_ID=${PLANNING_RUN_ID},PROOF_SOURCE_LINEAGE_ID=${SOURCE_LINEAGE_ID},PROOF_SCRIPT_B64=${proof_b64},PROOF_TOKEN=${proof_token}" \
+            --quiet
+          proof_url="$(gcloud run services describe "${PROOF_SERVICE}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          test -n "${proof_url}"
+          service_sa="$(gcloud run services describe "${PROOF_SERVICE}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.serviceAccountName)')"
+          test "${service_sa}" = "${RUNTIME_SA}"
+          echo "PINNED_IMAGE=${pinned_image}" >> "${GITHUB_ENV}"
+          echo "PROOF_URL=${proof_url}" >> "${GITHUB_ENV}"
+          echo "PROOF_TOKEN=${proof_token}" >> "${GITHUB_ENV}"
+
+      - name: Prove transport without model call
+        run: |
+          set -euo pipefail
+          health="$(curl -fsS -H "X-Proof-Token: ${PROOF_TOKEN}" "${PROOF_URL}/health")"
+          test "$(printf '%s' "${health}" | jq -r '.status')" = "ok"
+          test "$(printf '%s' "${health}" | jq -r '.model_invocation')" = "none"
+
+      - name: Approve active Axis and propose Editorial Project only
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 3550 \
+            -H "X-Proof-Token: ${PROOF_TOKEN}" \
+            "${PROOF_URL}/proof" \
+            | tee /tmp/luto-editorial-project-result.json
+          status="$(jq -r '.LUTO_EDITORIAL_PROJECT_PROOF' /tmp/luto-editorial-project-result.json)"
+          if [ "${status}" = "FAILURE" ]; then
+            echo "FAILED_STAGE=$(jq -r '.failed_stage' /tmp/luto-editorial-project-result.json)" >> "${GITHUB_ENV}"
+            echo "FAILED_ERROR=$(jq -r '.error' /tmp/luto-editorial-project-result.json)" >> "${GITHUB_ENV}"
+            echo "FAILED_MESSAGE=$(jq -r '.message' /tmp/luto-editorial-project-result.json)" >> "${GITHUB_ENV}"
+            exit 1
+          fi
+          test "${status}" = "SUCCESS"
+          test "$(jq -r '.stopped_at' /tmp/luto-editorial-project-result.json)" = "project_proposed"
+          test "$(jq -r '.human_approval_required' /tmp/luto-editorial-project-result.json)" = "true"
+          test "$(jq -r '.article_created' /tmp/luto-editorial-project-result.json)" = "false"
+          test "$(jq -r '.search_performed' /tmp/luto-editorial-project-result.json)" = "false"
+          test "$(jq -r '.graph_reextracted' /tmp/luto-editorial-project-result.json)" = "false"
+          test "$(jq -r '.understanding_rebuilt' /tmp/luto-editorial-project-result.json)" = "false"
+          cp /tmp/luto-editorial-project-result.json /tmp/result.json
+
+      - name: Result
+        if: always()
+        run: |
+          {
+            echo '# Canonical luto infantil → Editorial Project proof'
+            echo "- Canonical image: \`${PINNED_IMAGE:-NOT_RESOLVED}\`"
+            echo "- Planning run: \`${PLANNING_RUN_ID}\`"
+            echo "- Source lineage: \`${SOURCE_LINEAGE_ID}\`"
+            if [ -n "${FAILED_STAGE:-}" ]; then
+              echo "- Failed stage: \`${FAILED_STAGE}\`"
+              echo "- Error: \`${FAILED_ERROR}\`"
+              echo "- Message: ${FAILED_MESSAGE}"
+            fi
+            if [ -f /tmp/result.json ]; then
+              echo ''
+              echo '## Full Editorial Project result'
+              echo '```json'
+              cat /tmp/result.json
+              echo ''
+              echo '```'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Cleanup temporary proof service
+        if: always()
+        run: |
+          gcloud run services delete "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
