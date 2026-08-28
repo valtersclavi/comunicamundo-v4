@@ -14,9 +14,16 @@ from comunicamundo_v4.hefesto.prompts import (
     REVISE_AXIS_PROMPT,
 )
 from fakes import MemoryPlanningPersistence
-from test_axis_proposal import RecordingProposer, RecordingSynthesizer, _axis_runtime, _brief, _prepare_graph_ready
+from test_axis_proposal import (
+    RecordingEvidenceReviewer,
+    RecordingProposer,
+    RecordingSynthesizer,
+    _axis_runtime,
+    _brief,
+    _prepare_graph_ready,
+)
 
-_PREVIOUS_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v1"
+_PREVIOUS_AXIS_PROMPT_VERSION = "hefesto.narrative-axis.v2"
 _STRONG_FORM_EXAMPLES = (
     "the most",
     "the main",
@@ -171,6 +178,7 @@ def test_axis_prompt_version_bump_invalidates_only_the_old_axis() -> None:
         _axis_runtime(),
         synth,
         old_prop,
+        RecordingEvidenceReviewer(),
         axis_prompt_version=_PREVIOUS_AXIS_PROMPT_VERSION,
     ).execute(run.planning_run_id)
     understanding_writes = store.understanding_writes
@@ -180,7 +188,9 @@ def test_axis_prompt_version_bump_invalidates_only_the_old_axis() -> None:
     assert old.editorial_understanding.prompt_version == EDITORIAL_UNDERSTANDING_PROMPT_VERSION
 
     new_prop = RecordingProposer("A precise tension governs the piece. Consequence follows from that choice.")
-    result = AxisProposalOrchestrator(store, _axis_runtime(), synth, new_prop).execute(run.planning_run_id)
+    result = AxisProposalOrchestrator(store, _axis_runtime(), synth, new_prop, RecordingEvidenceReviewer()).execute(
+        run.planning_run_id
+    )
 
     assert result.planning_run.state is PlanningRunState.AXIS_PROPOSED
     assert result.editorial_project_created is False

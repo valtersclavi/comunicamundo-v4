@@ -106,7 +106,12 @@ def run_index_graph_command(source_lineage_id: UUID) -> SourceLineage:
 
 
 def run_propose_axis_command(planning_run_id: UUID) -> AxisProposalResult:
-    from .axis_proposal import AxisProposalOrchestrator, LlamaIndexAxisProposer, LlamaIndexUnderstandingSynthesizer
+    from .axis_proposal import (
+        AxisProposalOrchestrator,
+        LlamaIndexAxisEvidenceReviewer,
+        LlamaIndexAxisProposer,
+        LlamaIndexUnderstandingSynthesizer,
+    )
 
     persistence = _planning_persistence()
     runtime = _axis_proposal_runtime()
@@ -115,6 +120,7 @@ def run_propose_axis_command(planning_run_id: UUID) -> AxisProposalResult:
         runtime,
         LlamaIndexUnderstandingSynthesizer(runtime),
         LlamaIndexAxisProposer(runtime),
+        LlamaIndexAxisEvidenceReviewer(runtime),
     ).execute(planning_run_id)
 
 
