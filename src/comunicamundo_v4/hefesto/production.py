@@ -8,6 +8,20 @@ from .graph import ProjectGraph
 from .prompts import ARCHITECTURE_PROMPT, CRITIC_PROMPT, DRAFT_PROMPT, EDIT_PROMPT, SUBJECT_RESEARCH_PROMPT
 
 
+def _production_project_json(project: EditorialProject) -> str:
+    """Serialize only the editorial commitments authorized for production.
+
+    Dicas do Hefesto and enrichment opportunities are decision-support metadata shown
+    at the Project gate. They are not approved content commitments and must never leak
+    into architecture, drafting, criticism, or editing merely because they remain in a
+    persisted Project record.
+    """
+    return project.model_dump_json(
+        indent=2,
+        exclude={"llm_subjects", "enrichment_opportunities"},
+    )
+
+
 class EditorialProduction:
     def __init__(self, *, research_llm, architecture_llm, writing_llm, critic_llm, editing_llm) -> None:
         self._research_llm = research_llm
@@ -19,37 +33,38 @@ class EditorialProduction:
     async def run(self, *, project: EditorialProject, graph: ProjectGraph) -> FinalArticle:
         if project.status is not EditorialProjectStatus.APPROVED:
             raise ValueError("production requires an approved Editorial Project")
+        project_context = _production_project_json(project)
         research = await asyncio.gather(*(self._research_subject(project, graph, subject) for subject in project.core_subjects))
         rendered_research = "\n\n".join(f"## {s.title}\n{r.synthesis}" for s, r in zip(project.core_subjects, research, strict=True))
         architecture = await self._architecture_llm.astructured_predict(
             NarrativePlan,
             ARCHITECTURE_PROMPT,
             narrative_axis=project.narrative_axis,
-            project=project.model_dump_json(indent=2),
+            project=project_context,
             research=rendered_research,
         )
         draft = (await self._writing_llm.apredict(
             DRAFT_PROMPT,
             output_language=project.brief.output_language,
             narrative_axis=project.narrative_axis,
-            project=project.model_dump_json(indent=2),
+            project=project_context,
             architecture=architecture.model_dump_json(indent=2),
             research=rendered_research,
             duration_minutes=project.brief.duration_minutes,
         )).strip()
-        review = await self._review(project, draft)
+        review = await self._review(project, draft, project_context)
         rounds = 0
         while not review.ready_to_publish and rounds < 2:
             draft = (await self._editing_llm.apredict(
                 EDIT_PROMPT,
                 narrative_axis=project.narrative_axis,
-                project=project.model_dump_json(indent=2),
+                project=project_context,
                 draft=draft,
                 review=review.model_dump_json(indent=2),
                 output_language=project.brief.output_language,
             )).strip()
             rounds += 1
-            review = await self._review(project, draft)
+            review = await self._review(project, draft, project_context)
         if not draft:
             raise ValueError("writer returned an empty article")
         return FinalArticle(
@@ -74,11 +89,11 @@ class EditorialProduction:
         )).strip()
         return SubjectResearch(subject_id=subject.subject_id, synthesis=synthesis)
 
-    async def _review(self, project: EditorialProject, draft: str) -> EditorialReview:
+    async def _review(self, project: EditorialProject, draft: str, project_context: str) -> EditorialReview:
         return await self._critic_llm.astructured_predict(
             EditorialReview,
             CRITIC_PROMPT,
             narrative_axis=project.narrative_axis,
-            project=project.model_dump_json(indent=2),
+            project=project_context,
             draft=draft,
         )

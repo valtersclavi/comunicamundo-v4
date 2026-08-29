@@ -88,7 +88,12 @@ class EditorialDirector:
             ),
             brief=current.brief,
         )
-        return revised.model_copy(update={"parent_project_id": current.editorial_project_id})
+        return revised.model_copy(
+            update={
+                "parent_project_id": current.editorial_project_id,
+                "enrichment_opportunities": [],
+            }
+        )
 
     async def incorporate_hefesto_tips(
         self,
@@ -118,7 +123,12 @@ class EditorialDirector:
             ),
             brief=expanded_brief,
         )
-        return revised.model_copy(update={"parent_project_id": current.editorial_project_id})
+        return revised.model_copy(
+            update={
+                "parent_project_id": current.editorial_project_id,
+                "enrichment_opportunities": [],
+            }
+        )
 
     @staticmethod
     def _project_from_proposal(proposal: EditorialProjectProposal, *, axis: NarrativeAxis, brief: EditorialBrief) -> EditorialProject:
