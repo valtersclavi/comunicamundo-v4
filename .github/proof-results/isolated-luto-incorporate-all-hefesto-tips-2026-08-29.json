@@ -1,5 +1,117 @@
 {
-  "ISOLATED_LUTO_INCORPORATE_ALL_HEFESTO_TIPS": "FAILURE",
-  "error": "AttributeError",
-  "message": "'PlanningArtifactRefs' object has no attribute 'editorial_understanding_uri'"
+  "ISOLATED_LUTO_INCORPORATE_ALL_HEFESTO_TIPS": "SUCCESS",
+  "planning_run_id": "cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb",
+  "original_project_id": "01266775-9983-4dcb-a186-857182a3f99d",
+  "revised_project_id": "fd566b48-43b8-48a2-9f3b-fd8f2967ce73",
+  "selected_tips": [
+    "Como a expressão do luto varia em diferentes faixas etárias (0-3, 4-7, 8-12 anos).",
+    "O papel da brincadeira, do desenho e de outras expressões não-verbais no luto infantil.",
+    "Sugestões de livros e filmes que abordam a morte de forma sensível para crianças.",
+    "Sinais de que o luto infantil (ou do adulto) pode estar se tornando complicado e a importância de buscar ajuda profissional.",
+    "Como outras figuras da rede de apoio (professores, avós, amigos) podem ajudar.",
+    "A diferença entre luto e depressão na infância."
+  ],
+  "duration_before_minutes": 8,
+  "duration_after_minutes": 15,
+  "original_project_status_after": "superseded",
+  "revised_project_status": "proposed",
+  "parent_project_id": "01266775-9983-4dcb-a186-857182a3f99d",
+  "remaining_hefesto_tips": [],
+  "original_editorial_project_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb/editorial-project.json",
+  "revised_editorial_project_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb/editorial-projects/fd566b48-43b8-48a2-9f3b-fd8f2967ce73.json",
+  "original_artifact_preserved": true,
+  "graph_rebuilt": false,
+  "understanding_rebuilt": false,
+  "axis_changed": false,
+  "search_performed": false,
+  "human_approval_required": true,
+  "article_created": false,
+  "stopped_at": "project_proposed",
+  "editorial_project": {
+    "editorial_project_id": "fd566b48-43b8-48a2-9f3b-fd8f2967ce73",
+    "project_id": "72671afa-bf8e-44ac-a332-1242e80ea5c3",
+    "parent_project_id": "01266775-9983-4dcb-a186-857182a3f99d",
+    "narrative_axis_id": "d2e086ac-1b06-44c6-94ae-a6a1578ad092",
+    "narrative_axis": "O luto infantil não é um processo solitário, mas um drama compartilhado com o adulto cuidador, que também está de luto e cuja dor desestabiliza o mundo da criança. A elaboração da perda depende, portanto, não de um silêncio que isola, mas de uma verdade que reconheça e acolha o sofrimento de ambos.",
+    "brief": {
+      "theme": "O vivenciar do luto na infância",
+      "approach": "Produza um blog post sobre como crianças vivenciam o luto, com sensibilidade, clareza e profundidade, usando o artigo como matéria-prima editorial.",
+      "duration_minutes": 15,
+      "output_language": "pt-BR",
+      "audience": "Leitores não especialistas interessados em infância, cuidado e elaboração do luto",
+      "product": "article"
+    },
+    "working_title": "Luto Infantil: Quando a Dor da Criança Encontra a Dor do Adulto",
+    "editorial_promise": "Este artigo mostrará que o luto infantil é um drama compartilhado com o adulto cuidador. Explicaremos como a dor do adulto impacta a criança e por que a honestidade é crucial. Além de detalhar como as crianças expressam o luto em diferentes idades e através de meios não-verbais, ofereceremos ferramentas práticas — como livros e filmes — para facilitar o diálogo, discutiremos o papel da rede de apoio e apresentaremos sinais de quando o luto pode se tornar complicado, diferenciando-o da depressão e orientando sobre a busca por ajuda profissional.",
+    "core_subjects": [
+      {
+        "subject_id": "6fd591dd-36e8-4079-bcaf-dd385db5a535",
+        "title": "O Luto em Dose Dupla: A Perda da Criança e a Crise do Adulto",
+        "development": "Explicar como a morte de uma figura importante desestabiliza o mundo da criança em duas frentes: a perda da pessoa falecida e a perda da estabilidade do adulto cuidador, que também está imerso em sua própria dor. Abordar o conceito da 'dupla perda' como o ponto de partida do drama compartilhado."
+      },
+      {
+        "subject_id": "30f823cb-4346-4d38-95eb-dc5693c2abe8",
+        "title": "Decodificando a Dor: Expressões do Luto por Idade e Comportamento",
+        "development": "Detalhar como a expressão do luto infantil difere da adulta, focando em manifestações comportamentais. Apresentar as variações esperadas por faixa etária (0-3, 4-7, 8-12 anos) e destacar o papel fundamental da brincadeira, do desenho e de outras linguagens não-verbais como veículos para a criança processar e comunicar sua dor."
+      },
+      {
+        "subject_id": "30f30b4f-22b2-4991-b1f0-e0a9973e945a",
+        "title": "Do Silêncio que Isola à Verdade que Acolhe: Ferramentas para a Comunicação",
+        "development": "Analisar a tendência do adulto de 'proteger' a criança com o silêncio, demonstrando como isso a isola. Em contraste, desenvolver a importância da comunicação honesta para criar uma realidade compartilhada. Oferecer sugestões práticas para facilitar esse diálogo, incluindo o uso de livros e filmes que abordam a morte de forma sensível."
+      },
+      {
+        "subject_id": "fa4094c5-104d-4261-b8d2-b1270dbf903a",
+        "title": "Para Além do Cuidador Principal: O Papel da Rede de Apoio",
+        "development": "Expandir o foco para além da relação cuidador-criança, explorando como outras figuras da rede de apoio — como avós, professores e amigos — podem oferecer suporte essencial. Discutir como essa rede pode ajudar tanto a criança em seu luto quanto o adulto, aliviando a carga e reforçando a sensação de comunidade e segurança."
+      },
+      {
+        "subject_id": "e5b030cf-ebb9-4a95-8a3a-1404360520d4",
+        "title": "Sinais de Alerta: Diferenciando Luto, Depressão e a Hora de Buscar Ajuda",
+        "development": "Esclarecer a diferença fundamental entre o processo de luto natural e um quadro de depressão na infância. Apontar sinais de alerta de que o luto (tanto da criança quanto do adulto) pode estar se tornando complicado, enfatizando a importância e a validade de procurar ajuda psicológica profissional."
+      },
+      {
+        "subject_id": "cfa4595d-f665-4bef-b212-fef41c5f1de1",
+        "title": "Reconstruindo o Mundo, Juntos: A Elaboração como um Novo Começo",
+        "development": "Concluir abordando o processo de elaboração do luto não como um retorno ao que era antes, mas como a construção de um novo normal. Enfatizar que, ao reconhecer e atravessar a dor juntos, adulto e criança fortalecem seu vínculo e encontram um caminho para reorganizar suas vidas diante da ausência."
+      }
+    ],
+    "llm_subjects": [],
+    "enrichment_opportunities": [
+      "Pesquisas recentes (pós-2011) sobre neurociência e o impacto do luto no cérebro infantil.",
+      "Estudos que comparem o luto pela perda de um pai/mãe com o luto por um irmão, avô ou amigo.",
+      "Perspectivas antropológicas ou socioculturais sobre rituais de luto com crianças em diferentes culturas.",
+      "Entrevistas ou relatos em primeira pessoa de adultos que perderam um dos pais na infância.",
+      "Fontes que abordem o luto em contextos familiares não tradicionais ou em situações de vulnerabilidade social.",
+      "Abordagens terapêuticas específicas para o luto infantil que não sejam exclusivamente psicanalíticas (ex: Terapia Cognitivo-Comportamental)."
+    ],
+    "status": "proposed",
+    "created_at": "2026-08-29T16:34:36.181837Z",
+    "approved_at": null
+  },
+  "planning_run": {
+    "planning_run_id": "cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb",
+    "project_id": "72671afa-bf8e-44ac-a332-1242e80ea5c3",
+    "source_lineage_id": "2f43f316-f0ab-4970-be65-fb62dbfe5a8b",
+    "state": "project_proposed",
+    "source_fingerprint": "e51522775d7598d8d69c19fe8c74878843f8d6958b1d4c04db3596b756e9f27c",
+    "brief_fingerprint": "918653050dee5bd17a90a801ed4834f22d9f4738ebaad21947a6b4306883dc43",
+    "request_fingerprint": "f1cd67eeea9da5941c3af9656399f3eb530a37e7b0ca342d670fb403f6813f65",
+    "artifacts": {
+      "request_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/94d992ae-40fe-4913-8a1a-2052984dd23d/request.json",
+      "chunk_manifest_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/sources/2f43f316-f0ab-4970-be65-fb62dbfe5a8b/chunks/manifest.json",
+      "graph_extractions_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/sources/2f43f316-f0ab-4970-be65-fb62dbfe5a8b/graph-extractions/manifest.json",
+      "graph_artifact_id": "cea4fa63-dbfd-449d-95bf-b2749816997f",
+      "understanding_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb/understanding.json",
+      "narrative_axis_id": "d2e086ac-1b06-44c6-94ae-a6a1578ad092",
+      "narrative_axis_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb/axis.json",
+      "axis_feedback_decision_id": "a4923244-440a-525e-824d-fb9dd91ae48e",
+      "axis_feedback_decision_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb/feedback/a4923244-440a-525e-824d-fb9dd91ae48e.json",
+      "editorial_project_id": "fd566b48-43b8-48a2-9f3b-fd8f2967ce73",
+      "editorial_project_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb/editorial-projects/fd566b48-43b8-48a2-9f3b-fd8f2967ce73.json"
+    },
+    "chunk_count": 6,
+    "error": null,
+    "created_at": "2026-08-29T15:21:26.996939Z",
+    "updated_at": "2026-08-29T16:34:36.527488Z"
+  }
 }
