@@ -1,0 +1,1 @@
+Authorized proof: run the full test suite and production headroom checks against branch fix-production-output-headroom-2026-08-29. Do not deploy this branch and do not touch the approved Editorial Project.
