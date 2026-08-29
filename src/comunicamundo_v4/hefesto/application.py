@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Sequence
 from uuid import UUID
 
-from .contracts import EditorialProjectStatus, NarrativeAxisStatus
+from .contracts import EditorialProjectStatus, NarrativeAxisStatus, PlanningRunState
 from .persistence import GcpEditorialPersistence, StoredEditorialProject, StoredNarrativeAxis
 
 if TYPE_CHECKING:
@@ -69,14 +69,64 @@ class HefestoApplication:
             graph_context=stored.graph_context,
             selected_tips=selected,
         )
-        await asyncio.to_thread(
-            self._persistence.save_project,
-            stored.model_copy(update={"editorial_project": stored.editorial_project.supersede()}),
+        return await asyncio.to_thread(self._persist_tip_revision, stored, revised)
+
+    def _persist_tip_revision(self, stored: StoredEditorialProject, revised) -> StoredEditorialProject:
+        """Persist a tip-expanded Project and keep its PlanningRun pointer canonical.
+
+        The clean PlanningRun flow persists both a Firestore operational project and a
+        durable planning artifact. Tip incorporation must advance both, otherwise the
+        run would continue pointing at the superseded Project.
+        """
+        run = None
+        persisted = None
+        if stored.planning_run_id is not None:
+            run = self._persistence.get_run(stored.planning_run_id)
+            if run is None:
+                raise ValueError("Editorial Project points to a missing PlanningRun")
+            if run.state is not PlanningRunState.PROJECT_PROPOSED:
+                raise ValueError("Dicas do Hefesto require a PlanningRun stopped at project_proposed")
+            if run.artifacts.editorial_project_id != stored.editorial_project.editorial_project_id:
+                raise ValueError("PlanningRun does not point to the Editorial Project being revised")
+            if run.artifacts.editorial_project_uri is None:
+                raise ValueError("PlanningRun is missing the persisted Editorial Project artifact")
+            persisted = self._persistence.load_editorial_project(run.artifacts.editorial_project_uri)
+            if persisted.editorial_project.editorial_project_id != stored.editorial_project.editorial_project_id:
+                raise ValueError("persisted Editorial Project does not match the PlanningRun")
+            if persisted.planning_run_id != run.planning_run_id:
+                raise ValueError("persisted Editorial Project belongs to another PlanningRun")
+
+        # Write the new operational project first. Until the run pointer advances, the
+        # old project remains the canonical proposed project and a partial write is recoverable.
+        saved = self._persistence.save_project(stored.model_copy(update={"editorial_project": revised}))
+
+        if run is not None and persisted is not None:
+            revised_record = persisted.model_copy(update={"editorial_project": revised})
+            project_uri = self._persistence.artifacts.persist_planning_json(
+                project_id=run.project_id,
+                planning_run_id=run.planning_run_id,
+                relative_path=f"editorial-projects/{revised.editorial_project_id}.json",
+                payload=revised_record.model_dump(mode="json"),
+            )
+            self._persistence.save_run(
+                run.model_copy(
+                    update={
+                        "artifacts": run.artifacts.model_copy(
+                            update={
+                                "editorial_project_id": revised.editorial_project_id,
+                                "editorial_project_uri": project_uri,
+                            }
+                        ),
+                        "error": None,
+                    }
+                )
+            )
+
+        # The predecessor remains addressable by id but can no longer be approved.
+        self._persistence.save_project(
+            stored.model_copy(update={"editorial_project": stored.editorial_project.supersede()})
         )
-        return await asyncio.to_thread(
-            self._persistence.save_project,
-            stored.model_copy(update={"editorial_project": revised}),
-        )
+        return saved
 
     async def approve_project(self, editorial_project_id: UUID) -> StoredEditorialProject:
         stored = await asyncio.to_thread(self._persistence.get_project, editorial_project_id)
