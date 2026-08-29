@@ -1,1 +1,2 @@
 prove feature/hefesto-tips-time-scope-20260829 head 6517524e7a1823214401e6337fbfe35cccef679d
+trigger: 2
