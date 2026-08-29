@@ -76,7 +76,7 @@ jobs:
               assert original_durable_before.editorial_project.editorial_project_id == ORIGINAL_PROJECT_ID
 
               graph_artifact_before = run_before.artifacts.graph_artifact_id
-              understanding_uri_before = run_before.artifacts.editorial_understanding_uri
+              understanding_uri_before = run_before.artifacts.understanding_uri
               axis_id_before = run_before.artifacts.narrative_axis_id
               axis_uri_before = run_before.artifacts.narrative_axis_uri
 
@@ -105,7 +105,7 @@ jobs:
               assert f'editorial-projects/{revised_id}.json' in run_after.artifacts.editorial_project_uri
 
               assert run_after.artifacts.graph_artifact_id == graph_artifact_before
-              assert run_after.artifacts.editorial_understanding_uri == understanding_uri_before
+              assert run_after.artifacts.understanding_uri == understanding_uri_before
               assert run_after.artifacts.narrative_axis_id == axis_id_before
               assert run_after.artifacts.narrative_axis_uri == axis_uri_before
 
