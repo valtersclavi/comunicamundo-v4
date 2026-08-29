@@ -1,0 +1,29 @@
+name: hefesto-tips-pr-proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/comunicamundo_v4/hefesto/hefesto_tips.py'
+      - 'src/comunicamundo_v4/hefesto/editorial.py'
+      - 'src/comunicamundo_v4/hefesto/application.py'
+      - 'src/comunicamundo_v4/hefesto/worker.py'
+      - 'tests/test_hefesto_tips.py'
+      - '.github/workflows/hefesto-tips-pr-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m pytest
+      - run: python -m compileall -q src tests
+      - run: python -m comunicamundo_v4.hefesto.worker --help | grep -q incorporate-hefesto-tips
