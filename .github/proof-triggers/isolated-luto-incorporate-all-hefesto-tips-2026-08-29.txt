@@ -1,1 +1,2 @@
 Authorized human-gated proof: incorporate all six current Dicas do Hefesto into Editorial Project 01266775-9983-4dcb-a186-857182a3f99d on PlanningRun cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb. Expand duration; do not shrink existing core scope; do not search; do not rebuild graph/understanding; do not approve; do not produce an article.
+Corrected proof retry: uses canonical PlanningArtifactRefs.understanding_uri. Previous attempt failed before model invocation and before state mutation.
