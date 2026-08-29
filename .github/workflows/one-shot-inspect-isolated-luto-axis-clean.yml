@@ -18,7 +18,7 @@ env:
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
-  RESULT_PATH: .github/proof-results/isolated-luto-axis-clean-state-2026-08-29.json
+  RESULT_PATH: .github/proof-results/isolated-luto-axis-clean-state-2-2026-08-29.json
 jobs:
   inspect:
     if: ${{ contains(github.event.head_commit.message, '[inspect-isolated-luto-axis-clean]') }}
@@ -81,7 +81,7 @@ jobs:
           set -euo pipefail
           if [ ! -f /tmp/result.json ]; then printf '%s\n' '{"inspection_failed_before_result":true}' > /tmp/result.json; fi
           encoded="$(base64 -w0 /tmp/result.json)"
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${RESULT_PATH}" -f message='Persist isolated luto clean-state inspection [no-deploy]' -f content="${encoded}" >/dev/null
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${RESULT_PATH}" -f message='Persist second isolated luto clean-state inspection [no-deploy]' -f content="${encoded}" >/dev/null
       - name: Cleanup
         if: always()
         run: gcloud run services delete "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
