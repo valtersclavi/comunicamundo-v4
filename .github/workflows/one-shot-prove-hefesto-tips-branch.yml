@@ -3,14 +3,13 @@ name: one-shot-prove-hefesto-tips-branch
 on:
   push:
     branches: [main]
-    paths:
-      - '.github/proof-triggers/hefesto-tips-branch-2026-08-29.txt'
 
 permissions:
   contents: write
 
 jobs:
   prove:
+    if: ${{ contains(github.event.head_commit.message, '[hefesto-tips-branch-proof]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout implementation branch
