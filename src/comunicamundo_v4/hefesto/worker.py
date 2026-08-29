@@ -177,14 +177,15 @@ def run_resolve_axis_feedback_command(planning_run_id: UUID, choice: EnrichmentR
 def run_approve_axis_command(
     planning_run_id: UUID, narrative_axis_id: UUID | None = None
 ) -> EditorialProjectProposalResult:
-    from .editorial_project import EditorialProjectOrchestrator, LlamaIndexEditorialProjectBuilder
+    from .editorial_project import EditorialProjectOrchestrator
+    from .hefesto_tips import HefestoTipsEditorialProjectBuilder
 
     persistence = _planning_persistence()
     runtime = _editorial_project_runtime()
     return EditorialProjectOrchestrator(
         persistence,
         runtime,
-        LlamaIndexEditorialProjectBuilder(runtime),
+        HefestoTipsEditorialProjectBuilder(runtime),
     ).execute(planning_run_id, narrative_axis_id=narrative_axis_id)
 
 
@@ -239,6 +240,9 @@ async def _run(args: argparse.Namespace) -> None:
     app = _application()
     if args.command == "revise-project":
         result = await app.revise_project(args.editorial_project_id, _feedback(args.feedback_b64))
+    elif args.command == "incorporate-hefesto-tips":
+        selected_tips = None if args.all else args.tip
+        result = await app.incorporate_hefesto_tips(args.editorial_project_id, selected_tips)
     elif args.command == "approve-project":
         result = await app.approve_project(args.editorial_project_id)
     elif args.command == "produce":
@@ -284,6 +288,14 @@ def _parser() -> argparse.ArgumentParser:
     revise_project = commands.add_parser("revise-project")
     revise_project.add_argument("--editorial-project-id", type=UUID, required=True)
     revise_project.add_argument("--feedback-b64", required=True)
+    incorporate_tips = commands.add_parser(
+        "incorporate-hefesto-tips",
+        help="incorporate selected Dicas do Hefesto and increase duration without shrinking approved scope",
+    )
+    incorporate_tips.add_argument("--editorial-project-id", type=UUID, required=True)
+    tip_selection = incorporate_tips.add_mutually_exclusive_group(required=True)
+    tip_selection.add_argument("--all", action="store_true", help="incorporate every Dica do Hefesto")
+    tip_selection.add_argument("--tip", action="append", help="exact Dica do Hefesto text; repeat to select more than one")
     approve_project = commands.add_parser("approve-project")
     approve_project.add_argument("--editorial-project-id", type=UUID, required=True)
     produce = commands.add_parser("produce")
