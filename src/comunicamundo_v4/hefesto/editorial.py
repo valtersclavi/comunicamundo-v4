@@ -1,6 +1,7 @@
 """Human-gated editorial decisions built on top of graph understanding."""
 from __future__ import annotations
 
+from typing import Sequence
 from uuid import UUID
 
 from .contracts import (
@@ -11,6 +12,7 @@ from .contracts import (
     NarrativeAxis,
     NarrativeAxisProposal,
 )
+from .hefesto_tips import incorporate_hefesto_tips
 from .prompts import EDITORIAL_PROJECT_PROMPT, NARRATIVE_AXIS_PROMPT, REVISE_AXIS_PROMPT, REVISE_PROJECT_PROMPT
 
 
@@ -85,6 +87,36 @@ class EditorialDirector:
                 status="approved",
             ),
             brief=current.brief,
+        )
+        return revised.model_copy(update={"parent_project_id": current.editorial_project_id})
+
+    async def incorporate_hefesto_tips(
+        self,
+        *,
+        current: EditorialProject,
+        graph_context: str,
+        selected_tips: Sequence[str],
+    ) -> EditorialProject:
+        if current.status.value == "approved":
+            raise ValueError("approved Editorial Project is immutable")
+        proposal, incremental_minutes = await incorporate_hefesto_tips(
+            project_llm=self._project_llm,
+            current=current,
+            graph_context=graph_context,
+            selected_tips=selected_tips,
+        )
+        expanded_brief = current.brief.model_copy(
+            update={"duration_minutes": current.brief.duration_minutes + incremental_minutes}
+        )
+        revised = self._project_from_proposal(
+            proposal,
+            axis=NarrativeAxis(
+                narrative_axis_id=current.narrative_axis_id,
+                project_id=current.project_id,
+                statement=current.narrative_axis,
+                status="approved",
+            ),
+            brief=expanded_brief,
         )
         return revised.model_copy(update={"parent_project_id": current.editorial_project_id})
 
