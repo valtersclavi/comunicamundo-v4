@@ -31,19 +31,19 @@ class VertexRuntimeSettings:
     understanding_model: str = "gemini-2.5-pro"
     embedding_model: str = "gemini-embedding-001"
     context_window: int = GEMINI_2_5_CONTEXT_WINDOW
-    # Gemini 2.5 thinking tokens count against max output. These planning
-    # stages therefore need enough headroom for reasoning plus the final
-    # compact response; the previous 2K/4K/1.2K caps could terminate before
-    # the model emitted a usable answer even for one atomic chunk.
+    # Gemini 2.5 thinking tokens count against max output. Every reasoning stage
+    # therefore needs headroom for hidden reasoning plus its visible response.
+    # A larger ceiling does not request a longer answer; it prevents the provider
+    # from terminating a valid response solely because reasoning consumed the cap.
     graph_max_tokens: int = 12_000
     understanding_max_tokens: int = 16_384
     axis_max_tokens: int = 10_000
     project_max_tokens: int = 5_000
-    research_max_tokens: int = 4_096
-    architecture_max_tokens: int = 5_000
-    writing_max_tokens: int = 10_000
-    critic_max_tokens: int = 3_500
-    editing_max_tokens: int = 10_000
+    research_max_tokens: int = 12_000
+    architecture_max_tokens: int = 12_000
+    writing_max_tokens: int = 24_000
+    critic_max_tokens: int = 10_000
+    editing_max_tokens: int = 24_000
 
 
 @dataclass(frozen=True, slots=True)
