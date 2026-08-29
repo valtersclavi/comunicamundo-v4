@@ -6,9 +6,8 @@ from typing import Sequence
 from llama_index.core.prompts import PromptTemplate
 from pydantic import BaseModel, ConfigDict, Field
 
-from .contracts import EditorialBrief, EditorialProject, EditorialProjectProposal
-from .editorial_project import LlamaIndexEditorialProjectBuilder
-from .runtime import EditorialProjectRuntime
+from .contracts import EditorialBrief, EditorialProject, EditorialProjectProposal, EditorialUnderstanding, NarrativeAxis
+from .prompts import EDITORIAL_PROJECT_PROMPT
 
 
 class _StrictModel(BaseModel):
@@ -81,6 +80,10 @@ Return only the structured incorporation decision.
 )
 
 
+def _join_lines(values: Sequence[str]) -> str:
+    return "\n".join(values) if values else "(none)"
+
+
 def _display_tip(tip: str, minutes: int) -> str:
     clean = tip.strip()
     if not clean:
@@ -88,19 +91,42 @@ def _display_tip(tip: str, minutes: int) -> str:
     return f"{clean} — +~{minutes} min"
 
 
-class HefestoTipsEditorialProjectBuilder(LlamaIndexEditorialProjectBuilder):
+class HefestoTipsEditorialProjectBuilder:
     """Canonical project builder plus time estimates for Dicas do Hefesto."""
 
-    def __init__(self, runtime: EditorialProjectRuntime) -> None:
-        super().__init__(runtime)
-        self._tips_runtime = runtime
+    def __init__(self, runtime) -> None:
+        if runtime.context_window <= 0 or runtime.project_max_tokens <= 0:
+            raise ValueError("Editorial Project runtime must declare explicit context and output budgets")
+        self._runtime = runtime
 
-    def build(self, **kwargs) -> EditorialProjectProposal:
-        proposal = super().build(**kwargs)
+    def build(
+        self,
+        *,
+        axis: NarrativeAxis,
+        brief: EditorialBrief,
+        understanding: EditorialUnderstanding,
+        axis_feedback_history: str,
+        carry_forwards: str,
+    ) -> EditorialProjectProposal:
+        proposal = self._runtime.project_llm.structured_predict(
+            EditorialProjectProposal,
+            EDITORIAL_PROJECT_PROMPT,
+            narrative_axis=axis.statement,
+            brief=brief.model_dump_json(indent=2),
+            output_language=brief.output_language,
+            graph_context=understanding.synthesis,
+            synthesis=understanding.synthesis,
+            central_ideas=_join_lines(understanding.central_ideas),
+            relations_and_tensions=_join_lines(understanding.relations_and_tensions),
+            nuances=_join_lines(understanding.nuances),
+            source_limits=_join_lines(understanding.source_limits),
+            editorial_opportunities=_join_lines(understanding.editorial_opportunities),
+            axis_feedback_history=axis_feedback_history or "(none)",
+            carry_forwards=carry_forwards or "(none)",
+        )
         if not proposal.llm_subjects:
             return proposal
-        brief: EditorialBrief = kwargs["brief"]
-        timing = self._tips_runtime.project_llm.structured_predict(
+        timing = self._runtime.project_llm.structured_predict(
             HefestoTipTimingResult,
             HEFESTO_TIP_TIMING_PROMPT,
             brief=brief.model_dump_json(indent=2),
