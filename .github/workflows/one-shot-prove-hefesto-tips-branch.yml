@@ -56,7 +56,7 @@ jobs:
           {
             "status": "SUCCESS",
             "branch": "feature/hefesto-tips-time-scope-20260829",
-            "head": "e88c950d13e29554c512d8b64e82da53bd9bb0d8",
+            "head": "6517524e7a1823214401e6337fbfe35cccef679d",
             "checks": ["full pytest", "compileall", "worker command present", "no keep-duration option"]
           }
           JSON
