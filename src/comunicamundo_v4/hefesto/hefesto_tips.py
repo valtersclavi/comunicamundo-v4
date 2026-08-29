@@ -93,6 +93,12 @@ class HefestoTipsEditorialProjectBuilder:
         if runtime.context_window <= 0 or runtime.project_max_tokens <= 0:
             raise ValueError("Editorial Project runtime must declare explicit context and output budgets")
         self._runtime = runtime
+        # Construct the canonical builder at the same lifecycle boundary as before.
+        # This preserves approve-axis idempotency: a reusable rerun constructs a builder
+        # but never calls build().
+        from .editorial_project import LlamaIndexEditorialProjectBuilder
+
+        self._canonical_builder = LlamaIndexEditorialProjectBuilder(runtime)
 
     def build(
         self,
@@ -105,9 +111,7 @@ class HefestoTipsEditorialProjectBuilder:
     ) -> EditorialProjectProposal:
         # Keep the already-proven project builder as the source of editorial content.
         # Dicas do Hefesto only annotate its optional model subjects with incremental time.
-        from .editorial_project import LlamaIndexEditorialProjectBuilder
-
-        proposal = LlamaIndexEditorialProjectBuilder(self._runtime).build(
+        proposal = self._canonical_builder.build(
             axis=axis,
             brief=brief,
             understanding=understanding,
