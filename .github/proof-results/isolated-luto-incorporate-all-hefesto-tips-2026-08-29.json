@@ -1,0 +1,5 @@
+{
+  "ISOLATED_LUTO_INCORPORATE_ALL_HEFESTO_TIPS": "FAILURE",
+  "error": "AttributeError",
+  "message": "'PlanningArtifactRefs' object has no attribute 'editorial_understanding_uri'"
+}
