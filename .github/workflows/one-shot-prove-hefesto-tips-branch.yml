@@ -1,0 +1,67 @@
+name: one-shot-prove-hefesto-tips-branch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one-shot-prove-hefesto-tips-branch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/hefesto-tips-time-scope-20260829
+          path: implementation
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        working-directory: implementation
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+      - name: Full test suite
+        working-directory: implementation
+        run: python -m pytest
+      - name: Compile
+        working-directory: implementation
+        run: python -m compileall -q src tests
+      - name: CLI proof
+        working-directory: implementation
+        run: |
+          python -m comunicamundo_v4.hefesto.worker --help | grep -q incorporate-hefesto-tips
+          if python -m comunicamundo_v4.hefesto.worker incorporate-hefesto-tips --help | grep -q keep-duration; then
+            echo 'unexpected keep-duration option' >&2
+            exit 1
+          fi
+      - name: Record success on main
+        if: success()
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: proof-main
+      - name: Persist success
+        if: success()
+        working-directory: proof-main
+        run: |
+          mkdir -p .github/proof-results
+          cat > .github/proof-results/hefesto-tips-branch-2026-08-29.json <<'JSON'
+          {
+            "status": "SUCCESS",
+            "branch": "feature/hefesto-tips-time-scope-20260829",
+            "head": "e88c950d13e29554c512d8b64e82da53bd9bb0d8",
+            "checks": ["full pytest", "compileall", "worker command present", "no keep-duration option"]
+          }
+          JSON
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/proof-results/hefesto-tips-branch-2026-08-29.json
+          git commit -m 'Record Hefesto tips branch proof [no-deploy]'
+          git push origin HEAD:main
