@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 from uuid import UUID
 
 from .contracts import EditorialProjectStatus, NarrativeAxisStatus
@@ -50,6 +50,33 @@ class HefestoApplication:
         revised = await self._runtime.director.revise_project(current=stored.editorial_project, graph_context=stored.graph_context, feedback=feedback)
         await asyncio.to_thread(self._persistence.save_project, stored.model_copy(update={"editorial_project": stored.editorial_project.supersede()}))
         return await asyncio.to_thread(self._persistence.save_project, stored.model_copy(update={"editorial_project": revised}))
+
+    async def incorporate_hefesto_tips(
+        self,
+        editorial_project_id: UUID,
+        selected_tips: Sequence[str] | None = None,
+    ) -> StoredEditorialProject:
+        stored = await asyncio.to_thread(self._persistence.get_project, editorial_project_id)
+        if stored is None:
+            raise KeyError(f"Editorial Project not found: {editorial_project_id}")
+        if stored.editorial_project.status is not EditorialProjectStatus.PROPOSED:
+            raise ValueError("only a proposed Editorial Project can incorporate Dicas do Hefesto")
+        selected = list(stored.editorial_project.llm_subjects if selected_tips is None else selected_tips)
+        if not selected:
+            raise ValueError("Editorial Project has no selected Dicas do Hefesto")
+        revised = await self._runtime.director.incorporate_hefesto_tips(
+            current=stored.editorial_project,
+            graph_context=stored.graph_context,
+            selected_tips=selected,
+        )
+        await asyncio.to_thread(
+            self._persistence.save_project,
+            stored.model_copy(update={"editorial_project": stored.editorial_project.supersede()}),
+        )
+        return await asyncio.to_thread(
+            self._persistence.save_project,
+            stored.model_copy(update={"editorial_project": revised}),
+        )
 
     async def approve_project(self, editorial_project_id: UUID) -> StoredEditorialProject:
         stored = await asyncio.to_thread(self._persistence.get_project, editorial_project_id)
