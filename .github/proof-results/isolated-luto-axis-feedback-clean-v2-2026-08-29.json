@@ -1,0 +1,34 @@
+{
+  "status": "SUCCESS",
+  "canonical_run_id": "94d992ae-40fe-4913-8a1a-2052984dd23d",
+  "clone_run_id": "cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb",
+  "original_axis": "A conduta dos adultos diante da morte é o fator decisivo para que o luto infantil se torne um processo de cura ou de trauma: o silêncio protetor que isola e confunde, ou a verdade honesta que, embora dolorosa, inclui e permite a reconstrução.",
+  "feedback": "Falta um foco mais forte no luto infantil em si. Também ficou de fora que o adulto responsável pela criança pode estar vivendo a própria confusão e o próprio luto.",
+  "impact": "reformulates",
+  "affected_premises": [
+    "A premissa de que a conduta do adulto é o 'fator decisivo', apresentada como uma escolha binária entre silêncio protetor e verdade honesta.",
+    "A centralidade da ação do adulto, que ofusca a experiência interna e o processo de luto da própria criança."
+  ],
+  "editorial_consequences": [
+    "A narrativa precisa ser reestruturada para abordar a interação entre o luto da criança e o luto do adulto cuidador, tratando-os como processos interligados.",
+    "O eixo precisa refletir a complexidade do adulto, que não é apenas um agente de cuidado, mas também uma pessoa enlutada cuja capacidade de agir é afetada por sua própria dor.",
+    "É necessário dar mais destaque às características específicas do luto infantil (suas fases, manifestações, a forma como a criança elabora a perda) como um processo em si, e não apenas como uma reação à conduta adulta."
+  ],
+  "impact_rationale": "A contribuição reformula o eixo narrativo ao deslocar o foco de uma simples dicotomia (ação correta/incorreta do adulto) para uma dinâmica relacional mais complexa. Introduz dois elementos críticos: 1) o processo de luto da própria criança como tema central, não apenas como consequência, e 2) o fato de que o adulto cuidador também está de luto, o que contextualiza e explica seu comportamento. Isso altera a tensão central de 'proteção vs. verdade' para a interação entre dois indivíduos enlutados, um dos quais é uma criança dependente.",
+  "support": "sources",
+  "support_rationale": "As fontes sustentam amplamente ambos os pontos. Os trechos de evidência afirmam explicitamente que as crianças têm um 'modelo próprio' de luto e detalham suas experiências internas (culpa, abandono). Crucialmente, as fontes também discutem extensivamente o 'pai sobrevivente' que está 'enlutado', 'transtornado', e cuja própria dor influencia sua capacidade de apoiar a criança, como na menção de que a criança perde também 'os pais da forma como eram antes'. O conceito da 'dupla perda' (o genitor falecido e a versão alterada do genitor sobrevivente) está claramente articulado nas fontes.",
+  "axis_action": "revise",
+  "treatment_scale": "integrated",
+  "treatment_rationale": "A contribuição introduz a dinâmica crucial do 'luto duplo' (o da criança e o do adulto sobrevivente), que precisa ser integrada em toda a narrativa. Não se trata de um tópico separado, mas de uma lente através da qual toda a questão deve ser vista, reformulando a relação entre a conduta do adulto e os resultados para a criança.",
+  "enrichment_need": null,
+  "decision_rationale": "O eixo deve ser revisado porque a contribuição, que é fortemente apoiada pelas fontes, reformula fundamentalmente a premissa central. O eixo original é muito simplista, retratando o adulto como um agente racional fazendo uma escolha. O eixo revisado deve incorporar a complexa realidade de que o adulto também é uma pessoa em luto, e que o cerne da história é a interação entre o luto da criança e o luto do adulto. Essa mudança é significativa demais para ser levada adiante como uma nota; ela deve ser refletida no próprio eixo orientador.",
+  "carry_forward": null,
+  "result_axis_id": "d2e086ac-1b06-44c6-94ae-a6a1578ad092",
+  "result_axis": "O luto infantil não é um processo solitário, mas um drama compartilhado com o adulto cuidador, que também está de luto e cuja dor desestabiliza o mundo da criança. A elaboração da perda depende, portanto, não de um silêncio que isola, mas de uma verdade que reconheça e acolha o sofrimento de ambos.",
+  "result_axis_status": "proposed",
+  "human_approval_required": true,
+  "search_performed": false,
+  "editorial_project_created": false,
+  "research_needed": false,
+  "stopped_at": "axis_proposed"
+}
