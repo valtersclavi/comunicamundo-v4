@@ -1,0 +1,39 @@
+{
+  "clone_run_exists": true,
+  "clone_run": {
+    "planning_run_id": "cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb",
+    "project_id": "72671afa-bf8e-44ac-a332-1242e80ea5c3",
+    "source_lineage_id": "2f43f316-f0ab-4970-be65-fb62dbfe5a8b",
+    "state": "axis_proposed",
+    "source_fingerprint": "e51522775d7598d8d69c19fe8c74878843f8d6958b1d4c04db3596b756e9f27c",
+    "brief_fingerprint": "918653050dee5bd17a90a801ed4834f22d9f4738ebaad21947a6b4306883dc43",
+    "request_fingerprint": "f1cd67eeea9da5941c3af9656399f3eb530a37e7b0ca342d670fb403f6813f65",
+    "artifacts": {
+      "request_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/94d992ae-40fe-4913-8a1a-2052984dd23d/request.json",
+      "chunk_manifest_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/sources/2f43f316-f0ab-4970-be65-fb62dbfe5a8b/chunks/manifest.json",
+      "graph_extractions_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/sources/2f43f316-f0ab-4970-be65-fb62dbfe5a8b/graph-extractions/manifest.json",
+      "graph_artifact_id": "cea4fa63-dbfd-449d-95bf-b2749816997f",
+      "understanding_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/94d992ae-40fe-4913-8a1a-2052984dd23d/understanding.json",
+      "narrative_axis_id": "a57c8608-d376-45fb-87dd-578baaa14c97",
+      "narrative_axis_uri": "gs://comunicamundo-v4-hefesto-30524898837/comunicamundo-v4-rebuild/projects/72671afa-bf8e-44ac-a332-1242e80ea5c3/planning/cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb/axis.json",
+      "axis_feedback_decision_id": null,
+      "axis_feedback_decision_uri": null,
+      "editorial_project_id": null,
+      "editorial_project_uri": null
+    },
+    "chunk_count": 6,
+    "error": null,
+    "created_at": "2026-08-29T15:10:04.167424Z",
+    "updated_at": "2026-08-29T15:10:04.404381Z"
+  },
+  "axis": {
+    "narrative_axis_id": "a57c8608-d376-45fb-87dd-578baaa14c97",
+    "project_id": "72671afa-bf8e-44ac-a332-1242e80ea5c3",
+    "parent_axis_id": null,
+    "statement": "A conduta dos adultos diante da morte é o fator decisivo para que o luto infantil se torne um processo de cura ou de trauma: o silêncio protetor que isola e confunde, ou a verdade honesta que, embora dolorosa, inclui e permite a reconstrução.",
+    "status": "proposed",
+    "created_at": "2026-08-29T15:10:04.167295Z",
+    "approved_at": null
+  },
+  "decision": null
+}
