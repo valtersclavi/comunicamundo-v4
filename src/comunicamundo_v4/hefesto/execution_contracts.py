@@ -1,10 +1,12 @@
 """Durable, provider-neutral contracts for the Hefesto V2 execution layer."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_CEILING
 from enum import StrEnum
 from hashlib import sha256
+import json
+from typing import Annotated
 from uuid import UUID, uuid4
 
 from pydantic import Field, computed_field, model_validator
@@ -14,6 +16,8 @@ from .contracts import StrictModel
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 MILLION = Decimal("1000000")
+Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
+GcsUri = Annotated[str, Field(pattern=r"^gs://")]
 
 
 def text_sha256(value: str) -> str:
@@ -24,6 +28,165 @@ class LLMCallStatus(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     UNKNOWN_OUTCOME = "unknown_outcome"
+
+
+class WorkUnitStatus(StrEnum):
+    PENDING = "pending"
+    LEASED = "leased"
+    RUNNING = "running"
+    RETRYABLE = "retryable"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+def work_unit_key(
+    *,
+    engine_version: str,
+    unit_type: str,
+    input_sha256s: list[str],
+    prompt_version: str,
+    model: str,
+    model_config_sha256: str,
+    cache_scope: str,
+) -> str:
+    canonical = json.dumps(
+        {
+            "cache_scope": cache_scope,
+            "engine_version": engine_version,
+            "input_sha256s": input_sha256s,
+            "model": model,
+            "model_config_sha256": model_config_sha256,
+            "prompt_version": prompt_version,
+            "unit_type": unit_type,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return text_sha256(canonical)
+
+
+class WorkUnit(StrictModel):
+    """Durable V2 state machine; large inputs and outputs remain in GCS."""
+
+    work_unit_id: str = Field(pattern=SHA256_PATTERN)
+    execution_run_id: UUID
+    project_id: UUID
+    engine_version: str = Field(min_length=1)
+    unit_type: str = Field(min_length=1)
+    dependencies: list[Sha256] = Field(default_factory=list)
+    input_uris: list[GcsUri] = Field(default_factory=list)
+    input_sha256s: list[Sha256] = Field(default_factory=list)
+    prompt_version: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    model_config_sha256: str = Field(pattern=SHA256_PATTERN)
+    cache_scope: str = Field(min_length=1)
+    reserved_capacity_tokens: int = Field(ge=1)
+    status: WorkUnitStatus = WorkUnitStatus.PENDING
+    attempt_count: int = Field(default=0, ge=0)
+    max_attempts: int = Field(default=3, ge=1, le=8)
+    lease_owner: str | None = Field(default=None, min_length=1)
+    lease_expires_at: datetime | None = None
+    output_uri: str | None = Field(default=None, pattern=r"^gs://")
+    output_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    error_class: str | None = None
+    error_message: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="after")
+    def _coherent_state(self) -> "WorkUnit":
+        has_lease = self.lease_owner is not None and self.lease_expires_at is not None
+        if (self.lease_owner is None) != (self.lease_expires_at is None):
+            raise ValueError("lease owner and expiry must be set together")
+        if self.status in {WorkUnitStatus.LEASED, WorkUnitStatus.RUNNING} and not has_lease:
+            raise ValueError("leased or running work requires a lease")
+        if self.status not in {WorkUnitStatus.LEASED, WorkUnitStatus.RUNNING} and has_lease:
+            raise ValueError("terminal or waiting work cannot retain a lease")
+        if (self.output_uri is None) != (self.output_sha256 is None):
+            raise ValueError("output URI and hash must be set together")
+        if self.status is WorkUnitStatus.SUCCEEDED and self.output_uri is None:
+            raise ValueError("succeeded work requires an immutable output")
+        if self.status is not WorkUnitStatus.SUCCEEDED and self.output_uri is not None:
+            raise ValueError("only succeeded work can publish an output")
+        if self.status in {WorkUnitStatus.RETRYABLE, WorkUnitStatus.FAILED} and not self.error_class:
+            raise ValueError("failed work requires an error class")
+        if self.status not in {WorkUnitStatus.RETRYABLE, WorkUnitStatus.FAILED} and (
+            self.error_class or self.error_message
+        ):
+            raise ValueError("non-failed work cannot retain an error")
+        if self.attempt_count > self.max_attempts:
+            raise ValueError("attempt count exceeds configured maximum")
+        return self
+
+    def lease(self, *, owner: str, now: datetime, ttl: timedelta) -> "WorkUnit":
+        if not owner.strip() or ttl.total_seconds() <= 0:
+            raise ValueError("lease requires an owner and positive TTL")
+        if self.status in {WorkUnitStatus.SUCCEEDED, WorkUnitStatus.FAILED}:
+            raise ValueError("terminal work cannot be leased")
+        active_lease = self.lease_expires_at is not None and self.lease_expires_at > now
+        if self.status in {WorkUnitStatus.LEASED, WorkUnitStatus.RUNNING} and active_lease:
+            raise ValueError("work unit already has an active lease")
+        next_attempt = self.attempt_count + 1
+        if next_attempt > self.max_attempts:
+            raise ValueError("work unit exhausted its attempts")
+        return self._transition(
+            {
+                "status": WorkUnitStatus.LEASED,
+                "attempt_count": next_attempt,
+                "lease_owner": owner,
+                "lease_expires_at": now + ttl,
+                "error_class": None,
+                "error_message": None,
+                "updated_at": now,
+            }
+        )
+
+    def start(self, *, owner: str, now: datetime) -> "WorkUnit":
+        self._require_live_owner(owner, now)
+        if self.status is not WorkUnitStatus.LEASED:
+            raise ValueError("only leased work can start")
+        return self._transition({"status": WorkUnitStatus.RUNNING, "updated_at": now})
+
+    def succeed(self, *, owner: str, now: datetime, output_uri: str, output_sha256: str) -> "WorkUnit":
+        self._require_live_owner(owner, now)
+        if self.status is not WorkUnitStatus.RUNNING:
+            raise ValueError("only running work can succeed")
+        return self._transition(
+            {
+                "status": WorkUnitStatus.SUCCEEDED,
+                "lease_owner": None,
+                "lease_expires_at": None,
+                "output_uri": output_uri,
+                "output_sha256": output_sha256,
+                "updated_at": now,
+            }
+        )
+
+    def fail(self, *, owner: str, now: datetime, error: Exception, retryable: bool) -> "WorkUnit":
+        self._require_live_owner(owner, now)
+        if self.status is not WorkUnitStatus.RUNNING:
+            raise ValueError("only running work can fail")
+        can_retry = retryable and self.attempt_count < self.max_attempts
+        return self._transition(
+            {
+                "status": WorkUnitStatus.RETRYABLE if can_retry else WorkUnitStatus.FAILED,
+                "lease_owner": None,
+                "lease_expires_at": None,
+                "error_class": type(error).__name__,
+                "error_message": str(error)[:4000],
+                "updated_at": now,
+            }
+        )
+
+    def _require_live_owner(self, owner: str, now: datetime) -> None:
+        if self.lease_owner != owner:
+            raise ValueError("work unit lease belongs to another worker")
+        if self.lease_expires_at is None or self.lease_expires_at <= now:
+            raise ValueError("work unit lease expired")
+
+    def _transition(self, updates: dict[str, object]) -> "WorkUnit":
+        return WorkUnit.model_validate({**self.model_dump(), **updates})
 
 
 class TokenBudget(StrictModel):
