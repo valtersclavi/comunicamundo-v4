@@ -214,27 +214,33 @@ async def _run(args: argparse.Namespace) -> None:
         print(result.model_dump_json())
         return
     if args.command == "extract-graph":
-        result = run_extract_graph_command(args.source_lineage_id)
+        result = await asyncio.to_thread(run_extract_graph_command, args.source_lineage_id)
         print(result.model_dump_json())
         return
     if args.command == "index-graph":
-        result = run_index_graph_command(args.source_lineage_id)
+        result = await asyncio.to_thread(run_index_graph_command, args.source_lineage_id)
         print(result.model_dump_json())
         return
     if args.command == "propose-axis":
-        result = run_propose_axis_command(args.planning_run_id)
+        result = await asyncio.to_thread(run_propose_axis_command, args.planning_run_id)
         print(result.model_dump_json())
         return
     if args.command == "review-axis-feedback":
-        result = run_review_axis_feedback_command(args.planning_run_id, _feedback(args.feedback_b64))
+        result = await asyncio.to_thread(
+            run_review_axis_feedback_command, args.planning_run_id, _feedback(args.feedback_b64)
+        )
         print(result.model_dump_json())
         return
     if args.command == "resolve-axis-feedback":
-        result = run_resolve_axis_feedback_command(args.planning_run_id, EnrichmentResolutionChoice(args.choice))
+        result = await asyncio.to_thread(
+            run_resolve_axis_feedback_command, args.planning_run_id, EnrichmentResolutionChoice(args.choice)
+        )
         print(result.model_dump_json())
         return
     if args.command == "approve-axis":
-        result = run_approve_axis_command(args.planning_run_id, args.narrative_axis_id)
+        result = await asyncio.to_thread(
+            run_approve_axis_command, args.planning_run_id, args.narrative_axis_id
+        )
         print(result.model_dump_json())
         return
     app = _application()

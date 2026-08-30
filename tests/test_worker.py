@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import sys
@@ -96,6 +97,34 @@ def test_feedback_is_transport_encoded_but_natural_language() -> None:
     assert _feedback(encoded) == text
     with pytest.raises(ValueError):
         _feedback("")
+
+
+def test_extract_graph_entrypoint_runs_sync_adapter_without_active_event_loop(monkeypatch, capsys) -> None:
+    source_lineage_id = uuid4()
+    calls = []
+
+    class Result:
+        def model_dump_json(self) -> str:
+            return json.dumps({"state": "ok"})
+
+    def run_without_active_loop(value):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("synchronous LlamaIndex adapter ran inside the worker event loop")
+        calls.append(value)
+        return Result()
+
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker.run_extract_graph_command",
+        run_without_active_loop,
+    )
+    main(["extract-graph", "--source-lineage-id", str(source_lineage_id)])
+
+    assert calls == [source_lineage_id]
+    assert json.loads(capsys.readouterr().out) == {"state": "ok"}
 
 
 def _write_request(path, *, extra=None, sources=None, brief=None) -> None:
