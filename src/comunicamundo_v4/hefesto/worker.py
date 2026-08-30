@@ -226,15 +226,21 @@ async def _run(args: argparse.Namespace) -> None:
         print(result.model_dump_json())
         return
     if args.command == "review-axis-feedback":
-        result = await asyncio.to_thread(\n            run_review_axis_feedback_command, args.planning_run_id, _feedback(args.feedback_b64)\n        )
+        result = await asyncio.to_thread(
+            run_review_axis_feedback_command, args.planning_run_id, _feedback(args.feedback_b64)
+        )
         print(result.model_dump_json())
         return
     if args.command == "resolve-axis-feedback":
-        result = await asyncio.to_thread(\n            run_resolve_axis_feedback_command, args.planning_run_id, EnrichmentResolutionChoice(args.choice)\n        )
+        result = await asyncio.to_thread(
+            run_resolve_axis_feedback_command, args.planning_run_id, EnrichmentResolutionChoice(args.choice)
+        )
         print(result.model_dump_json())
         return
     if args.command == "approve-axis":
-        result = await asyncio.to_thread(\n            run_approve_axis_command, args.planning_run_id, args.narrative_axis_id\n        )
+        result = await asyncio.to_thread(
+            run_approve_axis_command, args.planning_run_id, args.narrative_axis_id
+        )
         print(result.model_dump_json())
         return
     app = _application()
