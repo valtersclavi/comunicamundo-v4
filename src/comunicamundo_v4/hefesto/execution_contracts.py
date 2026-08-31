@@ -314,6 +314,7 @@ class LLMAttemptRecord(StrictModel):
     error_class: str | None = None
     error_message: str | None = None
     rate_card_effective_at: datetime | None = None
+    rate_card_source_url: str | None = None
     rated_cost_usd: Decimal | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
@@ -329,4 +330,6 @@ class LLMAttemptRecord(StrictModel):
             raise ValueError("failed or unknown attempt requires an error class")
         if (self.rated_cost_usd is None) != (self.rate_card_effective_at is None):
             raise ValueError("rated cost and price-card timestamp must be recorded together")
+        if (self.rated_cost_usd is None) != (self.rate_card_source_url is None):
+            raise ValueError("rated cost and price-card source must be recorded together")
         return self

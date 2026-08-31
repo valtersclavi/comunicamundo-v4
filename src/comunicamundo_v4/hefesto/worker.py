@@ -218,6 +218,7 @@ def _v2_execution_services(
     from .execution_persistence import FirestoreUsageLedger, FirestoreWorkRepository
     from .execution_scheduler import BoundedFairExecutor, SmoothedTokenBucket
     from .llm_gateway import LLMGateway, VertexGenAITransport
+    from .pricing import price_resolver_from_environment
 
     project = _required("GOOGLE_CLOUD_PROJECT")
     bucket = _required("HEFESTO_GCS_BUCKET")
@@ -227,6 +228,7 @@ def _v2_execution_services(
     gateway = LLMGateway(
         VertexGenAITransport(project=project, location=location),
         ledger=FirestoreUsageLedger(database),
+        price_resolver=price_resolver_from_environment(),
     )
     executor = BoundedFairExecutor(
         SmoothedTokenBucket(tokens_per_minute=tokens_per_minute, burst_window_seconds=15),
@@ -452,6 +454,28 @@ async def run_produce_v2_command(
     ).run(execution_run_id)
 
 
+async def run_report_v2_command(project_id: UUID):
+    from .usage_reporting import (
+        FirestoreUsageReader,
+        GcsUsageReportStore,
+        build_and_persist_usage_report,
+    )
+
+    google_project = _required("GOOGLE_CLOUD_PROJECT")
+    bucket = _required("HEFESTO_GCS_BUCKET")
+    database = firestore.Client(project=google_project)
+    storage_client = storage.Client(project=google_project)
+    return await build_and_persist_usage_report(
+        project_id,
+        reader=FirestoreUsageReader(database),
+        store=GcsUsageReportStore(
+            storage_client,
+            bucket_name=bucket,
+            root_prefix="comunicamundo-v4-rebuild",
+        ),
+    )
+
+
 def _application():
     from .application import HefestoApplication
     from .runtime import VertexRuntimeSettings, build_vertex_runtime
@@ -522,6 +546,10 @@ async def _run(args: argparse.Namespace) -> None:
             max_concurrency=args.max_concurrency,
             per_project_concurrency=args.per_project_concurrency,
         )
+        print(result.model_dump_json())
+        return
+    if args.command == "report-v2":
+        result = await run_report_v2_command(args.project_id)
         print(result.model_dump_json())
         return
     if args.command == "extract-graph":
@@ -616,6 +644,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     produce_v2.add_argument("--execution-run-id", type=UUID, required=True)
     _add_v2_capacity_arguments(produce_v2)
+    report_v2 = commands.add_parser(
+        "report-v2",
+        help="aggregate and persist provider usage, latency, and rated cost for one V2 project",
+    )
+    report_v2.add_argument("--project-id", type=UUID, required=True)
     extract_graph = commands.add_parser("extract-graph", help="extract one persisted chunk at a time until graph_extractions_ready")
     extract_graph.add_argument("--source-lineage-id", type=UUID, required=True)
     index_graph = commands.add_parser("index-graph", help="assemble persisted graph extractions and index until graph_ready")

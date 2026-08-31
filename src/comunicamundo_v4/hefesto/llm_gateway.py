@@ -265,6 +265,7 @@ class LLMGateway:
             error_class=type(error).__name__ if error else None,
             error_message=str(error)[:4000] if error else None,
             rate_card_effective_at=price_card.effective_at if price_card else None,
+            rate_card_source_url=price_card.source_url if price_card else None,
             rated_cost_usd=price_card.rate(usage) if price_card and usage else None,
         )
 

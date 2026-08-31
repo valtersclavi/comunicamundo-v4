@@ -66,6 +66,9 @@ def test_worker_exposes_both_approval_boundaries() -> None:
         ["produce-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
     )
     assert produced_v2.command == "produce-v2"
+    reported_v2 = parser.parse_args(["report-v2", "--project-id", project_id])
+    assert reported_v2.command == "report-v2"
+    assert str(reported_v2.project_id) == project_id
     parsed = parser.parse_args(["extract-graph", "--source-lineage-id", axis_id])
     assert parsed.command == "extract-graph"
     assert str(parsed.source_lineage_id) == axis_id
