@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from comunicamundo_v4.hefesto.pricing import PRICE_CARDS_ENV, price_resolver_from_environment
+from comunicamundo_v4.hefesto.pricing import (
+    PRICE_CARDS_ENV,
+    VERTEX_PRICING_URL,
+    price_resolver_from_environment,
+)
 
 
 def _card(*, effective_at: str, input_price: str) -> dict:
@@ -31,8 +35,16 @@ def test_price_resolver_selects_latest_applicable_exact_model_card() -> None:
     assert resolver("another-model", datetime(2026, 8, 31, tzinfo=UTC)) is None
 
 
-def test_price_resolver_does_not_guess_when_configuration_is_absent() -> None:
-    assert price_resolver_from_environment({}) is None
+def test_price_resolver_uses_versioned_verified_bundle_when_override_is_absent() -> None:
+    resolver = price_resolver_from_environment({})
+    assert resolver is not None
+    selected = resolver("gemini-2.5-flash", datetime(2026, 8, 31, 1, tzinfo=UTC))
+    assert selected is not None
+    assert selected.input_per_million_usd == Decimal("0.30")
+    assert selected.cached_input_per_million_usd == Decimal("0.03")
+    assert selected.output_per_million_usd == Decimal("2.50")
+    assert selected.reasoning_per_million_usd == Decimal("2.50")
+    assert selected.source_url == VERTEX_PRICING_URL
 
 
 @pytest.mark.parametrize("raw", ["not-json", "[]", "{}"])
