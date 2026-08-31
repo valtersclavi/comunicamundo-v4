@@ -21,7 +21,7 @@ from comunicamundo_v4.hefesto.contracts import (
     SourceLineageState,
 )
 from comunicamundo_v4.hefesto.runtime import AxisProposalRuntime, EditorialProjectRuntime, GraphExtractionRuntime, GraphIndexingRuntime
-from comunicamundo_v4.hefesto.worker import _feedback, _parser, main
+from comunicamundo_v4.hefesto.worker import _feedback, _parser, _v2_location, main
 from fakes import MemoryPlanningPersistence
 from llama_index.core.embeddings import MockEmbedding
 
@@ -110,6 +110,17 @@ def test_worker_exposes_both_approval_boundaries() -> None:
         parser.parse_args(
             ["approve-project-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
         )
+
+
+def test_v2_uses_global_endpoint_without_changing_v1_location(monkeypatch) -> None:
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+    monkeypatch.delenv("HEFESTO_V2_LOCATION", raising=False)
+    assert _v2_location() == "global"
+    monkeypatch.setenv("HEFESTO_V2_LOCATION", "europe-west4")
+    assert _v2_location() == "europe-west4"
+    monkeypatch.setenv("HEFESTO_V2_LOCATION", " ")
+    with pytest.raises(ValueError, match="HEFESTO_V2_LOCATION"):
+        _v2_location()
 
 
 def test_canonical_cli_cannot_rewrite_proposed_axis_without_feedback_decision() -> None:

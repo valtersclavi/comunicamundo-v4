@@ -43,6 +43,16 @@ def _required(name: str) -> str:
     return value
 
 
+def _v2_location() -> str:
+    # Standard PayGo exposes its organization-level baseline on the global
+    # endpoint and Google recommends global routing to reduce regional 429s.
+    # Keep this separate from the frozen V1 GOOGLE_CLOUD_LOCATION setting.
+    location = os.environ.get("HEFESTO_V2_LOCATION", "global").strip()
+    if not location:
+        raise ValueError("HEFESTO_V2_LOCATION cannot be empty")
+    return location
+
+
 def _read_request(location: str, *, project: str) -> dict[str, Any]:
     if location.startswith("gs://"):
         parsed = urlparse(location)
@@ -222,7 +232,7 @@ def _v2_execution_services(
 
     project = _required("GOOGLE_CLOUD_PROJECT")
     bucket = _required("HEFESTO_GCS_BUCKET")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    location = _v2_location()
     database = firestore.Client(project=project)
     storage_client = storage.Client(project=project)
     gateway = LLMGateway(
@@ -700,7 +710,7 @@ def _add_v2_capacity_arguments(parser: argparse.ArgumentParser) -> None:
         "--tokens-per-minute",
         type=int,
         required=True,
-        help="verified Vertex model TPM available to this worker; no guessed default",
+        help="verified Standard PayGo baseline TPM for this model; no guessed default",
     )
     parser.add_argument("--max-concurrency", type=int, default=4)
     parser.add_argument("--per-project-concurrency", type=int, default=4)
