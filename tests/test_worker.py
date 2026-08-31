@@ -42,6 +42,26 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     )
     assert resumed_v2.command == "resume-digest-v2"
     assert resumed_v2.max_concurrency == 4
+    proposed_v2 = parser.parse_args(
+        ["propose-axis-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
+    )
+    assert proposed_v2.command == "propose-axis-v2"
+    approved_axis_v2 = parser.parse_args(
+        ["approve-axis-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
+    )
+    assert approved_axis_v2.command == "approve-axis-v2"
+    approved_project_v2 = parser.parse_args(
+        [
+            "approve-project-v2",
+            "--execution-run-id",
+            axis_id,
+            "--without-tips",
+            "--tokens-per-minute",
+            "1000000",
+        ]
+    )
+    assert approved_project_v2.command == "approve-project-v2"
+    assert approved_project_v2.without_tips is True
     parsed = parser.parse_args(["extract-graph", "--source-lineage-id", axis_id])
     assert parsed.command == "extract-graph"
     assert str(parsed.source_lineage_id) == axis_id
@@ -79,6 +99,10 @@ def test_worker_exposes_both_approval_boundaries() -> None:
         parser.parse_args(["approve-axis", "--narrative-axis-id", axis_id])
     with pytest.raises(SystemExit):
         parser.parse_args(["digest-v2", "--request", "gs://bucket/request.json"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["approve-project-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
+        )
 
 
 def test_canonical_cli_cannot_rewrite_proposed_axis_without_feedback_decision() -> None:
@@ -251,6 +275,57 @@ def test_digest_v2_command_uses_async_opt_in_path_without_loading_v1_application
 
     assert calls == [(str(path), 2_000_000, 3, 2)]
     assert json.loads(capsys.readouterr().out) == {"state": "understanding_ready"}
+
+
+def test_v2_editorial_commands_use_async_opt_in_path_and_explicit_zero_tips(monkeypatch, capsys) -> None:
+    execution_run_id = uuid4()
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._application",
+        lambda: (_ for _ in ()).throw(AssertionError("V1 application must not be built")),
+    )
+    calls = []
+
+    class Result:
+        def model_dump_json(self):
+            return json.dumps({"state": "ok"})
+
+    async def propose(value, **capacity):
+        calls.append(("propose", value, capacity))
+        return Result()
+
+    async def approve_axis(value, **capacity):
+        calls.append(("axis", value, capacity))
+        return Result()
+
+    async def approve_project(value, **capacity):
+        calls.append(("project-no-tips", value, capacity))
+        return Result()
+
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker.run_propose_axis_v2_command", propose)
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker.run_approve_axis_v2_command", approve_axis)
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker.run_approve_project_v2_without_tips_command",
+        approve_project,
+    )
+    capacity = ["--tokens-per-minute", "2000000"]
+
+    main(["propose-axis-v2", "--execution-run-id", str(execution_run_id), *capacity])
+    assert json.loads(capsys.readouterr().out) == {"state": "ok"}
+    main(["approve-axis-v2", "--execution-run-id", str(execution_run_id), *capacity])
+    assert json.loads(capsys.readouterr().out) == {"state": "ok"}
+    main(
+        [
+            "approve-project-v2",
+            "--execution-run-id",
+            str(execution_run_id),
+            "--without-tips",
+            *capacity,
+        ]
+    )
+    assert json.loads(capsys.readouterr().out) == {"state": "ok"}
+    assert [item[0] for item in calls] == ["propose", "axis", "project-no-tips"]
+    assert all(item[1] == execution_run_id for item in calls)
+    assert all(item[2]["tokens_per_minute"] == 2_000_000 for item in calls)
 
 
 def test_extract_graph_command_uses_only_graph_extraction_runtime(monkeypatch, tmp_path, capsys) -> None:
@@ -671,4 +746,3 @@ def test_approve_axis_command_uses_only_project_runtime(monkeypatch, capsys) -> 
     assert store.extraction_writes == extract_writes
     assert store.graph_writes == graph_writes
     assert store.understanding_writes == understanding_writes
-

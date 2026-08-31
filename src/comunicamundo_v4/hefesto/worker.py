@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,21 @@ from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
 from .planning import PlanningOrchestrator
 
 MAX_REQUEST_BYTES = 50 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class _V2ExecutionServices:
+    project: str
+    location: str
+    gateway: Any
+    executor: Any
+    database: Any
+    work: Any
+    digestion_artifacts: Any
+    digestion_runs: Any
+    storage_client: Any
+    bucket: str
+    worker_id: str
 
 
 def _required(name: str) -> str:
@@ -195,23 +211,19 @@ def run_plan_command(location: str) -> PlanningRun:
     return PlanningOrchestrator(_planning_persistence()).execute(request)
 
 
-def _digestion_orchestrator(*, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int):
-    from .digestion_orchestrator import DigestionOrchestrator
+def _v2_execution_services(
+    *, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int
+) -> _V2ExecutionServices:
     from .digestion_persistence import FirestoreExecutionRunRepository, GcsDigestionArtifactStore
-    from .digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
     from .execution_persistence import FirestoreUsageLedger, FirestoreWorkRepository
     from .execution_scheduler import BoundedFairExecutor, SmoothedTokenBucket
     from .llm_gateway import LLMGateway, VertexGenAITransport
-    from .source_digestion import SourceDigestionPlanner
 
     project = _required("GOOGLE_CLOUD_PROJECT")
     bucket = _required("HEFESTO_GCS_BUCKET")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-    model = os.environ.get("HEFESTO_V2_DIGESTION_MODEL", "gemini-2.5-flash").strip()
-    if not model:
-        raise ValueError("HEFESTO_V2_DIGESTION_MODEL cannot be empty")
     database = firestore.Client(project=project)
-    config = DigestionRuntimeConfig(model=model, location=location)
+    storage_client = storage.Client(project=project)
     gateway = LLMGateway(
         VertexGenAITransport(project=project, location=location),
         ledger=FirestoreUsageLedger(database),
@@ -223,19 +235,85 @@ def _digestion_orchestrator(*, tokens_per_minute: int, max_concurrency: int, per
     )
     execution_name = os.environ.get("CLOUD_RUN_EXECUTION", "manual")
     task_index = os.environ.get("CLOUD_RUN_TASK_INDEX", "0")
-    return DigestionOrchestrator(
-        planner=SourceDigestionPlanner(),
-        calls=DigestionCallFactory(config),
+    return _V2ExecutionServices(
+        project=project,
+        location=location,
         gateway=gateway,
         executor=executor,
-        artifacts=GcsDigestionArtifactStore(
-            storage.Client(project=project),
+        database=database,
+        work=FirestoreWorkRepository(database),
+        digestion_artifacts=GcsDigestionArtifactStore(
+            storage_client,
             bucket_name=bucket,
             root_prefix="comunicamundo-v4-rebuild",
         ),
-        runs=FirestoreExecutionRunRepository(database),
-        work=FirestoreWorkRepository(database),
+        digestion_runs=FirestoreExecutionRunRepository(database),
+        storage_client=storage_client,
+        bucket=bucket,
         worker_id=f"{execution_name}:{task_index}",
+    )
+
+
+def _digestion_orchestrator(*, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int):
+    from .digestion_orchestrator import DigestionOrchestrator
+    from .digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
+    from .source_digestion import SourceDigestionPlanner
+
+    services = _v2_execution_services(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    )
+    model = os.environ.get("HEFESTO_V2_DIGESTION_MODEL", "gemini-2.5-flash").strip()
+    if not model:
+        raise ValueError("HEFESTO_V2_DIGESTION_MODEL cannot be empty")
+    config = DigestionRuntimeConfig(model=model, location=services.location)
+    return DigestionOrchestrator(
+        planner=SourceDigestionPlanner(),
+        calls=DigestionCallFactory(config),
+        gateway=services.gateway,
+        executor=services.executor,
+        artifacts=services.digestion_artifacts,
+        runs=services.digestion_runs,
+        work=services.work,
+        worker_id=services.worker_id,
+    )
+
+
+def _editorial_v2_orchestrator(
+    *, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int
+):
+    from .editorial_v2_orchestrator import EditorialV2Orchestrator
+    from .editorial_v2_persistence import (
+        FirestoreEditorialV2RunRepository,
+        GcsEditorialV2ArtifactStore,
+    )
+    from .editorial_v2_runtime import EditorialV2CallFactory, EditorialV2RuntimeConfig
+
+    services = _v2_execution_services(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    )
+    model = os.environ.get("HEFESTO_V2_EDITORIAL_MODEL", "gemini-2.5-flash").strip()
+    if not model:
+        raise ValueError("HEFESTO_V2_EDITORIAL_MODEL cannot be empty")
+    return EditorialV2Orchestrator(
+        calls=EditorialV2CallFactory(
+            EditorialV2RuntimeConfig(model=model, location=services.location)
+        ),
+        gateway=services.gateway,
+        digestion_artifacts=services.digestion_artifacts,
+        digestion_runs=services.digestion_runs,
+        editorial_artifacts=GcsEditorialV2ArtifactStore(
+            services.storage_client,
+            bucket_name=services.bucket,
+            root_prefix="comunicamundo-v4-rebuild",
+        ),
+        editorial_runs=FirestoreEditorialV2RunRepository(services.database),
+        work=services.work,
+        executor=services.executor,
+        worker_id=services.worker_id,
     )
 
 
@@ -269,6 +347,48 @@ async def run_resume_digest_v2_command(
     ).resume(execution_run_id)
 
 
+async def run_propose_axis_v2_command(
+    execution_run_id: UUID,
+    *,
+    tokens_per_minute: int,
+    max_concurrency: int,
+    per_project_concurrency: int,
+):
+    return await _editorial_v2_orchestrator(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    ).propose_axis(execution_run_id)
+
+
+async def run_approve_axis_v2_command(
+    execution_run_id: UUID,
+    *,
+    tokens_per_minute: int,
+    max_concurrency: int,
+    per_project_concurrency: int,
+):
+    return await _editorial_v2_orchestrator(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    ).approve_axis_and_propose_project(execution_run_id)
+
+
+async def run_approve_project_v2_without_tips_command(
+    execution_run_id: UUID,
+    *,
+    tokens_per_minute: int,
+    max_concurrency: int,
+    per_project_concurrency: int,
+):
+    return await _editorial_v2_orchestrator(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    ).approve_project_without_tips(execution_run_id)
+
+
 def _application():
     from .application import HefestoApplication
     from .runtime import VertexRuntimeSettings, build_vertex_runtime
@@ -298,6 +418,33 @@ async def _run(args: argparse.Namespace) -> None:
         return
     if args.command == "resume-digest-v2":
         result = await run_resume_digest_v2_command(
+            args.execution_run_id,
+            tokens_per_minute=args.tokens_per_minute,
+            max_concurrency=args.max_concurrency,
+            per_project_concurrency=args.per_project_concurrency,
+        )
+        print(result.model_dump_json())
+        return
+    if args.command == "propose-axis-v2":
+        result = await run_propose_axis_v2_command(
+            args.execution_run_id,
+            tokens_per_minute=args.tokens_per_minute,
+            max_concurrency=args.max_concurrency,
+            per_project_concurrency=args.per_project_concurrency,
+        )
+        print(result.model_dump_json())
+        return
+    if args.command == "approve-axis-v2":
+        result = await run_approve_axis_v2_command(
+            args.execution_run_id,
+            tokens_per_minute=args.tokens_per_minute,
+            max_concurrency=args.max_concurrency,
+            per_project_concurrency=args.per_project_concurrency,
+        )
+        print(result.model_dump_json())
+        return
+    if args.command == "approve-project-v2":
+        result = await run_approve_project_v2_without_tips_command(
             args.execution_run_id,
             tokens_per_minute=args.tokens_per_minute,
             max_concurrency=args.max_concurrency,
@@ -367,6 +514,30 @@ def _parser() -> argparse.ArgumentParser:
     )
     resume_digest_v2.add_argument("--execution-run-id", type=UUID, required=True)
     _add_v2_capacity_arguments(resume_digest_v2)
+    propose_axis_v2 = commands.add_parser(
+        "propose-axis-v2",
+        help="propose and evidence-review a graph-free V2 Narrative Axis; STOP for approval",
+    )
+    propose_axis_v2.add_argument("--execution-run-id", type=UUID, required=True)
+    _add_v2_capacity_arguments(propose_axis_v2)
+    approve_axis_v2 = commands.add_parser(
+        "approve-axis-v2",
+        help="approve the V2 Axis and propose an Editorial Project with preserved Dicas; STOP",
+    )
+    approve_axis_v2.add_argument("--execution-run-id", type=UUID, required=True)
+    _add_v2_capacity_arguments(approve_axis_v2)
+    approve_project_v2 = commands.add_parser(
+        "approve-project-v2",
+        help="approve the V2 Editorial Project while accepting zero Dicas do Hefesto",
+    )
+    approve_project_v2.add_argument("--execution-run-id", type=UUID, required=True)
+    approve_project_v2.add_argument(
+        "--without-tips",
+        action="store_true",
+        required=True,
+        help="explicitly preserve generated Dicas while accepting none",
+    )
+    _add_v2_capacity_arguments(approve_project_v2)
     extract_graph = commands.add_parser("extract-graph", help="extract one persisted chunk at a time until graph_extractions_ready")
     extract_graph.add_argument("--source-lineage-id", type=UUID, required=True)
     index_graph = commands.add_parser("index-graph", help="assemble persisted graph extractions and index until graph_ready")

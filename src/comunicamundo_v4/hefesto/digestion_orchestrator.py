@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Protocol, cast
+from typing import cast
 from uuid import UUID
 
 from .contracts import NormalizedSource, PlanningRequest
@@ -24,9 +24,9 @@ from .digestion_contracts import (
 )
 from .digestion_persistence import DigestionArtifactStore, ExecutionRunRepository
 from .digestion_runtime import DigestionCallFactory, ModelGateway, PreparedDigestionCall
-from .execution_contracts import LLMCallStatus, WorkUnit, WorkUnitStatus
+from .durable_calls import DurableCallExecutor, WorkRepository
+from .execution_contracts import WorkUnitStatus
 from .execution_scheduler import BoundedFairExecutor, ScheduledWork
-from .llm_gateway import LLMCallError
 from .execution_contracts import text_sha256
 from .planning import fingerprint_brief
 from .source_digestion import SourceDigestionPlanner, editorial_understanding_from_matrix
@@ -36,12 +36,6 @@ class DigestionExecutionError(RuntimeError):
     def __init__(self, message: str, failed_work_unit_ids: Sequence[str]) -> None:
         super().__init__(message)
         self.failed_work_unit_ids = tuple(failed_work_unit_ids)
-
-
-class WorkRepository(Protocol):
-    async def create(self, unit: WorkUnit) -> WorkUnit: ...
-    async def get(self, execution_run_id: UUID, work_unit_id: str) -> WorkUnit | None: ...
-    async def transition(self, execution_run_id: UUID, work_unit_id: str, change) -> WorkUnit: ...
 
 
 class DigestionOrchestrator:
@@ -64,13 +58,20 @@ class DigestionOrchestrator:
             raise ValueError("orchestrator requires a worker identity and positive lease TTL")
         self._planner = planner
         self._calls = calls
-        self._gateway = gateway
         self._executor = executor
         self._artifacts = artifacts
         self._runs = runs
         self._work = work
-        self._worker_id = worker_id
-        self._lease_ttl = lease_ttl
+        self._durable = DurableCallExecutor(
+            gateway=gateway,
+            artifacts=artifacts,
+            work=work,
+            worker_id=worker_id,
+            engine_version=DIGESTION_ENGINE_VERSION,
+            model_config_sha256=calls.config.config_sha256,
+            lease_ttl=lease_ttl,
+            work_max_attempts=2,
+        )
 
     async def start(self, request: PlanningRequest) -> DigestionRunResult:
         plan = self._planner.plan(project_id=request.project_id, sources=request.sources)
@@ -282,88 +283,12 @@ class DigestionOrchestrator:
         input_uris: list[str],
         dependencies: list[str],
     ) -> object:
-        unit = await self._work.get(plan.execution_run_id, call.work_unit_id)
-        if unit is None:
-            unit = WorkUnit(
-                work_unit_id=call.work_unit_id,
-                execution_run_id=plan.execution_run_id,
-                project_id=plan.project_id,
-                engine_version=DIGESTION_ENGINE_VERSION,
-                unit_type=call.intent.task_type,
-                dependencies=dependencies,
-                input_uris=input_uris,
-                input_sha256s=list(call.input_sha256s),
-                prompt_version=call.intent.prompt_version,
-                model=call.intent.model,
-                model_config_sha256=self._calls.config.config_sha256,
-                cache_scope=f"run:{plan.execution_run_id}",
-                reserved_capacity_tokens=call.reserved_capacity_tokens,
-                max_attempts=2,
-            )
-            await self._work.create(unit)
-        if unit.status is WorkUnitStatus.SUCCEEDED:
-            return await self._artifacts.load(
-                ArtifactPointer(uri=cast(str, unit.output_uri), sha256=cast(str, unit.output_sha256)),
-                call.output_schema,
-            )
-        if unit.status is WorkUnitStatus.FAILED:
-            raise DigestionExecutionError(
-                unit.error_message or "work unit failed terminally",
-                [unit.work_unit_id],
-            )
-        now = datetime.now(UTC)
-        await self._work.transition(
-            plan.execution_run_id,
-            call.work_unit_id,
-            lambda current: current.lease(owner=self._worker_id, now=now, ttl=self._lease_ttl),
+        return await self._durable.execute(
+            call,
+            persist=lambda output: self._persist_output(plan, output),
+            input_uris=input_uris,
+            dependencies=dependencies,
         )
-        await self._work.transition(
-            plan.execution_run_id,
-            call.work_unit_id,
-            lambda current: current.start(owner=self._worker_id, now=datetime.now(UTC)),
-        )
-        try:
-            output = await call.invoke(self._gateway)
-        except Exception as error:
-            retryable = _retryable_model_failure(error)
-            await self._work.transition(
-                plan.execution_run_id,
-                call.work_unit_id,
-                lambda current: current.fail(
-                    owner=self._worker_id,
-                    now=datetime.now(UTC),
-                    error=error,
-                    retryable=retryable,
-                ),
-            )
-            raise
-        try:
-            pointer = await self._persist_output(plan, output)
-        except Exception as error:
-            # The provider already succeeded. Never repeat that paid call merely
-            # because artifact persistence failed after the response arrived.
-            await self._work.transition(
-                plan.execution_run_id,
-                call.work_unit_id,
-                lambda current: current.fail(
-                    owner=self._worker_id,
-                    now=datetime.now(UTC),
-                    error=error,
-                    retryable=False,
-                ),
-            )
-            raise
-        await self._work.transition(
-            plan.execution_run_id,
-            call.work_unit_id,
-            lambda current: current.succeed(
-                owner=self._worker_id,
-                now=datetime.now(UTC),
-                output_uri=pointer.uri,
-                output_sha256=pointer.sha256,
-            ),
-        )
-        return output
 
     async def _persist_output(self, plan: DigestionPlan, output: object) -> ArtifactPointer:
         if isinstance(output, SectionDigest):
@@ -440,10 +365,3 @@ def _updated_run(run: DigestionExecutionRun, **updates) -> DigestionExecutionRun
     return DigestionExecutionRun.model_validate(
         {**run.model_dump(), **updates, "updated_at": datetime.now(UTC)}
     )
-
-
-def _retryable_model_failure(error: Exception) -> bool:
-    if not isinstance(error, LLMCallError) or not error.attempts:
-        return False
-    final = error.attempts[-1]
-    return final.status is LLMCallStatus.FAILED and final.retryable
