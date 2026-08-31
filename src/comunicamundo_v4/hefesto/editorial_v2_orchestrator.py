@@ -550,13 +550,22 @@ class EditorialV2Orchestrator:
         current = await self._editorial_runs.get(execution_run_id)
         if current is None or current.state is EditorialV2State.FAILED:
             return
+        failed_ids = []
+        for work_unit_id in dict.fromkeys(work_ids):
+            unit = await self._work.get(execution_run_id, work_unit_id)
+            if unit is None or unit.status is not WorkUnitStatus.SUCCEEDED:
+                failed_ids.append(work_unit_id)
+        if not failed_ids:
+            # A failure after every paid output was checkpointed can be recovered
+            # from those work units; do not mislabel successful calls as failed.
+            return
         await self._editorial_runs.transition(
             execution_run_id,
             lambda value: _updated_run(
                 value,
                 state=EditorialV2State.FAILED,
                 resume_state=value.state,
-                failed_work_unit_ids=list(dict.fromkeys(work_ids)),
+                failed_work_unit_ids=failed_ids,
                 error_class=type(error).__name__,
                 error_message=str(error)[:4000],
             ),

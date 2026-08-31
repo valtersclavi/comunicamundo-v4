@@ -518,10 +518,14 @@ class ProductionV2Orchestrator:
         current = await self._production_runs.get(execution_run_id)
         if current is None or current.state is ProductionV2State.FAILED:
             return
-        failed_ids = list(dict.fromkeys(work_ids))
+        failed_ids = []
+        for work_unit_id in dict.fromkeys(work_ids):
+            unit = await self._work.get(execution_run_id, work_unit_id)
+            if unit is None or unit.status is not WorkUnitStatus.SUCCEEDED:
+                failed_ids.append(work_unit_id)
         if not failed_ids:
-            # Deterministic pre-call failures are surfaced without manufacturing a
-            # fake work unit; the run remains at its last safe checkpoint.
+            # Pre-call failures and failures after all paid outputs were checkpointed
+            # remain at the last safe state; successful calls are never mislabeled.
             return
         await self._production_runs.transition(
             execution_run_id,

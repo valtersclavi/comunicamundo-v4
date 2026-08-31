@@ -273,6 +273,7 @@ async def test_retryable_mid_production_failure_resumes_without_repeating_comple
     failed = await production_runs.get(digestion.execution_run.execution_run_id)
     assert failed.state is ProductionV2State.FAILED
     assert failed.revision_rounds == 1
+    assert len(failed.failed_work_unit_ids) == 1
 
     result = await production.run(digestion.execution_run.execution_run_id)
 
