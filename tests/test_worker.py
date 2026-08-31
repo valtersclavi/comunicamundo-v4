@@ -32,6 +32,16 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     project_id = str(uuid4())
     assert parser.parse_args(["approve-project", "--editorial-project-id", project_id]).command == "approve-project"
     assert parser.parse_args(["plan", "--request", "gs://bucket/request.json"]).command == "plan"
+    digested = parser.parse_args(
+        ["digest-v2", "--request", "gs://bucket/request.json", "--tokens-per-minute", "1000000"]
+    )
+    assert digested.command == "digest-v2"
+    assert digested.tokens_per_minute == 1_000_000
+    resumed_v2 = parser.parse_args(
+        ["resume-digest-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
+    )
+    assert resumed_v2.command == "resume-digest-v2"
+    assert resumed_v2.max_concurrency == 4
     parsed = parser.parse_args(["extract-graph", "--source-lineage-id", axis_id])
     assert parsed.command == "extract-graph"
     assert str(parsed.source_lineage_id) == axis_id
@@ -67,6 +77,8 @@ def test_worker_exposes_both_approval_boundaries() -> None:
         parser.parse_args(["revise-axis", "--narrative-axis-id", axis_id, "--feedback-b64", "Zg"])
     with pytest.raises(SystemExit):
         parser.parse_args(["approve-axis", "--narrative-axis-id", axis_id])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["digest-v2", "--request", "gs://bucket/request.json"])
 
 
 def test_canonical_cli_cannot_rewrite_proposed_axis_without_feedback_decision() -> None:
@@ -201,6 +213,44 @@ def test_plan_command_reaches_source_chunks_ready_without_building_runtime(monke
     assert store.manifest_writes == 1
     assert store.chunk_writes == 1
     assert "comunicamundo_v4.hefesto.runtime" not in sys.modules
+
+
+def test_digest_v2_command_uses_async_opt_in_path_without_loading_v1_application(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setattr(
+        "comunicamundo_v4.hefesto.worker._application",
+        lambda: (_ for _ in ()).throw(AssertionError("V1 application must not be built")),
+    )
+    calls = []
+
+    class Result:
+        def model_dump_json(self):
+            return json.dumps({"state": "understanding_ready"})
+
+    async def run(location, *, tokens_per_minute, max_concurrency, per_project_concurrency):
+        calls.append((location, tokens_per_minute, max_concurrency, per_project_concurrency))
+        return Result()
+
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker.run_digest_v2_command", run)
+    path = tmp_path / "request.json"
+    _write_request(path)
+
+    main(
+        [
+            "digest-v2",
+            "--request",
+            str(path),
+            "--tokens-per-minute",
+            "2000000",
+            "--max-concurrency",
+            "3",
+            "--per-project-concurrency",
+            "2",
+        ]
+    )
+
+    assert calls == [(str(path), 2_000_000, 3, 2)]
+    assert json.loads(capsys.readouterr().out) == {"state": "understanding_ready"}
 
 
 def test_extract_graph_command_uses_only_graph_extraction_runtime(monkeypatch, tmp_path, capsys) -> None:
@@ -621,5 +671,4 @@ def test_approve_axis_command_uses_only_project_runtime(monkeypatch, capsys) -> 
     assert store.extraction_writes == extract_writes
     assert store.graph_writes == graph_writes
     assert store.understanding_writes == understanding_writes
-
 

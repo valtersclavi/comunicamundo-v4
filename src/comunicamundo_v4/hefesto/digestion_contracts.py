@@ -127,6 +127,88 @@ class DigestionPlan(StrictModel):
         return self
 
 
+class DigestionRunState(StrEnum):
+    PLANNED = "planned"
+    DIGESTING = "digesting"
+    DOSSIERS_READY = "dossiers_ready"
+    UNDERSTANDING_READY = "understanding_ready"
+    FAILED = "failed"
+
+
+class ArtifactPointer(StrictModel):
+    uri: str = Field(pattern=r"^gs://")
+    sha256: Sha256
+
+
+class SourceDossierPointer(ArtifactPointer):
+    source_id: UUID
+
+
+class DigestionArtifactRefs(StrictModel):
+    request: ArtifactPointer
+    plan: ArtifactPointer
+    section_digests: list[ArtifactPointer] = Field(default_factory=list)
+    source_dossiers: list[SourceDossierPointer] = Field(default_factory=list)
+    evidence_matrix: ArtifactPointer | None = None
+    editorial_understanding: ArtifactPointer | None = None
+
+
+class DigestionExecutionRun(StrictModel):
+    schema_version: int = 1
+    execution_run_id: UUID
+    project_id: UUID
+    source_fingerprint: Sha256
+    brief_fingerprint: Sha256
+    state: DigestionRunState
+    source_count: int = Field(ge=1)
+    planned_model_calls: int = Field(ge=2)
+    completed_model_calls: int = Field(default=0, ge=0)
+    failed_work_unit_ids: list[Sha256] = Field(default_factory=list)
+    artifacts: DigestionArtifactRefs
+    error_class: str | None = None
+    error_message: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="after")
+    def _coherent_run(self) -> "DigestionExecutionRun":
+        if self.completed_model_calls > self.planned_model_calls:
+            raise ValueError("completed calls cannot exceed the plan")
+        dossier_ids = [item.source_id for item in self.artifacts.source_dossiers]
+        if len(dossier_ids) != len(set(dossier_ids)):
+            raise ValueError("a run can persist only one dossier pointer per source")
+        if self.state in {DigestionRunState.DOSSIERS_READY, DigestionRunState.UNDERSTANDING_READY}:
+            if len(dossier_ids) != self.source_count:
+                raise ValueError("dossiers_ready requires one dossier per source")
+        if self.state is DigestionRunState.UNDERSTANDING_READY:
+            if self.artifacts.evidence_matrix is None or self.artifacts.editorial_understanding is None:
+                raise ValueError("understanding_ready requires matrix and understanding artifacts")
+            if self.completed_model_calls != self.planned_model_calls:
+                raise ValueError("understanding_ready requires every planned model call")
+        if self.state is DigestionRunState.FAILED:
+            if not self.error_class or not self.failed_work_unit_ids:
+                raise ValueError("failed run requires an error and failed work identities")
+        elif self.error_class or self.error_message or self.failed_work_unit_ids:
+            raise ValueError("non-failed run cannot retain failure fields")
+        return self
+
+
+class DigestionRunResult(StrictModel):
+    execution_run: DigestionExecutionRun
+    digestion_plan: DigestionPlan
+    source_dossiers: list["SourceDossier"] = Field(min_length=1)
+    evidence_matrix: "EvidenceMatrix"
+    editorial_understanding: "EditorialUnderstandingV2"
+
+    @model_validator(mode="after")
+    def _ready_result(self) -> "DigestionRunResult":
+        if self.execution_run.state is not DigestionRunState.UNDERSTANDING_READY:
+            raise ValueError("a digestion result must be understanding_ready")
+        if self.execution_run.execution_run_id != self.digestion_plan.execution_run_id:
+            raise ValueError("result plan and run identities disagree")
+        return self
+
+
 class EvidenceAnchor(StrictModel):
     section_id: Sha256
     locator: str = Field(min_length=1, max_length=300)
@@ -367,3 +449,6 @@ class EditorialUnderstandingV2(StrictModel):
     editorial_opportunities: list[str] = Field(default_factory=list, max_length=16)
     synthesis: str = Field(min_length=1, max_length=12000)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+DigestionRunResult.model_rebuild()

@@ -124,6 +124,8 @@ class WorkUnit(StrictModel):
             raise ValueError("lease requires an owner and positive TTL")
         if self.status in {WorkUnitStatus.SUCCEEDED, WorkUnitStatus.FAILED}:
             raise ValueError("terminal work cannot be leased")
+        if self.status is WorkUnitStatus.RUNNING and self.lease_expires_at is not None and self.lease_expires_at <= now:
+            raise ValueError("expired running work has an unknown provider outcome and requires reconciliation")
         active_lease = self.lease_expires_at is not None and self.lease_expires_at > now
         if self.status in {WorkUnitStatus.LEASED, WorkUnitStatus.RUNNING} and active_lease:
             raise ValueError("work unit already has an active lease")

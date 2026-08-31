@@ -103,6 +103,8 @@ class PreparedDigestionCall(Generic[OutputT, ProposalT]):
     intent: LLMCallIntent
     prompt: str
     response_schema: type[ProposalT]
+    output_schema: type[OutputT]
+    input_sha256s: tuple[str, ...]
     finalize: Callable[[ProposalT], OutputT]
 
     @property
@@ -151,7 +153,7 @@ class DigestionCallFactory:
             prompt_version=SECTION_DIGEST_PROMPT_VERSION,
             prompt=prompt,
             response_schema=SectionDigestProposal,
-            input_sha256s=[section.content_sha256],
+            input_sha256s=[section.section_id, section.content_sha256],
             max_output_tokens=self.config.section_max_output_tokens,
             thinking_tokens=self.config.section_thinking_tokens,
         )
@@ -165,7 +167,14 @@ class DigestionCallFactory:
                 model=self.config.model,
             )
 
-        return PreparedDigestionCall(intent, prompt, SectionDigestProposal, finalize)
+        return PreparedDigestionCall(
+            intent=intent,
+            prompt=prompt,
+            response_schema=SectionDigestProposal,
+            output_schema=SectionDigest,
+            input_sha256s=(section.section_id, section.content_sha256),
+            finalize=finalize,
+        )
 
     def direct_dossier(
         self,
@@ -185,7 +194,11 @@ class DigestionCallFactory:
             prompt_version=SOURCE_DOSSIER_PROMPT_VERSION,
             prompt=prompt,
             response_schema=SourceDossierProposal,
-            input_sha256s=[source_plan.source_sha256, fingerprint_brief(brief)],
+            input_sha256s=[
+                text_sha256(str(source_plan.source_id)),
+                source_plan.source_sha256,
+                fingerprint_brief(brief),
+            ],
             max_output_tokens=self.config.dossier_max_output_tokens,
             thinking_tokens=self.config.dossier_thinking_tokens,
         )
@@ -195,7 +208,18 @@ class DigestionCallFactory:
             validate_dossier_evidence(dossier, source_plan.sections)
             return dossier
 
-        return PreparedDigestionCall(intent, prompt, SourceDossierProposal, finalize)
+        return PreparedDigestionCall(
+            intent=intent,
+            prompt=prompt,
+            response_schema=SourceDossierProposal,
+            output_schema=SourceDossier,
+            input_sha256s=(
+                text_sha256(str(source_plan.source_id)),
+                source_plan.source_sha256,
+                fingerprint_brief(brief),
+            ),
+            finalize=finalize,
+        )
 
     def reduced_dossier(
         self,
@@ -227,6 +251,7 @@ class DigestionCallFactory:
             prompt=prompt,
             response_schema=SourceDossierProposal,
             input_sha256s=[
+                text_sha256(str(source_plan.source_id)),
                 source_plan.source_sha256,
                 *[digest.content_sha256 for digest in ordered],
                 fingerprint_brief(brief),
@@ -240,7 +265,21 @@ class DigestionCallFactory:
             validate_reduced_dossier_evidence(dossier, ordered, source_plan.sections)
             return dossier
 
-        return PreparedDigestionCall(intent, prompt, SourceDossierProposal, finalize)
+        return PreparedDigestionCall(
+            intent=intent,
+            prompt=prompt,
+            response_schema=SourceDossierProposal,
+            output_schema=SourceDossier,
+            input_sha256s=tuple(
+                [
+                    text_sha256(str(source_plan.source_id)),
+                    source_plan.source_sha256,
+                    *[digest.content_sha256 for digest in ordered],
+                    fingerprint_brief(brief),
+                ]
+            ),
+            finalize=finalize,
+        )
 
     def evidence_matrix(
         self,
@@ -276,7 +315,14 @@ class DigestionCallFactory:
                 model=self.config.model,
             )
 
-        return PreparedDigestionCall(intent, prompt, EvidenceMatrixProposal, finalize)
+        return PreparedDigestionCall(
+            intent=intent,
+            prompt=prompt,
+            response_schema=EvidenceMatrixProposal,
+            output_schema=EvidenceMatrix,
+            input_sha256s=tuple([*[item.content_sha256 for item in dossiers], fingerprint_brief(brief)]),
+            finalize=finalize,
+        )
 
     def _dossier(
         self,

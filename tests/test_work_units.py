@@ -95,6 +95,15 @@ def test_expired_lease_can_be_recovered_by_another_worker() -> None:
     assert recovered.attempt_count == 2
 
 
+def test_expired_running_work_is_not_replayed_with_an_unknown_provider_outcome() -> None:
+    now = datetime(2026, 8, 30, tzinfo=UTC)
+    running = _unit().lease(owner="dead-worker", now=now, ttl=timedelta(seconds=5))
+    running = running.start(owner="dead-worker", now=now)
+
+    with pytest.raises(ValueError, match="unknown provider outcome"):
+        running.lease(owner="worker-2", now=now + timedelta(seconds=6), ttl=timedelta(minutes=1))
+
+
 def test_retryable_failure_becomes_terminal_after_attempt_budget() -> None:
     now = datetime(2026, 8, 30, tzinfo=UTC)
     first = _unit(max_attempts=2).lease(owner="w", now=now, ttl=timedelta(minutes=1))

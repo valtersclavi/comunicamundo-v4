@@ -11,7 +11,7 @@ from typing import Any, Sequence
 from urllib.parse import urlparse
 from uuid import UUID
 
-from google.cloud import storage
+from google.cloud import firestore, storage
 
 from .contracts import AxisFeedbackReviewResult, AxisProposalResult, EditorialProjectProposalResult, EnrichmentResolutionChoice, PlanningRequest, PlanningRun, SourceLineage
 from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
@@ -195,6 +195,80 @@ def run_plan_command(location: str) -> PlanningRun:
     return PlanningOrchestrator(_planning_persistence()).execute(request)
 
 
+def _digestion_orchestrator(*, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int):
+    from .digestion_orchestrator import DigestionOrchestrator
+    from .digestion_persistence import FirestoreExecutionRunRepository, GcsDigestionArtifactStore
+    from .digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
+    from .execution_persistence import FirestoreUsageLedger, FirestoreWorkRepository
+    from .execution_scheduler import BoundedFairExecutor, SmoothedTokenBucket
+    from .llm_gateway import LLMGateway, VertexGenAITransport
+    from .source_digestion import SourceDigestionPlanner
+
+    project = _required("GOOGLE_CLOUD_PROJECT")
+    bucket = _required("HEFESTO_GCS_BUCKET")
+    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+    model = os.environ.get("HEFESTO_V2_DIGESTION_MODEL", "gemini-2.5-flash").strip()
+    if not model:
+        raise ValueError("HEFESTO_V2_DIGESTION_MODEL cannot be empty")
+    database = firestore.Client(project=project)
+    config = DigestionRuntimeConfig(model=model, location=location)
+    gateway = LLMGateway(
+        VertexGenAITransport(project=project, location=location),
+        ledger=FirestoreUsageLedger(database),
+    )
+    executor = BoundedFairExecutor(
+        SmoothedTokenBucket(tokens_per_minute=tokens_per_minute, burst_window_seconds=15),
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    )
+    execution_name = os.environ.get("CLOUD_RUN_EXECUTION", "manual")
+    task_index = os.environ.get("CLOUD_RUN_TASK_INDEX", "0")
+    return DigestionOrchestrator(
+        planner=SourceDigestionPlanner(),
+        calls=DigestionCallFactory(config),
+        gateway=gateway,
+        executor=executor,
+        artifacts=GcsDigestionArtifactStore(
+            storage.Client(project=project),
+            bucket_name=bucket,
+            root_prefix="comunicamundo-v4-rebuild",
+        ),
+        runs=FirestoreExecutionRunRepository(database),
+        work=FirestoreWorkRepository(database),
+        worker_id=f"{execution_name}:{task_index}",
+    )
+
+
+async def run_digest_v2_command(
+    location: str,
+    *,
+    tokens_per_minute: int,
+    max_concurrency: int,
+    per_project_concurrency: int,
+):
+    project = _required("GOOGLE_CLOUD_PROJECT")
+    request = load_planning_request(location, project=project)
+    return await _digestion_orchestrator(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    ).start(request)
+
+
+async def run_resume_digest_v2_command(
+    execution_run_id: UUID,
+    *,
+    tokens_per_minute: int,
+    max_concurrency: int,
+    per_project_concurrency: int,
+):
+    return await _digestion_orchestrator(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    ).resume(execution_run_id)
+
+
 def _application():
     from .application import HefestoApplication
     from .runtime import VertexRuntimeSettings, build_vertex_runtime
@@ -211,6 +285,24 @@ def _application():
 async def _run(args: argparse.Namespace) -> None:
     if args.command == "plan":
         result = run_plan_command(args.request)
+        print(result.model_dump_json())
+        return
+    if args.command == "digest-v2":
+        result = await run_digest_v2_command(
+            args.request,
+            tokens_per_minute=args.tokens_per_minute,
+            max_concurrency=args.max_concurrency,
+            per_project_concurrency=args.per_project_concurrency,
+        )
+        print(result.model_dump_json())
+        return
+    if args.command == "resume-digest-v2":
+        result = await run_resume_digest_v2_command(
+            args.execution_run_id,
+            tokens_per_minute=args.tokens_per_minute,
+            max_concurrency=args.max_concurrency,
+            per_project_concurrency=args.per_project_concurrency,
+        )
         print(result.model_dump_json())
         return
     if args.command == "extract-graph":
@@ -263,6 +355,18 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     plan = commands.add_parser("plan", help="validate the request, prepare source chunks, and persist a resumable PlanningRun")
     plan.add_argument("--request", required=True)
+    digest_v2 = commands.add_parser(
+        "digest-v2",
+        help="run the opt-in graph-free V2 digestion path and persist its editorial understanding",
+    )
+    digest_v2.add_argument("--request", required=True)
+    _add_v2_capacity_arguments(digest_v2)
+    resume_digest_v2 = commands.add_parser(
+        "resume-digest-v2",
+        help="resume a persisted V2 digestion run without repeating completed work units",
+    )
+    resume_digest_v2.add_argument("--execution-run-id", type=UUID, required=True)
+    _add_v2_capacity_arguments(resume_digest_v2)
     extract_graph = commands.add_parser("extract-graph", help="extract one persisted chunk at a time until graph_extractions_ready")
     extract_graph.add_argument("--source-lineage-id", type=UUID, required=True)
     index_graph = commands.add_parser("index-graph", help="assemble persisted graph extractions and index until graph_ready")
@@ -307,6 +411,17 @@ def _parser() -> argparse.ArgumentParser:
     produce = commands.add_parser("produce")
     produce.add_argument("--editorial-project-id", type=UUID, required=True)
     return parser
+
+
+def _add_v2_capacity_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--tokens-per-minute",
+        type=int,
+        required=True,
+        help="verified Vertex model TPM available to this worker; no guessed default",
+    )
+    parser.add_argument("--max-concurrency", type=int, default=4)
+    parser.add_argument("--per-project-concurrency", type=int, default=4)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
