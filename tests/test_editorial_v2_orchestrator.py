@@ -44,6 +44,13 @@ from comunicamundo_v4.hefesto.editorial_v2_runtime import (
 from comunicamundo_v4.hefesto.execution_scheduler import BoundedFairExecutor, SmoothedTokenBucket
 from comunicamundo_v4.hefesto.hefesto_tips import HefestoTipTiming, HefestoTipTimingResult
 from comunicamundo_v4.hefesto.source_digestion import SourceDigestionPlanner
+from comunicamundo_v4.hefesto.production_v2_contracts import (
+    ArticleDraftV2,
+    ProductionEvidenceBundle,
+    ProductionRecordV2,
+)
+from comunicamundo_v4.hefesto.contracts import EditorialReview, FinalArticle, NarrativePlan
+from comunicamundo_v4.hefesto.production_v2_contracts import SubjectResearchBundleProposal
 
 
 class MemoryArtifacts:
@@ -118,6 +125,36 @@ class MemoryArtifacts:
             return None
         pointer = ArtifactPointer(uri=uri, sha256=sha256(data).hexdigest())
         return pointer, schema.model_validate_json(data)
+
+    async def persist_evidence_bundle(self, run_id, project_id, value):
+        return await self._persist(value, f"{run_id}/production/evidence-bundle.json")
+
+    async def persist_research(self, run_id, project_id, value):
+        return await self._persist(value, f"{run_id}/production/research.json")
+
+    async def persist_architecture(self, run_id, project_id, value):
+        return await self._persist(value, f"{run_id}/production/architecture.json")
+
+    async def persist_draft(self, run_id, project_id, value, *, round_index):
+        return await self._persist(value, f"{run_id}/production/drafts/{round_index:02d}.json")
+
+    async def persist_review(self, run_id, project_id, value, *, round_index):
+        return await self._persist(value, f"{run_id}/production/reviews/{round_index:02d}.json")
+
+    async def persist_final_article(self, run_id, project_id, value):
+        return await self._persist(value, f"{run_id}/production/final-article.json")
+
+    async def persist_production_record(self, run_id, project_id, value):
+        return await self._persist(value, f"{run_id}/production/production-record.json")
+
+    async def find_evidence_bundle(self, run_id, project_id):
+        return await self._find(f"{run_id}/production/evidence-bundle.json", ProductionEvidenceBundle)
+
+    async def find_final_article(self, run_id, project_id):
+        return await self._find(f"{run_id}/production/final-article.json", FinalArticle)
+
+    async def find_production_record(self, run_id, project_id):
+        return await self._find(f"{run_id}/production/production-record.json", ProductionRecordV2)
 
 
 class MemoryRepository:
@@ -264,12 +301,12 @@ def _request():
     )
 
 
-async def _system():
+async def _system(gateway=None):
     artifacts = MemoryArtifacts()
     digestion_runs = MemoryRepository()
     editorial_runs = MemoryRepository()
     work = MemoryWork()
-    gateway = ResponsiveGateway()
+    gateway = gateway or ResponsiveGateway()
     executor = BoundedFairExecutor(
         SmoothedTokenBucket(tokens_per_minute=100_000_000, burst_window_seconds=5),
         max_concurrency=4,

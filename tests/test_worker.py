@@ -62,6 +62,10 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     )
     assert approved_project_v2.command == "approve-project-v2"
     assert approved_project_v2.without_tips is True
+    produced_v2 = parser.parse_args(
+        ["produce-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
+    )
+    assert produced_v2.command == "produce-v2"
     parsed = parser.parse_args(["extract-graph", "--source-lineage-id", axis_id])
     assert parsed.command == "extract-graph"
     assert str(parsed.source_lineage_id) == axis_id
@@ -301,12 +305,17 @@ def test_v2_editorial_commands_use_async_opt_in_path_and_explicit_zero_tips(monk
         calls.append(("project-no-tips", value, capacity))
         return Result()
 
+    async def produce(value, **capacity):
+        calls.append(("produce", value, capacity))
+        return Result()
+
     monkeypatch.setattr("comunicamundo_v4.hefesto.worker.run_propose_axis_v2_command", propose)
     monkeypatch.setattr("comunicamundo_v4.hefesto.worker.run_approve_axis_v2_command", approve_axis)
     monkeypatch.setattr(
         "comunicamundo_v4.hefesto.worker.run_approve_project_v2_without_tips_command",
         approve_project,
     )
+    monkeypatch.setattr("comunicamundo_v4.hefesto.worker.run_produce_v2_command", produce)
     capacity = ["--tokens-per-minute", "2000000"]
 
     main(["propose-axis-v2", "--execution-run-id", str(execution_run_id), *capacity])
@@ -323,7 +332,9 @@ def test_v2_editorial_commands_use_async_opt_in_path_and_explicit_zero_tips(monk
         ]
     )
     assert json.loads(capsys.readouterr().out) == {"state": "ok"}
-    assert [item[0] for item in calls] == ["propose", "axis", "project-no-tips"]
+    main(["produce-v2", "--execution-run-id", str(execution_run_id), *capacity])
+    assert json.loads(capsys.readouterr().out) == {"state": "ok"}
+    assert [item[0] for item in calls] == ["propose", "axis", "project-no-tips", "produce"]
     assert all(item[1] == execution_run_id for item in calls)
     assert all(item[2]["tokens_per_minute"] == 2_000_000 for item in calls)
 

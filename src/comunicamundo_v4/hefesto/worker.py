@@ -317,6 +317,55 @@ def _editorial_v2_orchestrator(
     )
 
 
+def _production_v2_orchestrator(
+    *, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int
+):
+    from .editorial_v2_persistence import (
+        FirestoreEditorialV2RunRepository,
+        GcsEditorialV2ArtifactStore,
+    )
+    from .production_evidence import ProductionEvidenceBuilder
+    from .production_v2_orchestrator import ProductionV2Orchestrator
+    from .production_v2_persistence import (
+        FirestoreProductionV2RunRepository,
+        GcsProductionV2ArtifactStore,
+    )
+    from .production_v2_runtime import ProductionV2CallFactory, ProductionV2RuntimeConfig
+
+    services = _v2_execution_services(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    )
+    model = os.environ.get("HEFESTO_V2_PRODUCTION_MODEL", "gemini-2.5-flash").strip()
+    if not model:
+        raise ValueError("HEFESTO_V2_PRODUCTION_MODEL cannot be empty")
+    return ProductionV2Orchestrator(
+        evidence_builder=ProductionEvidenceBuilder(),
+        calls=ProductionV2CallFactory(
+            ProductionV2RuntimeConfig(model=model, location=services.location)
+        ),
+        gateway=services.gateway,
+        executor=services.executor,
+        digestion_artifacts=services.digestion_artifacts,
+        digestion_runs=services.digestion_runs,
+        editorial_artifacts=GcsEditorialV2ArtifactStore(
+            services.storage_client,
+            bucket_name=services.bucket,
+            root_prefix="comunicamundo-v4-rebuild",
+        ),
+        editorial_runs=FirestoreEditorialV2RunRepository(services.database),
+        production_artifacts=GcsProductionV2ArtifactStore(
+            services.storage_client,
+            bucket_name=services.bucket,
+            root_prefix="comunicamundo-v4-rebuild",
+        ),
+        production_runs=FirestoreProductionV2RunRepository(services.database),
+        work=services.work,
+        worker_id=services.worker_id,
+    )
+
+
 async def run_digest_v2_command(
     location: str,
     *,
@@ -389,6 +438,20 @@ async def run_approve_project_v2_without_tips_command(
     ).approve_project_without_tips(execution_run_id)
 
 
+async def run_produce_v2_command(
+    execution_run_id: UUID,
+    *,
+    tokens_per_minute: int,
+    max_concurrency: int,
+    per_project_concurrency: int,
+):
+    return await _production_v2_orchestrator(
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    ).run(execution_run_id)
+
+
 def _application():
     from .application import HefestoApplication
     from .runtime import VertexRuntimeSettings, build_vertex_runtime
@@ -445,6 +508,15 @@ async def _run(args: argparse.Namespace) -> None:
         return
     if args.command == "approve-project-v2":
         result = await run_approve_project_v2_without_tips_command(
+            args.execution_run_id,
+            tokens_per_minute=args.tokens_per_minute,
+            max_concurrency=args.max_concurrency,
+            per_project_concurrency=args.per_project_concurrency,
+        )
+        print(result.model_dump_json())
+        return
+    if args.command == "produce-v2":
+        result = await run_produce_v2_command(
             args.execution_run_id,
             tokens_per_minute=args.tokens_per_minute,
             max_concurrency=args.max_concurrency,
@@ -538,6 +610,12 @@ def _parser() -> argparse.ArgumentParser:
         help="explicitly preserve generated Dicas while accepting none",
     )
     _add_v2_capacity_arguments(approve_project_v2)
+    produce_v2 = commands.add_parser(
+        "produce-v2",
+        help="produce, critique, revise, and persist the complete article from an approved V2 Project",
+    )
+    produce_v2.add_argument("--execution-run-id", type=UUID, required=True)
+    _add_v2_capacity_arguments(produce_v2)
     extract_graph = commands.add_parser("extract-graph", help="extract one persisted chunk at a time until graph_extractions_ready")
     extract_graph.add_argument("--source-lineage-id", type=UUID, required=True)
     index_graph = commands.add_parser("index-graph", help="assemble persisted graph extractions and index until graph_ready")
