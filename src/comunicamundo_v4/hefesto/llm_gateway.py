@@ -28,6 +28,7 @@ ParsedT = TypeVar("ParsedT", bound=BaseModel)
 
 class AsyncModelsTransport(Protocol):
     async def generate_content(self, *, model: str, contents: str, config: object) -> object: ...
+    async def count_tokens(self, *, model: str, contents: str, config: object | None = None) -> object: ...
 
 
 class UsageLedger(Protocol):
@@ -61,6 +62,10 @@ class LLMCallError(RuntimeError):
         self.attempts = attempts
 
 
+class InputBudgetExceeded(ValueError):
+    pass
+
+
 class VertexGenAITransport:
     """Owns the direct Google Gen AI client; LlamaIndex is not in this path."""
 
@@ -69,6 +74,9 @@ class VertexGenAITransport:
 
     async def generate_content(self, *, model: str, contents: str, config: object) -> object:
         return await self._client.aio.models.generate_content(model=model, contents=contents, config=config)
+
+    async def count_tokens(self, *, model: str, contents: str, config: object | None = None) -> object:
+        return await self._client.aio.models.count_tokens(model=model, contents=contents, config=config)
 
 
 class LLMGateway:
@@ -81,13 +89,17 @@ class LLMGateway:
         sleep: Sleep = asyncio.sleep,
         utc_now: UtcNow | None = None,
         monotonic: Monotonic = perf_counter,
+        exact_count_threshold: float = 0.8,
     ) -> None:
+        if not 0 < exact_count_threshold <= 1:
+            raise ValueError("exact token count threshold must be in (0, 1]")
         self._transport = transport
         self._ledger = ledger or NullUsageLedger()
         self._price_resolver = price_resolver
         self._sleep = sleep
         self._utc_now = utc_now or (lambda: datetime.now(UTC))
         self._monotonic = monotonic
+        self._exact_count_threshold = exact_count_threshold
 
     async def generate(
         self,
@@ -105,6 +117,8 @@ class LLMGateway:
         supplied_schema_name = _schema_name(response_schema)
         if supplied_schema_name != intent.response_schema_name:
             raise ValueError("response schema does not match the immutable call intent")
+
+        await self._validate_input_budget(intent, prompt=prompt, system_instruction=system_instruction)
 
         config_kwargs: dict[str, Any] = {
             "temperature": intent.temperature,
@@ -181,6 +195,29 @@ class LLMGateway:
                 final_attempt=record,
             )
         raise AssertionError("unreachable retry loop")
+
+    async def _validate_input_budget(
+        self,
+        intent: LLMCallIntent,
+        *,
+        prompt: str,
+        system_instruction: str | None,
+    ) -> None:
+        threshold = int(intent.budget.max_input_tokens * self._exact_count_threshold)
+        if intent.budget.estimated_input_tokens < threshold:
+            return
+        counter = getattr(self._transport, "count_tokens", None)
+        if not callable(counter):
+            raise InputBudgetExceeded("near-limit input requires an exact provider token counter")
+        config = types.CountTokensConfig(system_instruction=system_instruction) if system_instruction else None
+        response = await counter(model=intent.model, contents=prompt, config=config)
+        exact_tokens = int(getattr(response, "total_tokens", 0) or 0)
+        if exact_tokens <= 0:
+            raise InputBudgetExceeded("provider did not return a usable exact input token count")
+        if exact_tokens > intent.budget.max_input_tokens:
+            raise InputBudgetExceeded(
+                f"exact input token count {exact_tokens} exceeds maximum {intent.budget.max_input_tokens}"
+            )
 
     def _record(
         self,

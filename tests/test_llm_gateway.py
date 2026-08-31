@@ -33,9 +33,11 @@ class MemoryLedger:
 
 
 class FakeTransport:
-    def __init__(self, outcomes) -> None:
+    def __init__(self, outcomes, *, exact_tokens: int | None = None) -> None:
         self.outcomes = list(outcomes)
         self.calls = []
+        self.exact_tokens = exact_tokens
+        self.count_calls = []
 
     async def generate_content(self, *, model: str, contents: str, config: object) -> object:
         self.calls.append({"model": model, "contents": contents, "config": config})
@@ -43,6 +45,10 @@ class FakeTransport:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+    async def count_tokens(self, *, model: str, contents: str, config: object | None = None) -> object:
+        self.count_calls.append({"model": model, "contents": contents, "config": config})
+        return SimpleNamespace(total_tokens=self.exact_tokens)
 
 
 class ResourceExhausted(RuntimeError):
@@ -228,4 +234,43 @@ async def test_ledger_failure_never_repeats_a_successful_paid_call() -> None:
     with pytest.raises(RuntimeError, match="ledger unavailable"):
         await gateway.generate(_intent(), prompt=PROMPT)
 
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_near_limit_prompt_is_counted_exactly_before_any_paid_generation() -> None:
+    transport = FakeTransport([_response()], exact_tokens=10_001)
+    gateway = LLMGateway(transport)
+    original = _intent()
+    intent = original.model_copy(
+        update={
+            "budget": original.budget.model_copy(
+                update={"estimated_input_tokens": 8_500, "max_input_tokens": 10_000}
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="exact input token count"):
+        await gateway.generate(intent, prompt=PROMPT)
+
+    assert len(transport.count_calls) == 1
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_exact_count_allows_a_near_limit_prompt_that_really_fits() -> None:
+    transport = FakeTransport([_response()], exact_tokens=9_500)
+    gateway = LLMGateway(transport)
+    original = _intent()
+    intent = original.model_copy(
+        update={
+            "budget": original.budget.model_copy(
+                update={"estimated_input_tokens": 8_500, "max_input_tokens": 10_000}
+            )
+        }
+    )
+
+    await gateway.generate(intent, prompt=PROMPT)
+
+    assert len(transport.count_calls) == 1
     assert len(transport.calls) == 1
