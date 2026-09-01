@@ -1,26 +1,24 @@
 name: inspect-failed-execution
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 permissions:
   contents: read
   id-token: write
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
-  JOB_NAME: hefesto-v4-rebuild
-  TEST_A_REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/calibracao/multifonte-social-media/test-a/20260830T005655Z-2e8c6fe9-5098-4ec1-8d37-f87dcc24ecfa/request.json
-  HELPER_SERVICE: hefesto-v2-test-a-state
-  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+  EXECUTION: hefesto-v4-rebuild-bgvht
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
-  CAPACITY_ARGS: --tokens-per-minute=1000000,--max-concurrency=1,--per-project-concurrency=1
 
 jobs:
-  test-a:
-    if: ${{ contains(github.event.head_commit.message, '[run-v2-test-a]') }}
+  inspect:
+    if: ${{ contains(github.event.head_commit.message, '[inspect-execution]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 10
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -28,163 +26,15 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-
-      - name: Resolve canonical Test A request and runtime state
+      - name: Describe failed execution only
         run: |
           set -euo pipefail
-          request_uri="${TEST_A_REQUEST_URI}"
-          test -n "${request_uri}"
-          echo "TEST_A_REQUEST_URI=${request_uri}" >> "${GITHUB_ENV}"
-
-          image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}"             --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
-          token="$(openssl rand -hex 32)"
-          echo "::add-mask::${token}"
-          cat > /tmp/state.py <<'PY'
-          import json
-          import os
-          from datetime import date, datetime
-          from decimal import Decimal
-          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-          from urllib.parse import urlparse
-
-          from google.cloud import firestore, storage
-
-          TOKEN = os.environ["STATE_TOKEN"]
-          REQUEST_URI = os.environ["REQUEST_URI"]
-
-          def clean(value):
-              if isinstance(value, (datetime, date)):
-                  return value.isoformat()
-              if isinstance(value, Decimal):
-                  return str(value)
-              if isinstance(value, dict):
-                  return {str(k): clean(v) for k, v in value.items()}
-              if isinstance(value, (list, tuple)):
-                  return [clean(v) for v in value]
-              return value
-
-          def request_data():
-              parsed = urlparse(REQUEST_URI)
-              raw = storage.Client().bucket(parsed.netloc).blob(parsed.path.lstrip("/")).download_as_bytes()
-              return json.loads(raw.decode("utf-8"))
-
-          def latest_state(project_id):
-              db = firestore.Client()
-              docs = list(db.collection("hefesto_execution_runs").where("project_id", "==", project_id).stream())
-              if not docs:
-                  docs = [
-                      snap for snap in db.collection("hefesto_execution_runs").stream()
-                      if str((snap.to_dict() or {}).get("project_id")) == project_id
-                  ]
-              if not docs:
-                  return {"error": "no execution run found", "project_id": project_id}
-              def key(snap):
-                  value = (snap.to_dict() or {}).get("updated_at")
-                  return value.timestamp() if hasattr(value, "timestamp") else 0
-              snap = max(docs, key=key)
-              return {"execution_run_id": snap.id, "run": clean(snap.to_dict() or {})}
-
-          class Handler(BaseHTTPRequestHandler):
-              def do_GET(self):
-                  if self.headers.get("X-State-Token") != TOKEN:
-                      self.send_response(403)
-                      self.end_headers()
-                      return
-                  try:
-                      request = request_data()
-                      project_id = str(request["project_id"])
-                      result = (
-                          {"project_id": project_id}
-                          if self.path == "/project"
-                          else latest_state(project_id)
-                      )
-                      code = 200
-                  except Exception as exc:
-                      result = {"error": type(exc).__name__, "message": str(exc)}
-                      code = 500
-                  body = json.dumps(result, ensure_ascii=False).encode()
-                  self.send_response(code)
-                  self.send_header("Content-Type", "application/json")
-                  self.send_header("Content-Length", str(len(body)))
-                  self.end_headers()
-                  self.wfile.write(body)
-              def log_message(self, *args):
-                  return
-
-          ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8080"))), Handler).serve_forever()
-          PY
-          script_b64="$(base64 -w0 /tmp/state.py)"
-          gcloud run deploy "${HELPER_SERVICE}"             --project="${PROJECT_ID}" --region="${REGION}"             --image="${image}" --service-account="${RUNTIME_SA}"             --command=python             --args="^@^-c@import base64,os;exec(base64.b64decode(os.environ['STATE_SCRIPT_B64']))"             --cpu=1 --memory=512Mi --concurrency=1 --max-instances=1 --min-instances=0             --timeout=300 --allow-unauthenticated             --set-env-vars="REQUEST_URI=${request_uri},STATE_TOKEN=${token},STATE_SCRIPT_B64=${script_b64}"             --quiet
-          helper_url="$(gcloud run services describe "${HELPER_SERVICE}"             --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
-          project_json="$(curl -fsS --retry 8 --retry-all-errors --retry-delay 5             -H "X-State-Token: ${token}" "${helper_url}/project")"
-          project_id="$(jq -r '.project_id // empty' <<<"${project_json}")"
-          test -n "${project_id}"
-          echo "HELPER_URL=${helper_url}" >> "${GITHUB_ENV}"
-          echo "STATE_TOKEN=${token}" >> "${GITHUB_ENV}"
-          echo "TEST_A_PROJECT_ID=${project_id}" >> "${GITHUB_ENV}"
-          echo "TEST_A_PROJECT_ID=${project_id}"
-
-      - name: Test A — digest V2
+          gcloud run jobs executions describe "${EXECUTION}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='yaml(status)'
+      - name: Prove existing bucket read without exposing request
         run: |
           set -euo pipefail
-          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="digest-v2,--request=${TEST_A_REQUEST_URI},${CAPACITY_ARGS}"             --wait --format='value(metadata.name)')"
-          echo "TEST_A_DIGEST_EXECUTION=${execution}" >> "${GITHUB_ENV}"
-          echo "TEST_A_DIGEST_EXECUTION=${execution}"
-          state_json="$(curl -fsS --retry 8 --retry-all-errors --retry-delay 5             -H "X-State-Token: ${STATE_TOKEN}" "${HELPER_URL}/state")"
-          execution_run_id="$(jq -r '.execution_run_id // empty' <<<"${state_json}")"
-          state="$(jq -r '.run.state // empty' <<<"${state_json}")"
-          test -n "${execution_run_id}"
-          test "${state}" = "understanding_ready"
-          echo "TEST_A_EXECUTION_RUN_ID=${execution_run_id}" >> "${GITHUB_ENV}"
-          echo "TEST_A_EXECUTION_RUN_ID=${execution_run_id}"
-
-      - name: Test A — propose Narrative Axis
-        run: |
-          set -euo pipefail
-          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="propose-axis-v2,--execution-run-id=${TEST_A_EXECUTION_RUN_ID},${CAPACITY_ARGS}"             --wait --format='value(metadata.name)')"
-          echo "TEST_A_AXIS_EXECUTION=${execution}" >> "${GITHUB_ENV}"
-          echo "TEST_A_AXIS_EXECUTION=${execution}"
-
-      - name: Test A — approve Axis and propose Project
-        run: |
-          set -euo pipefail
-          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="approve-axis-v2,--execution-run-id=${TEST_A_EXECUTION_RUN_ID},${CAPACITY_ARGS}"             --wait --format='value(metadata.name)')"
-          echo "TEST_A_PROJECT_EXECUTION=${execution}" >> "${GITHUB_ENV}"
-          echo "TEST_A_PROJECT_EXECUTION=${execution}"
-
-      - name: Test A — approve Project without tips
-        run: |
-          set -euo pipefail
-          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="approve-project-v2,--execution-run-id=${TEST_A_EXECUTION_RUN_ID},--without-tips,${CAPACITY_ARGS}"             --wait --format='value(metadata.name)')"
-          echo "TEST_A_APPROVAL_EXECUTION=${execution}" >> "${GITHUB_ENV}"
-          echo "TEST_A_APPROVAL_EXECUTION=${execution}"
-
-      - name: Test A — produce complete article
-        run: |
-          set -euo pipefail
-          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="produce-v2,--execution-run-id=${TEST_A_EXECUTION_RUN_ID},${CAPACITY_ARGS}"             --wait --format='value(metadata.name)')"
-          echo "TEST_A_PRODUCTION_EXECUTION=${execution}" >> "${GITHUB_ENV}"
-          echo "TEST_A_PRODUCTION_EXECUTION=${execution}"
-
-      - name: Test A — persist usage report
-        run: |
-          set -euo pipefail
-          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="report-v2,--project-id=${TEST_A_PROJECT_ID}"             --wait --format='value(metadata.name)')"
-          echo "TEST_A_REPORT_EXECUTION=${execution}" >> "${GITHUB_ENV}"
-          echo "TEST_A_REPORT_EXECUTION=${execution}"
-
-      - name: Record Test A result
-        run: |
-          jq -n             --arg project_id "${TEST_A_PROJECT_ID}"             --arg execution_run_id "${TEST_A_EXECUTION_RUN_ID}"             --arg digest "${TEST_A_DIGEST_EXECUTION}"             --arg axis "${TEST_A_AXIS_EXECUTION}"             --arg project "${TEST_A_PROJECT_EXECUTION}"             --arg approval "${TEST_A_APPROVAL_EXECUTION}"             --arg production "${TEST_A_PRODUCTION_EXECUTION}"             --arg report "${TEST_A_REPORT_EXECUTION}"             '{project_id:$project_id,execution_run_id:$execution_run_id,cloud_run:{digest:$digest,axis:$axis,project:$project,approval:$approval,production:$production,report:$report},test_b:"not_started"}'             | tee /tmp/test-a-result.json
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: hefesto-v2-test-a-result
-          path: /tmp/test-a-result.json
-          if-no-files-found: warn
-
-      - name: Delete temporary state reader
-        if: always()
-        run: |
-          gcloud run services delete "${HELPER_SERVICE}"             --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
+          gcloud storage cat "${REQUEST_URI}" >/dev/null
+          echo 'BUCKET_READ: SUCCESS'
