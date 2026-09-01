@@ -74,5 +74,8 @@ def test_matrix_prompt_uses_equal_ceiling_dossiers_and_never_requires_a_graph() 
     assert "synthesize rather than append" in prompt
     assert "document length" in prompt
     assert "institutional" in prompt
+    assert "single-source rules" in prompt
+    assert "relations_and_tensions must contain at least one" in prompt
+    assert "dominance_assessment.source_ids must be empty" in prompt
     assert "graph" not in prompt
 

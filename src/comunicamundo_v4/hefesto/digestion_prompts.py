@@ -107,6 +107,22 @@ def evidence_matrix_prompt(*, dossiers: Sequence[SourceDossier], brief: Editoria
         }
         for item in dossiers
     ]
+    if len(dossiers) == 1:
+        cardinality_rules = """
+SINGLE-SOURCE RULES:
+- relations_and_tensions must contain at least one substantive relation or tension within the source, such as a
+  finding qualified by a limitation or a reported association constrained by the source's causal status.
+- agreements and divergences must be empty because cross-source comparison is impossible.
+- dominance_assessment.long_source_dominance_detected must be false and
+  dominance_assessment.source_ids must be empty.
+""".strip()
+    else:
+        cardinality_rules = """
+MULTI-SOURCE RULES:
+- relations_and_tensions must contain at least one substantive relation or tension across the dossiers.
+- If dominance_assessment.long_source_dominance_detected is false, dominance_assessment.source_ids must be empty.
+  If it is true, source_ids must identify at least one dominant source.
+""".strip()
     return f"""
 Build a genuinely cross-source editorial understanding from the source dossiers. Synthesize rather than append their
 contents. Identify agreements, real divergences, ideas unique to one source, causal status, and methodological limits.
@@ -114,6 +130,8 @@ Weigh claims by evidence and relevance, not document length, section count, pros
 authority. Explicitly assess whether a long source still dominates the integrated understanding without adding useful
 depth. Do not invent agreement when sources address different questions. Do not erase an idea simply because only one
 source contains it. The integrated synthesis must make the sources illuminate or qualify one another.
+
+{cardinality_rules}
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}
