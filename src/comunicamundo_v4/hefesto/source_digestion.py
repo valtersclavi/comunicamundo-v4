@@ -155,9 +155,15 @@ def validate_dossier_evidence(dossier: SourceDossier, sections: Sequence[SourceS
         for anchor in finding.anchors:
             section = section_map[anchor.section_id]
             excerpt = " ".join(normalize("NFKC", anchor.excerpt).split())
-            section_text = " ".join(normalize("NFKC", section.text).split())
-            if excerpt not in section_text:
-                raise ValueError("dossier contains an evidence excerpt absent from its source section")
+            paragraphs = [
+                " ".join(normalize("NFKC", paragraph).split())
+                for paragraph in re.split(r"\n[ \t]*\n", section.text)
+                if paragraph.strip()
+            ]
+            if not any(excerpt in paragraph for paragraph in paragraphs):
+                raise ValueError(
+                    "dossier evidence must be a contiguous excerpt contained in one source paragraph"
+                )
 
 
 def validate_reduced_dossier_evidence(

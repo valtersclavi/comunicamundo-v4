@@ -33,7 +33,8 @@ def test_prompts_make_epistemic_and_balance_rules_explicit() -> None:
 
     assert "correlation" in DIGESTION_SYSTEM_INSTRUCTION.lower()
     assert "causation" in direct.lower()
-    assert "400 characters" in DIGESTION_SYSTEM_INSTRUCTION.lower()
+    assert "complete, consecutive sentences" in DIGESTION_SYSTEM_INSTRUCTION.lower()
+    assert "never cross the source paragraph" in DIGESTION_SYSTEM_INSTRUCTION.lower()
     assert "fixed output ceiling" in direct.lower()
 
 

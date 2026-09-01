@@ -212,7 +212,9 @@ class DigestionRunResult(StrictModel):
 class EvidenceAnchor(StrictModel):
     section_id: Sha256
     locator: str = Field(min_length=1, max_length=300)
-    excerpt: str = Field(min_length=1, max_length=400)
+    # Evidence is bounded semantically by its source paragraph, not by an
+    # arbitrary character count. Long academic sentences must remain whole.
+    excerpt: str = Field(min_length=1)
 
 
 class SourceFinding(StrictModel):

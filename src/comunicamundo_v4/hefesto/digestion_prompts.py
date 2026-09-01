@@ -13,7 +13,7 @@ DIGESTION_SYSTEM_INSTRUCTION = """
 You are Hefesto's source analyst. Work only from the supplied source material. Do not add outside knowledge.
 Keep correlation, temporal association, quasi-experimental inference, and causation distinct. Never strengthen a
 source's claim. Preserve disagreements, null findings, boundary conditions, uncertainty, and methodological limits.
-Every substantive finding must include a verbatim evidence excerpt of at most 400 characters and the exact supplied section_id.
+Every substantive finding must include the exact supplied section_id and a verbatim excerpt made of one or more complete, consecutive sentences. Include consecutive sentences needed to preserve qualifications, but never cross the source paragraph; use another anchor for another paragraph.
 Return only the requested structured object in the requested language.
 """.strip()
 
@@ -30,8 +30,9 @@ def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, o
     }
     return f"""
 Create a bounded digest of this one section. Record only findings actually supported in the section. A references or
-administrative section may legitimately have no findings. Evidence excerpts must be copied exactly from SECTION TEXT.
-Do not infer a whole-source method or conclusion from this partial section.
+administrative section may legitimately have no findings. Evidence excerpts must contain complete, consecutive
+sentences copied exactly from SECTION TEXT and must never cross a paragraph boundary. Do not infer a whole-source
+method or conclusion from this partial section.
 
 OUTPUT LANGUAGE: {output_language}
 SOURCE AND SECTION: {json.dumps(descriptor, ensure_ascii=False, sort_keys=True)}
@@ -46,7 +47,9 @@ def direct_source_dossier_prompt(*, source: NormalizedSource, section: SourceSec
 Build one compact source dossier from the complete source below. The dossier has a fixed output ceiling independent of
 source length: select the most decision-relevant findings, do not enumerate the document. Describe its actual method
 or institutional role. Treat recommendations as recommendations, not empirical effects. Evidence excerpts must be
-copied exactly and must use section_id {section.section_id}.
+copied exactly and must use section_id {section.section_id}. Each excerpt must contain one or more complete,
+consecutive sentences and must stay inside one source paragraph. Use a separate anchor when another paragraph is
+needed. Keep each locator a brief source-location label, never a quotation, and return at most 10 practical implications.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}

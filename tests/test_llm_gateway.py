@@ -22,7 +22,6 @@ PROMPT = "Sintetize as evidências sem inventar causalidade."
 
 class Proposal(BaseModel):
     synthesis: str = Field(min_length=1, max_length=1_200)
-    excerpt: str = Field(default="evidence", max_length=400)
 
 
 class MemoryLedger:
@@ -143,11 +142,10 @@ async def test_gateway_uses_explicit_budgets_and_persists_provider_usage() -> No
     assert config.response_mime_type == "application/json"
     assert config.response_schema is None
     assert config.response_json_schema is not None
-    rendered_schema = config.response_json_schema
-    assert "minLength" not in str(rendered_schema)
-    assert "maxLength" not in rendered_schema["properties"]["synthesis"]
-    assert rendered_schema["properties"]["excerpt"]["maxLength"] == 400
-    assert "title" not in str(rendered_schema)
+    rendered_schema = str(config.response_json_schema)
+    assert "minLength" not in rendered_schema
+    assert "maxLength" not in rendered_schema
+    assert "title" not in rendered_schema
     assert Proposal.model_json_schema()["properties"]["synthesis"]["maxLength"] == 1_200
     assert len(ledger.records) == 1
     record = ledger.records[0]

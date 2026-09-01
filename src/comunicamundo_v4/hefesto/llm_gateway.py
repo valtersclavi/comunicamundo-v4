@@ -310,29 +310,13 @@ def _provider_response_schema(schema: type[BaseModel]) -> dict[str, Any]:
     return _strip_provider_schema_constraints(schema.model_json_schema())
 
 
-def _strip_provider_schema_constraints(
-    value: Any,
-    *,
-    property_name: str | None = None,
-) -> Any:
+def _strip_provider_schema_constraints(value: Any) -> Any:
     if isinstance(value, dict):
-        rendered: dict[str, Any] = {}
-        for key, item in value.items():
-            if key in _PROVIDER_SCHEMA_OMIT_KEYS:
-                # Evidence excerpts are validated verbatim after generation. Keeping
-                # this one compact bound prevents oversized quotes without restoring
-                # the full constraint grammar that Vertex rejected.
-                if key == "maxLength" and property_name == "excerpt":
-                    rendered[key] = item
-                continue
-            if key == "properties" and isinstance(item, dict):
-                rendered[key] = {
-                    name: _strip_provider_schema_constraints(schema, property_name=name)
-                    for name, schema in item.items()
-                }
-            else:
-                rendered[key] = _strip_provider_schema_constraints(item)
-        return rendered
+        return {
+            key: _strip_provider_schema_constraints(item)
+            for key, item in value.items()
+            if key not in _PROVIDER_SCHEMA_OMIT_KEYS
+        }
     if isinstance(value, list):
         return [_strip_provider_schema_constraints(item) for item in value]
     return value

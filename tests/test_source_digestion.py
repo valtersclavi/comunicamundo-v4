@@ -153,6 +153,40 @@ def test_dossier_evidence_accepts_unicode_compatibility_normalization() -> None:
     validate_dossier_evidence(dossier, plan.sections)
 
 
+def test_dossier_evidence_accepts_a_complete_sentence_longer_than_400_characters() -> None:
+    sentence = "A complete evidentiary sentence " + ("with necessary context " * 24) + "and its qualification."
+    assert len(sentence) > 400
+    source = NormalizedSource(source_id=uuid4(), text=sentence, language="en", title="Long sentence")
+    plan = SourceDigestionPlanner().plan_source(source, source_ordinal=0)
+    dossier = _dossier(plan, project_id=uuid4(), run_id=uuid4(), findings=1)
+    anchor = dossier.findings[0].anchors[0].model_copy(update={"excerpt": sentence})
+    dossier = dossier.model_copy(
+        update={"findings": [dossier.findings[0].model_copy(update={"anchors": [anchor]})]}
+    )
+
+    validate_dossier_evidence(dossier, plan.sections)
+
+
+def test_dossier_evidence_cannot_join_sentences_across_paragraphs() -> None:
+    source = NormalizedSource(
+        source_id=uuid4(),
+        text="First complete sentence.\n\nSecond complete sentence.",
+        language="en",
+        title="Two paragraphs",
+    )
+    plan = SourceDigestionPlanner().plan_source(source, source_ordinal=0)
+    dossier = _dossier(plan, project_id=uuid4(), run_id=uuid4(), findings=1)
+    anchor = dossier.findings[0].anchors[0].model_copy(
+        update={"excerpt": "First complete sentence. Second complete sentence."}
+    )
+    dossier = dossier.model_copy(
+        update={"findings": [dossier.findings[0].model_copy(update={"anchors": [anchor]})]}
+    )
+
+    with pytest.raises(ValueError, match="one source paragraph"):
+        validate_dossier_evidence(dossier, plan.sections)
+
+
 def test_equal_output_ceiling_prevents_raw_length_from_becoming_representation_weight() -> None:
     planner = SourceDigestionPlanner()
     project_id, run_id = uuid4(), uuid4()
