@@ -1,24 +1,24 @@
 name: inspect-failed-execution
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 permissions:
   contents: read
   id-token: write
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
-  JOB_NAME: hefesto-v4-rebuild
-  SERVICE_NAME: hefesto-v2-inspect-temp
-  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
-  CANARY_PROJECT_ID: 4e32c17d-0af8-4f8f-840e-8a2454a0a81b
+  EXECUTION: hefesto-v4-rebuild-bgvht
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+
 jobs:
   inspect:
-    if: ${{ contains(github.event.head_commit.message, '[inspect-v2-runtime]') }}
+    if: ${{ contains(github.event.head_commit.message, '[inspect-execution]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -26,83 +26,15 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Deploy temporary read-only inspector
+      - name: Describe failed execution only
         run: |
           set -euo pipefail
-          image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}"             --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
-          token="$(openssl rand -hex 32)"
-          cat > /tmp/inspect.py <<'PY'
-          import json
-          import os
-          from datetime import date, datetime
-          from decimal import Decimal
-          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-          from google.cloud import firestore
-
-          TOKEN = os.environ["INSPECT_TOKEN"]
-          PROJECT_ID = os.environ["CANARY_PROJECT_ID"]
-
-          def clean(value):
-              if isinstance(value, (datetime, date)):
-                  return value.isoformat()
-              if isinstance(value, Decimal):
-                  return str(value)
-              if isinstance(value, dict):
-                  return {str(k): clean(v) for k, v in value.items()}
-              if isinstance(value, (list, tuple)):
-                  return [clean(v) for v in value]
-              return value
-
-          def payload():
-              db = firestore.Client()
-              docs = [
-                  snap for snap in db.collection("hefesto_execution_runs").stream()
-                  if (snap.to_dict() or {}).get("project_id") == PROJECT_ID
-              ]
-              docs.sort(key=lambda snap: (snap.to_dict() or {}).get("updated_at") or datetime.min)
-              if not docs:
-                  return {"error": "no execution run found", "project_id": PROJECT_ID}
-              snap = docs[-1]
-              units = []
-              for unit in snap.reference.collection("work_units").stream():
-                  units.append({"id": unit.id, **clean(unit.to_dict() or {})})
-              return {
-                  "project_id": PROJECT_ID,
-                  "execution_run_id": snap.id,
-                  "run": clean(snap.to_dict() or {}),
-                  "work_units": units,
-              }
-
-          class Handler(BaseHTTPRequestHandler):
-              def do_GET(self):
-                  if self.headers.get("X-Inspect-Token") != TOKEN:
-                      self.send_response(403)
-                      self.end_headers()
-                      return
-                  body = json.dumps(payload(), ensure_ascii=False, indent=2).encode()
-                  self.send_response(200)
-                  self.send_header("Content-Type", "application/json")
-                  self.send_header("Content-Length", str(len(body)))
-                  self.end_headers()
-                  self.wfile.write(body)
-              def log_message(self, *args):
-                  return
-
-          ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8080"))), Handler).serve_forever()
-          PY
-          script_b64="$(base64 -w0 /tmp/inspect.py)"
-          gcloud run deploy "${SERVICE_NAME}" --project="${PROJECT_ID}" --region="${REGION}"             --image="${image}" --service-account="${RUNTIME_SA}"             --command=python             --args=-c,"import base64,os;exec(base64.b64decode(os.environ['INSPECT_SCRIPT_B64']))"             --cpu=1 --memory=512Mi --concurrency=1 --max-instances=1 --min-instances=0             --timeout=300 --allow-unauthenticated             --set-env-vars="CANARY_PROJECT_ID=${CANARY_PROJECT_ID},INSPECT_TOKEN=${token},INSPECT_SCRIPT_B64=${script_b64}"             --quiet
-          url="$(gcloud run services describe "${SERVICE_NAME}" --project="${PROJECT_ID}"             --region="${REGION}" --format='value(status.url)')"
-          curl -fsS --retry 8 --retry-all-errors --retry-delay 5             -H "X-Inspect-Token: ${token}" "${url}/"             | tee /tmp/canary-state.json
-          jq '{execution_run_id, state:.run.state, error_class:.run.error_class, error_message:.run.error_message, work_units:[.work_units[]|{id,status,error_class,error_message,attempt_count}]}' /tmp/canary-state.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: hefesto-v2-canary-runtime-state
-          path: /tmp/canary-state.json
-          if-no-files-found: warn
-      - name: Delete temporary inspector
-        if: always()
+          gcloud run jobs executions describe "${EXECUTION}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='yaml(status)'
+      - name: Prove existing bucket read without exposing request
         run: |
-          gcloud run services delete "${SERVICE_NAME}" --project="${PROJECT_ID}"             --region="${REGION}" --quiet || true
+          set -euo pipefail
+          gcloud storage cat "${REQUEST_URI}" >/dev/null
+          echo 'BUCKET_READ: SUCCESS'
