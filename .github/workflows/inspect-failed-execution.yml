@@ -1,21 +1,24 @@
 name: inspect-failed-execution
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 permissions:
   contents: read
   id-token: write
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
-  JOB_NAME: hefesto-v4-rebuild
-  EXECUTION: hefesto-v4-rebuild-lsg4k
+  EXECUTION: hefesto-v4-rebuild-bgvht
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+
 jobs:
   inspect:
-    if: ${{ contains(github.event.head_commit.message, '[inspect-v2-canary]') }}
+    if: ${{ contains(github.event.head_commit.message, '[inspect-execution]') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -23,16 +26,15 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Collect execution and logs
+      - name: Describe failed execution only
         run: |
           set -euo pipefail
-          mkdir -p /tmp/canary-inspect
-          gcloud run jobs executions describe "${EXECUTION}"             --project="${PROJECT_ID}" --region="${REGION}" --format=json             | tee /tmp/canary-inspect/execution.json
-          filter="resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND labels.\"run.googleapis.com/execution_name\"=${EXECUTION}"
-          gcloud logging read "${filter}" --project="${PROJECT_ID}"             --limit=1000 --order=asc --format=json             | tee /tmp/canary-inspect/logs.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: hefesto-v2-canary-lsg4k
-          path: /tmp/canary-inspect
-          if-no-files-found: error
+          gcloud run jobs executions describe "${EXECUTION}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='yaml(status)'
+      - name: Prove existing bucket read without exposing request
+        run: |
+          set -euo pipefail
+          gcloud storage cat "${REQUEST_URI}" >/dev/null
+          echo 'BUCKET_READ: SUCCESS'
