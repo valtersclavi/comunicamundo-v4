@@ -130,6 +130,29 @@ def test_dossier_evidence_must_be_a_verbatim_source_excerpt() -> None:
         validate_dossier_evidence(invented, plan.sections)
 
 
+def test_dossier_evidence_accepts_unicode_compatibility_normalization() -> None:
+    source = NormalizedSource(
+        source_id=uuid4(),
+        text="Speciﬁcally, the observed association remained bounded.",
+        language="en",
+        title="PDF ligature",
+    )
+    plan = SourceDigestionPlanner().plan_source(source, source_ordinal=0)
+    dossier = _dossier(plan, project_id=uuid4(), run_id=uuid4(), findings=1)
+    normalized_anchor = dossier.findings[0].anchors[0].model_copy(
+        update={"excerpt": "Specifically, the observed association remained bounded."}
+    )
+    dossier = dossier.model_copy(
+        update={
+            "findings": [
+                dossier.findings[0].model_copy(update={"anchors": [normalized_anchor]})
+            ]
+        }
+    )
+
+    validate_dossier_evidence(dossier, plan.sections)
+
+
 def test_equal_output_ceiling_prevents_raw_length_from_becoming_representation_weight() -> None:
     planner = SourceDigestionPlanner()
     project_id, run_id = uuid4(), uuid4()

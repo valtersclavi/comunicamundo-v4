@@ -6,6 +6,7 @@ from hashlib import sha256
 import math
 import re
 from typing import Sequence
+from unicodedata import normalize
 from uuid import UUID, uuid4
 
 from .contracts import NormalizedSource
@@ -153,7 +154,9 @@ def validate_dossier_evidence(dossier: SourceDossier, sections: Sequence[SourceS
     for finding in dossier.findings:
         for anchor in finding.anchors:
             section = section_map[anchor.section_id]
-            if " ".join(anchor.excerpt.split()) not in " ".join(section.text.split()):
+            excerpt = " ".join(normalize("NFKC", anchor.excerpt).split())
+            section_text = " ".join(normalize("NFKC", section.text).split())
+            if excerpt not in section_text:
                 raise ValueError("dossier contains an evidence excerpt absent from its source section")
 
 
