@@ -131,7 +131,10 @@ class LLMGateway:
         if system_instruction:
             config_kwargs["system_instruction"] = system_instruction
         if response_schema is not None:
-            config_kwargs.update(response_mime_type="application/json", response_schema=response_schema)
+            config_kwargs.update(
+                response_mime_type="application/json",
+                response_json_schema=_provider_response_schema(response_schema),
+            )
         config = types.GenerateContentConfig(**config_kwargs)
 
         queued_at = self._utc_now()
@@ -268,6 +271,55 @@ class LLMGateway:
             rate_card_source_url=price_card.source_url if price_card else None,
             rated_cost_usd=price_card.rate(usage) if price_card and usage else None,
         )
+
+
+_PROVIDER_SCHEMA_OMIT_KEYS = frozenset(
+    {
+        "$schema",
+        "const",
+        "contentEncoding",
+        "contentMediaType",
+        "default",
+        "description",
+        "examples",
+        "exclusiveMaximum",
+        "exclusiveMinimum",
+        "format",
+        "maxContains",
+        "maxItems",
+        "maxLength",
+        "maxProperties",
+        "maximum",
+        "minContains",
+        "minItems",
+        "minLength",
+        "minProperties",
+        "minimum",
+        "multipleOf",
+        "pattern",
+        "propertyNames",
+        "title",
+        "uniqueItems",
+    }
+)
+
+
+def _provider_response_schema(schema: type[BaseModel]) -> dict[str, Any]:
+    """Keep output shape while omitting constraints that explode provider grammar states."""
+
+    return _strip_provider_schema_constraints(schema.model_json_schema())
+
+
+def _strip_provider_schema_constraints(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_provider_schema_constraints(item)
+            for key, item in value.items()
+            if key not in _PROVIDER_SCHEMA_OMIT_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_provider_schema_constraints(item) for item in value]
+    return value
 
 
 def _usage_from_response(response: object) -> LLMUsage:

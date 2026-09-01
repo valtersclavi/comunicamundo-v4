@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from comunicamundo_v4.hefesto.execution_contracts import (
     LLMCallIntent,
@@ -21,7 +21,7 @@ PROMPT = "Sintetize as evidências sem inventar causalidade."
 
 
 class Proposal(BaseModel):
-    synthesis: str
+    synthesis: str = Field(min_length=1, max_length=1_200)
 
 
 class MemoryLedger:
@@ -140,6 +140,13 @@ async def test_gateway_uses_explicit_budgets_and_persists_provider_usage() -> No
     assert config.thinking_config.thinking_budget == 500
     assert config.thinking_config.include_thoughts is False
     assert config.response_mime_type == "application/json"
+    assert config.response_schema is None
+    assert config.response_json_schema is not None
+    rendered_schema = str(config.response_json_schema)
+    assert "minLength" not in rendered_schema
+    assert "maxLength" not in rendered_schema
+    assert "title" not in rendered_schema
+    assert Proposal.model_json_schema()["properties"]["synthesis"]["maxLength"] == 1_200
     assert len(ledger.records) == 1
     record = ledger.records[0]
     assert record.status is LLMCallStatus.SUCCEEDED
