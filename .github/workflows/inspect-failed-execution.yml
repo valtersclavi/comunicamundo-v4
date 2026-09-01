@@ -1,24 +1,24 @@
 name: inspect-failed-execution
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 permissions:
   contents: read
   id-token: write
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
-  EXECUTION: hefesto-v4-rebuild-bgvht
-  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
+  JOB_NAME: hefesto-v4-rebuild
+  CANARY_URI: gs://comunicamundo-v4-hefesto-30524898837/calibracao/hefesto-v2/canary-20260901T135723Z-4e32c17d-0af8-4f8f-840e-8a2454a0a81b/request.json
+  CANARY_PROJECT_ID: 4e32c17d-0af8-4f8f-840e-8a2454a0a81b
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
 
 jobs:
-  inspect:
-    if: ${{ contains(github.event.head_commit.message, '[inspect-execution]') }}
+  canary:
+    if: ${{ contains(github.event.head_commit.message, '[run-v2-canary]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -26,15 +26,13 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Describe failed execution only
+      - name: Run paid V2 canary
         run: |
           set -euo pipefail
-          gcloud run jobs executions describe "${EXECUTION}" \
-            --project="${PROJECT_ID}" \
-            --region="${REGION}" \
-            --format='yaml(status)'
-      - name: Prove existing bucket read without exposing request
+          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="digest-v2,--request=${CANARY_URI},--tokens-per-minute=1000000,--max-concurrency=1,--per-project-concurrency=1"             --wait --format='value(metadata.name)')"
+          echo "CANARY_EXECUTION=${execution}"
+      - name: Persist canary usage report
         run: |
           set -euo pipefail
-          gcloud storage cat "${REQUEST_URI}" >/dev/null
-          echo 'BUCKET_READ: SUCCESS'
+          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="report-v2,--project-id=${CANARY_PROJECT_ID}"             --wait --format='value(metadata.name)')"
+          echo "CANARY_REPORT_EXECUTION=${execution}"
