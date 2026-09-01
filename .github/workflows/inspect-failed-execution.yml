@@ -110,6 +110,24 @@ jobs:
                   "axis": json.loads(raw.decode("utf-8")),
               }
 
+          def project_state(execution_run_id):
+              db = firestore.Client()
+              snap = db.collection("hefesto_editorial_v2_runs").document(execution_run_id).get()
+              if not snap.exists:
+                  return {"error": "no editorial run found", "execution_run_id": execution_run_id}
+              run = snap.to_dict() or {}
+              pointer = ((run.get("artifacts") or {}).get("proposed_project") or {})
+              uri = pointer.get("uri")
+              if not uri:
+                  return {"execution_run_id": execution_run_id, "run": clean(run), "editorial_project": None}
+              parsed = urlparse(uri)
+              raw = storage.Client().bucket(parsed.netloc).blob(parsed.path.lstrip("/")).download_as_bytes()
+              return {
+                  "execution_run_id": execution_run_id,
+                  "run": clean(run),
+                  "editorial_project": json.loads(raw.decode("utf-8")),
+              }
+
           class Handler(BaseHTTPRequestHandler):
               def do_GET(self):
                   if self.headers.get("X-State-Token") != TOKEN:
@@ -127,6 +145,11 @@ jobs:
                           if not values:
                               raise ValueError("missing execution_run_id")
                           result = axis_state(values[0])
+                      elif parsed_path.path == "/editorial-project":
+                          values = parse_qs(parsed_path.query).get("execution_run_id", [])
+                          if not values:
+                              raise ValueError("missing execution_run_id")
+                          result = project_state(values[0])
                       else:
                           result = latest_state(project_id)
                       code = 200
@@ -207,23 +230,56 @@ jobs:
           test "$(jq -r '.run.state // empty' /tmp/operator-axis.json)" = "axis_proposed"
           jq -r '.axis.narrative_axis.statement' /tmp/operator-axis.json
 
-      - name: Record result through Narrative Axis
+      - name: Operator — approve Axis and propose Editorial Project
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args="approve-axis-v2,--execution-run-id=${OPERATOR_EXECUTION_RUN_ID},${CAPACITY_ARGS}" --wait --format='value(metadata.name)' 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "${output}"
+          execution="$(printf '%s\n' "${output}" | grep -oE 'hefesto-v4-rebuild-[a-z0-9]+' | tail -1 || true)"
+          if [ -n "${execution}" ]; then
+            echo "OPERATOR_PROJECT_EXECUTION=${execution}" >> "${GITHUB_ENV}"
+          fi
+          if [ "${status}" -ne 0 ]; then
+            exit "${status}"
+          fi
+          test -n "${execution}"
+          timing="$(gcloud run jobs executions describe "${execution}" --project="${PROJECT_ID}" --region="${REGION}" --format=json | jq -c '{created_at:(.metadata.creationTimestamp // .metadata.creationTime),started_at:.status.startTime,completed_at:.status.completionTime}')"
+          echo "OPERATOR_PROJECT_TIMING=${timing}" >> "${GITHUB_ENV}"
+          curl -fsS --retry 8 --retry-all-errors --retry-delay 5 \
+            -H "X-State-Token: ${STATE_TOKEN}" \
+            "${HELPER_URL}/editorial-project?execution_run_id=${OPERATOR_EXECUTION_RUN_ID}" \
+            | tee /tmp/operator-project.json
+          test "$(jq -r '.run.state // empty' /tmp/operator-project.json)" = "project_proposed"
+          jq -r '.editorial_project.editorial_project.title // "Editorial Project proposed"' /tmp/operator-project.json
+
+      - name: Record result through Editorial Project
         run: |
           jq -n \
             --arg project_id "${OPERATOR_PROJECT_ID}" \
             --arg execution_run_id "${OPERATOR_EXECUTION_RUN_ID}" \
             --arg digest_execution "${OPERATOR_DIGEST_EXECUTION}" \
             --arg axis_execution "${OPERATOR_AXIS_EXECUTION}" \
+            --arg project_execution "${OPERATOR_PROJECT_EXECUTION}" \
             --argjson digest_timing "${OPERATOR_DIGEST_TIMING}" \
             --argjson axis_timing "${OPERATOR_AXIS_TIMING}" \
+            --argjson project_timing "${OPERATOR_PROJECT_TIMING}" \
             --slurpfile axis /tmp/operator-axis.json \
-            '{project_id:$project_id,execution_run_id:$execution_run_id,terminal_state:"axis_proposed",cloud_run:{digest:$digest_execution,axis:$axis_execution},timing:{digest:$digest_timing,axis:$axis_timing},narrative_axis:$axis[0].axis.narrative_axis,test_b:"not_started"}' \
+            --slurpfile project /tmp/operator-project.json \
+            '{project_id:$project_id,execution_run_id:$execution_run_id,terminal_state:"project_proposed",cloud_run:{digest:$digest_execution,axis:$axis_execution,project:$project_execution},timing:{digest:$digest_timing,axis:$axis_timing,project:$project_timing},narrative_axis:$axis[0].axis.narrative_axis,editorial_project:$project[0].editorial_project.editorial_project,editorial_project_record:$project[0].editorial_project,test_b:"not_started"}' \
             | tee /tmp/operator-result.json
 
       - name: Collect durable failure state
         if: failure()
         run: |
-          if [ -n "${OPERATOR_EXECUTION_RUN_ID:-}" ]; then
+          if [ -n "${OPERATOR_PROJECT_EXECUTION:-}" ]; then
+            curl -sS --retry 4 --retry-all-errors --retry-delay 3 \
+              -H "X-State-Token: ${STATE_TOKEN}" \
+              "${HELPER_URL}/editorial-project?execution_run_id=${OPERATOR_EXECUTION_RUN_ID}" \
+              | tee /tmp/operator-failure.json || true
+          elif [ -n "${OPERATOR_EXECUTION_RUN_ID:-}" ]; then
             curl -sS --retry 4 --retry-all-errors --retry-delay 3 \
               -H "X-State-Token: ${STATE_TOKEN}" \
               "${HELPER_URL}/axis?execution_run_id=${OPERATOR_EXECUTION_RUN_ID}" \
@@ -238,14 +294,16 @@ jobs:
         if: always()
         run: |
           {
-            echo "# Hefesto V2 — digestão até Eixo Narrativo"
+            echo "# Hefesto V2 — digestão até Projeto Editorial"
             echo "- Request: \`${OPERATOR_REQUEST_URI}\`"
             echo "- Digest execution: \`${OPERATOR_DIGEST_EXECUTION:-not-completed}\`"
             echo "- Axis execution: \`${OPERATOR_AXIS_EXECUTION:-not-started}\`"
+            echo "- Project execution: \`${OPERATOR_PROJECT_EXECUTION:-not-started}\`"
             if [ -f /tmp/operator-result.json ]; then
-              echo "- State: \`axis_proposed\`"
+              echo "- State: \`project_proposed\`"
               echo "- Execution run: \`$(jq -r '.execution_run_id' /tmp/operator-result.json)\`"
               echo "- Axis: $(jq -r '.narrative_axis.statement' /tmp/operator-result.json)"
+              echo "- Editorial Project: \`$(jq -r '.editorial_project.editorial_project_id' /tmp/operator-result.json)\`"
             elif [ -f /tmp/operator-failure.json ]; then
               echo "- State: \`$(jq -r '.run.state // "unknown"' /tmp/operator-failure.json)\`"
               echo "- Error: $(jq -r '.run.error_message // .message // "unavailable"' /tmp/operator-failure.json)"
@@ -259,6 +317,7 @@ jobs:
           path: |
             /tmp/operator-result.json
             /tmp/operator-axis.json
+            /tmp/operator-project.json
             /tmp/operator-failure.json
           if-no-files-found: warn
 

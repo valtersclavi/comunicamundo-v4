@@ -9,14 +9,15 @@ The canonical manual test path is the GitHub Actions workflow `hefesto-v2-operat
 3. Keep the internal admission-control ceiling at `1000000` unless the test contract changes it.
 4. Start the run.
 
-The operator always uses concurrency 1, runs `digest-v2`, then `propose-axis-v2`, and stops at `axis_proposed`. It never approves the Axis, creates an Editorial Project, produces an article, or starts Test B.
+The operator always uses concurrency 1 and runs `digest-v2` → `propose-axis-v2` → `approve-axis-v2`. The last command approves the proposed Axis and creates the proposed Editorial Project. The operator stops at `project_proposed`; it never approves the Editorial Project, produces an article, or starts Test B.
 
 ## Output
 
 The workflow summary shows the request, Cloud Run execution names, execution-run identity, terminal state, and Narrative Axis. The `hefesto-v2-operator-result` artifact contains:
 
 - `operator-result.json` with stage timestamps and the proposed Narrative Axis;
-- `operator-axis.json` with the complete durable Axis record;
+- `operator-axis.json` with the complete durable proposed Axis record;
+- `operator-project.json` with the complete durable proposed Editorial Project record;
 - `operator-failure.json` with durable state when a stage fails.
 
 The temporary read-only state service runs with the canonical runtime identity and is deleted by an `always()` cleanup step. Starting a test requires no workflow edit, trigger commit, job mutation, image build, or deployment.
