@@ -1,21 +1,24 @@
 name: inspect-failed-execution
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 permissions:
   contents: read
   id-token: write
 env:
   PROJECT_ID: comunicamundo-v4
-  BUCKET: comunicamundo-v4-hefesto-30524898837
-  CANARY_PROJECT_ID: 4e32c17d-0af8-4f8f-840e-8a2454a0a81b
+  REGION: us-central1
+  EXECUTION: hefesto-v4-rebuild-bgvht
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
-  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+
 jobs:
   inspect:
-    if: ${{ contains(github.event.head_commit.message, '[inspect-v2-state]') }}
+    if: ${{ contains(github.event.head_commit.message, '[inspect-execution]') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -23,23 +26,15 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Read durable canary state as runtime identity
+      - name: Describe failed execution only
         run: |
           set -euo pipefail
-          mkdir -p /tmp/canary-state
-          token="$(gcloud auth print-access-token --impersonate-service-account="${RUNTIME_SA}")"
-          test -n "${token}"
-          gcloud --impersonate-service-account="${RUNTIME_SA}" storage ls --long             "gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${CANARY_PROJECT_ID}/executions/*/digestion/plan.json"             | tee /tmp/canary-state/plans.txt
-          latest_uri="$(sort -k2 /tmp/canary-state/plans.txt | tail -1 | awk '{print $3}')"
-          run_id="$(printf '%s' "${latest_uri}" | sed -E 's#^.*/executions/([^/]+)/digestion/plan[.]json$#\1#')"
-          test -n "${run_id}"
-          base="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents"
-          curl -fsS -H "Authorization: Bearer ${token}"             "${base}/hefesto_execution_runs/${run_id}"             | tee /tmp/canary-state/run.json
-          curl -fsS -H "Authorization: Bearer ${token}"             "${base}/hefesto_execution_runs/${run_id}/work_units?pageSize=100"             | tee /tmp/canary-state/work-units.json
-          jq -n --arg run_id "${run_id}"             --arg state "$(jq -r '.fields.state.stringValue' /tmp/canary-state/run.json)"             --arg error_class "$(jq -r '.fields.error_class.stringValue // ""' /tmp/canary-state/run.json)"             --arg error_message "$(jq -r '.fields.error_message.stringValue // ""' /tmp/canary-state/run.json)"             '{run_id:$run_id,state:$state,error_class:$error_class,error_message:$error_message}'             | tee /tmp/canary-state/summary.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: hefesto-v2-canary-state
-          path: /tmp/canary-state
-          if-no-files-found: error
+          gcloud run jobs executions describe "${EXECUTION}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='yaml(status)'
+      - name: Prove existing bucket read without exposing request
+        run: |
+          set -euo pipefail
+          gcloud storage cat "${REQUEST_URI}" >/dev/null
+          echo 'BUCKET_READ: SUCCESS'
