@@ -3,161 +3,38 @@ on:
   push:
     branches:
       - main
-
 permissions:
   contents: read
   id-token: write
-
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
-  JOB_NAME: hefesto-v4-rebuild
+  EXECUTION: hefesto-v4-rebuild-bgvht
+  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
-  CANARY_URI: gs://comunicamundo-v4-hefesto-30524898837/calibracao/hefesto-v2/canary-20260901T135723Z-4e32c17d-0af8-4f8f-840e-8a2454a0a81b/request.json
-  TEST_A_PLAN_EXECUTION: hefesto-v4-rebuild-zvv78
-  TOKENS_PER_MINUTE: "1000000"
 
 jobs:
-  operate-v2-test-a:
-    if: ${{ contains(github.event.head_commit.message, '[hefesto-v2-test-a-logs]') }}
+  inspect:
+    if: ${{ contains(github.event.head_commit.message, '[inspect-execution]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-
+    timeout-minutes: 10
     steps:
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
-
       - uses: google-github-actions/setup-gcloud@v3
-
-      - name: Run canary then Test A through Cloud Run
-        shell: bash
+      - name: Describe failed execution only
         run: |
-          set -Eeuo pipefail
-          mkdir -p /tmp/hefesto-v2-test-a
-          RESULT=/tmp/hefesto-v2-test-a/summary.json
-          stage=bootstrap
-          jq -n '{status:"running",stage:"bootstrap",test_b_started:false}' > "${RESULT}"
-
-          on_error() {
-            rc=$?
-            trap - ERR
-            jq --arg stage "${stage}" --argjson exit_code "${rc}"               '.status="failure" | .stage=$stage | .exit_code=$exit_code'               "${RESULT}" > "${RESULT}.tmp" || true
-            if [ -s "${RESULT}.tmp" ]; then mv "${RESULT}.tmp" "${RESULT}"; fi
-            exit "${rc}"
-          }
-          trap on_error ERR
-
-          set_stage() {
-            stage="$1"
-            jq --arg stage "${stage}" '.stage=$stage' "${RESULT}" > "${RESULT}.tmp"
-            mv "${RESULT}.tmp" "${RESULT}"
-          }
-
-          execute_job() {
-            local args="$1"
-            gcloud run jobs execute "${JOB_NAME}"               --project="${PROJECT_ID}"               --region="${REGION}"               --args="${args}"               --wait --quiet --format='value(metadata.name)'
-          }
-
-          capture_logs() {
-            local execution="$1"
-            local output="$2"
-            local filter
-            filter="resource.type=cloud_run_job AND resource.labels.job_name=${JOB_NAME} AND labels.\"run.googleapis.com/execution_name\"=${execution}"
-            for attempt in {1..12}; do
-              gcloud logging read "${filter}"                 --project="${PROJECT_ID}" --limit=1000 --order=asc --format=json > "${output}"
-              if jq -e 'length > 0' "${output}" >/dev/null; then return 0; fi
-              sleep 5
-            done
-            return 1
-          }
-
-          extract_execution_run_id() {
-            local logs="$1"
-            jq -r '.[] | .textPayload? // empty' "${logs}"               | grep -Eo '"execution_run_id"[[:space:]]*:[[:space:]]*"[0-9a-f-]{36}"'               | head -1 | grep -Eo '[0-9a-f-]{36}'
-          }
-
-          extract_project_id() {
-            local logs="$1"
-            jq -r '.[] | .textPayload? // empty' "${logs}"               | grep -Eo '"project_id"[[:space:]]*:[[:space:]]*"[0-9a-f-]{36}"'               | head -1 | grep -Eo '[0-9a-f-]{36}'
-          }
-
-          pinned_image="$(gcloud run jobs describe "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --format='value(spec.template.spec.template.spec.containers[0].image)')"
-          test -n "${pinned_image}"
-
-          set_stage canary_digest
-          canary_execution="$(execute_job "digest-v2,--request=${CANARY_URI},--tokens-per-minute=${TOKENS_PER_MINUTE},--max-concurrency=1,--per-project-concurrency=1")"
-          capture_logs "${canary_execution}" /tmp/hefesto-v2-test-a/canary-logs.json
-          canary_run_id="$(extract_execution_run_id /tmp/hefesto-v2-test-a/canary-logs.json)"
-          test -n "${canary_run_id}"
-
-          jq --arg execution "${canary_execution}" --arg run_id "${canary_run_id}"             '.canary={status:"success",cloud_run_execution:$execution,execution_run_id:$run_id}'             "${RESULT}" > "${RESULT}.tmp"
-          mv "${RESULT}.tmp" "${RESULT}"
-
-          set_stage test_a_resolve_request
-          gcloud run jobs executions describe "${TEST_A_PLAN_EXECUTION}"             --project="${PROJECT_ID}" --region="${REGION}" --format=json             > /tmp/hefesto-v2-test-a/original-plan-execution.json
-          test_a_uri="$(jq -r '.. | strings | select(startswith("gs://") and endswith(".json"))'             /tmp/hefesto-v2-test-a/original-plan-execution.json | head -1)"
-          test -n "${test_a_uri}"
-          capture_logs "${TEST_A_PLAN_EXECUTION}" /tmp/hefesto-v2-test-a/original-plan-logs.json
-          test_a_project_id="$(extract_project_id /tmp/hefesto-v2-test-a/original-plan-logs.json)"
-          test -n "${test_a_project_id}"
-
-          set_stage test_a_digest
-          digest_execution="$(execute_job "digest-v2,--request=${test_a_uri},--tokens-per-minute=${TOKENS_PER_MINUTE},--max-concurrency=1,--per-project-concurrency=1")"
-          capture_logs "${digest_execution}" /tmp/hefesto-v2-test-a/digest-logs.json
-          test_a_run_id="$(extract_execution_run_id /tmp/hefesto-v2-test-a/digest-logs.json)"
-          test -n "${test_a_run_id}"
-
-          set_stage test_a_propose_axis
-          axis_execution="$(execute_job "propose-axis-v2,--execution-run-id=${test_a_run_id},--tokens-per-minute=${TOKENS_PER_MINUTE},--max-concurrency=1,--per-project-concurrency=1")"
-          capture_logs "${axis_execution}" /tmp/hefesto-v2-test-a/axis-logs.json
-
-          set_stage test_a_approve_axis
-          project_execution="$(execute_job "approve-axis-v2,--execution-run-id=${test_a_run_id},--tokens-per-minute=${TOKENS_PER_MINUTE},--max-concurrency=1,--per-project-concurrency=1")"
-          capture_logs "${project_execution}" /tmp/hefesto-v2-test-a/project-logs.json
-
-          set_stage test_a_approve_project_without_tips
-          approval_execution="$(execute_job "approve-project-v2,--execution-run-id=${test_a_run_id},--without-tips,--tokens-per-minute=${TOKENS_PER_MINUTE},--max-concurrency=1,--per-project-concurrency=1")"
-          capture_logs "${approval_execution}" /tmp/hefesto-v2-test-a/approval-logs.json
-
-          set_stage test_a_production
-          production_execution="$(execute_job "produce-v2,--execution-run-id=${test_a_run_id},--tokens-per-minute=${TOKENS_PER_MINUTE},--max-concurrency=1,--per-project-concurrency=1")"
-          capture_logs "${production_execution}" /tmp/hefesto-v2-test-a/production-logs.json
-
-          set_stage test_a_report
-          report_execution="$(execute_job "report-v2,--project-id=${test_a_project_id}")"
-          capture_logs "${report_execution}" /tmp/hefesto-v2-test-a/report-logs.json
-
-          jq -n             --arg pinned_image "${pinned_image}"             --arg request_uri "${test_a_uri}"             --arg project_id "${test_a_project_id}"             --arg execution_run_id "${test_a_run_id}"             --arg canary_execution "${canary_execution}"             --arg canary_run_id "${canary_run_id}"             --arg digest_execution "${digest_execution}"             --arg axis_execution "${axis_execution}"             --arg project_execution "${project_execution}"             --arg approval_execution "${approval_execution}"             --arg production_execution "${production_execution}"             --arg report_execution "${report_execution}"             '{
-              status:"success",
-              stage:"complete",
-              test:"A",
-              test_b_started:false,
-              pinned_image:$pinned_image,
-              request_uri:$request_uri,
-              project_id:$project_id,
-              execution_run_id:$execution_run_id,
-              canary:{status:"success",cloud_run_execution:$canary_execution,execution_run_id:$canary_run_id},
-              executions:{
-                digest:$digest_execution,
-                propose_axis:$axis_execution,
-                approve_axis:$project_execution,
-                approve_project_without_tips:$approval_execution,
-                production:$production_execution,
-                report:$report_execution
-              }
-            }' > "${RESULT}"
-
-          cat "${RESULT}"
-
-      - name: Upload Test A evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hefesto-v2-test-a-evidence
-          path: /tmp/hefesto-v2-test-a
-          if-no-files-found: error
-          retention-days: 30
+          set -euo pipefail
+          gcloud run jobs executions describe "${EXECUTION}" \
+            --project="${PROJECT_ID}" \
+            --region="${REGION}" \
+            --format='yaml(status)'
+      - name: Prove existing bucket read without exposing request
+        run: |
+          set -euo pipefail
+          gcloud storage cat "${REQUEST_URI}" >/dev/null
+          echo 'BUCKET_READ: SUCCESS'
