@@ -14,13 +14,13 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     DigestionExecutionRun,
     DigestionRunState,
     DominanceAssessment,
-    EvidenceAnchor,
+    EvidenceReference,
     EvidenceMatrixProposal,
     EvidenceStrength,
     MethodProfile,
     SectionDigestProposal,
     SourceDossierProposal,
-    SourceFinding,
+    SourceFindingProposal,
 )
 from comunicamundo_v4.hefesto.digestion_orchestrator import DigestionExecutionError, DigestionOrchestrator
 from comunicamundo_v4.hefesto.digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
@@ -114,18 +114,21 @@ class ResponsiveGateway:
 
     async def generate(self, intent, *, prompt, system_instruction=None, response_schema=None):
         self.calls.append(intent.work_unit_id)
-        hashes = re.findall(r"\b[0-9a-f]{64}\b", prompt)
+        section_match = re.search(r'"section_id": "([0-9a-f]{64})"', prompt) or re.search(
+            r"section_id ([0-9a-f]{64})", prompt
+        )
+        paragraph_match = re.search(r"\[PARAGRAPH ([0-9a-f]{64})\]", prompt) or re.search(
+            r'"paragraph_id": "([0-9a-f]{64})"', prompt
+        )
+        sentence_match = re.search(r"\[SENTENCE ([0-9a-f]{64})\]", prompt) or re.search(
+            r'"first_sentence_id": "([0-9a-f]{64})"', prompt
+        )
         if response_schema is SectionDigestProposal:
-            section_id = re.search(r'"section_id": "([0-9a-f]{64})"', prompt).group(1)
             proposal = SectionDigestProposal(
                 synopsis="Resumo da seção.",
-                findings=[_finding(section_id)],
+                findings=[_finding(section_match.group(1), paragraph_match.group(1), sentence_match.group(1))],
             )
         elif response_schema is SourceDossierProposal:
-            if intent.task_type == "source_dossier_direct":
-                section_id = re.search(r"section_id ([0-9a-f]{64})", prompt).group(1)
-            else:
-                section_id = re.search(r'"section_id": "([0-9a-f]{64})"', prompt).group(1)
             proposal = SourceDossierProposal(
                 executive_synthesis="Síntese da fonte.",
                 method_profile=MethodProfile(
@@ -135,7 +138,7 @@ class ResponsiveGateway:
                     measures_or_material="questionário",
                     temporal_scope="um período",
                 ),
-                findings=[_finding(section_id)],
+                findings=[_finding(section_match.group(1), paragraph_match.group(1), sentence_match.group(1))],
                 limitations=["Não identifica causalidade."],
             )
         elif response_schema is EvidenceMatrixProposal:
@@ -153,12 +156,20 @@ class ResponsiveGateway:
         return SimpleNamespace(parsed=proposal)
 
 
-def _finding(section_id):
-    return SourceFinding(
+def _finding(section_id, paragraph_id, sentence_id):
+    return SourceFindingProposal(
         finding="Foi observada uma associação.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
-        anchors=[EvidenceAnchor(section_id=section_id, locator="trecho", excerpt="Evidence line.")],
+        anchors=[
+            EvidenceReference(
+                section_id=section_id,
+                paragraph_id=paragraph_id,
+                first_sentence_id=sentence_id,
+                last_sentence_id=sentence_id,
+                locator="trecho",
+            )
+        ],
     )
 
 
@@ -189,9 +200,9 @@ def _orchestrator():
     work = MemoryWork()
     gateway = ResponsiveGateway()
     planner = SourceDigestionPlanner(
-        direct_source_tokens=20,
-        target_section_tokens=100,
-        max_section_tokens=150,
+        analyst_load_tokens=100,
+        max_analysts_per_source=4,
+        hard_section_tokens=150,
     )
     bucket = SmoothedTokenBucket(tokens_per_minute=100_000_000, burst_window_seconds=5)
     executor = BoundedFairExecutor(bucket, max_concurrency=4, per_project_concurrency=4)

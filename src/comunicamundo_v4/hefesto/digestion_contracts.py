@@ -19,9 +19,9 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 CompactText = Annotated[str, Field(min_length=1, max_length=1200)]
 ShortText = Annotated[str, Field(min_length=1, max_length=600)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v2"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v1"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v1"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v3"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v2"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v2"
 EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v1"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
@@ -53,6 +53,55 @@ class EvidenceStrength(StrEnum):
     INDETERMINATE = "indeterminate"
 
 
+class SourceSentence(StrictModel):
+    """Immutable sentence coordinates inside the normalized source."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
+    sentence_id: Sha256
+    ordinal: int = Field(ge=0)
+    char_start: int = Field(ge=0)
+    char_end: int = Field(gt=0)
+    text: str = Field(min_length=1)
+    content_sha256: Sha256
+
+    @model_validator(mode="after")
+    def _valid_span_and_hash(self) -> "SourceSentence":
+        if self.char_end - self.char_start != len(self.text):
+            raise ValueError("sentence character span must exactly match its text")
+        if sha256(self.text.encode("utf-8")).hexdigest() != self.content_sha256:
+            raise ValueError("sentence content hash does not match its text")
+        return self
+
+
+class SourceParagraph(StrictModel):
+    """Atomic semantic and evidence boundary preserved from the source."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
+    paragraph_id: Sha256
+    ordinal: int = Field(ge=0)
+    char_start: int = Field(ge=0)
+    char_end: int = Field(gt=0)
+    text: str = Field(min_length=1)
+    content_sha256: Sha256
+    sentences: list[SourceSentence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _valid_content(self) -> "SourceParagraph":
+        if self.char_end - self.char_start != len(self.text):
+            raise ValueError("paragraph character span must exactly match its text")
+        if sha256(self.text.encode("utf-8")).hexdigest() != self.content_sha256:
+            raise ValueError("paragraph content hash does not match its text")
+        if [item.ordinal for item in self.sentences] != list(range(len(self.sentences))):
+            raise ValueError("sentence ordinals must be contiguous inside a paragraph")
+        if self.sentences[0].char_start != self.char_start or self.sentences[-1].char_end != self.char_end:
+            raise ValueError("sentences must cover their paragraph from beginning to end")
+        if any(left.char_end != right.char_start for left, right in zip(self.sentences, self.sentences[1:])):
+            raise ValueError("sentences must not overlap or leave gaps inside a paragraph")
+        return self
+
+
 class SourceSection(StrictModel):
     # Section text is an immutable byte-for-byte slice. Global whitespace
     # stripping would silently create gaps at semantic boundaries.
@@ -67,6 +116,7 @@ class SourceSection(StrictModel):
     content_sha256: Sha256
     estimated_tokens: int = Field(ge=1)
     heading_hint: str | None = Field(default=None, max_length=240)
+    paragraphs: list[SourceParagraph] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _valid_span_and_hash(self) -> "SourceSection":
@@ -74,6 +124,12 @@ class SourceSection(StrictModel):
             raise ValueError("section character span must exactly match its text")
         if sha256(self.text.encode("utf-8")).hexdigest() != self.content_sha256:
             raise ValueError("section content hash does not match its text")
+        if [item.ordinal for item in self.paragraphs] != sorted(item.ordinal for item in self.paragraphs):
+            raise ValueError("section paragraphs must preserve source order")
+        if self.paragraphs[0].char_start < self.char_start or self.paragraphs[-1].char_end > self.char_end:
+            raise ValueError("section boundaries must contain complete paragraphs")
+        if any(item.char_start < self.char_start or item.char_end > self.char_end for item in self.paragraphs):
+            raise ValueError("section paragraphs must stay inside the section")
         return self
 
 
@@ -209,9 +265,17 @@ class DigestionRunResult(StrictModel):
         return self
 
 
-class EvidenceAnchor(StrictModel):
+class EvidenceReference(StrictModel):
+    """Compact model output; code reconstructs the verbatim excerpt."""
+
     section_id: Sha256
+    paragraph_id: Sha256
+    first_sentence_id: Sha256
+    last_sentence_id: Sha256
     locator: str = Field(min_length=1, max_length=300)
+
+
+class EvidenceAnchor(EvidenceReference):
     # Evidence is bounded semantically by its source paragraph, not by an
     # arbitrary character count. Long academic sentences must remain whole.
     excerpt: str = Field(min_length=1)
@@ -225,6 +289,14 @@ class SourceFinding(StrictModel):
     qualifications: list[ShortText] = Field(default_factory=list, max_length=4)
 
 
+class SourceFindingProposal(StrictModel):
+    finding: str = Field(min_length=1, max_length=1200)
+    causal_status: CausalStatus
+    evidence_strength: EvidenceStrength
+    anchors: list[EvidenceReference] = Field(min_length=1, max_length=3)
+    qualifications: list[ShortText] = Field(default_factory=list, max_length=4)
+
+
 class MethodProfile(StrictModel):
     source_kind: str = Field(min_length=1, max_length=200)
     design: str = Field(min_length=1, max_length=500)
@@ -235,14 +307,20 @@ class MethodProfile(StrictModel):
 
 class SectionDigestProposal(StrictModel):
     synopsis: str = Field(min_length=1, max_length=2500)
-    findings: list[SourceFinding] = Field(default_factory=list, max_length=8)
+    findings: list[SourceFindingProposal] = Field(default_factory=list, max_length=8)
     methods: list[CompactText] = Field(default_factory=list, max_length=4)
     limitations: list[CompactText] = Field(default_factory=list, max_length=6)
     uncertainties: list[CompactText] = Field(default_factory=list, max_length=6)
     distinctive_contributions: list[CompactText] = Field(default_factory=list, max_length=6)
 
 
-class SectionDigest(SectionDigestProposal):
+class SectionDigest(StrictModel):
+    synopsis: str = Field(min_length=1, max_length=2500)
+    findings: list[SourceFinding] = Field(default_factory=list, max_length=8)
+    methods: list[CompactText] = Field(default_factory=list, max_length=4)
+    limitations: list[CompactText] = Field(default_factory=list, max_length=6)
+    uncertainties: list[CompactText] = Field(default_factory=list, max_length=6)
+    distinctive_contributions: list[CompactText] = Field(default_factory=list, max_length=6)
     schema_version: int = 1
     source_id: UUID
     section_id: Sha256
@@ -266,7 +344,7 @@ class SectionDigest(SectionDigestProposal):
 class SourceDossierProposal(StrictModel):
     executive_synthesis: str = Field(min_length=1, max_length=6000)
     method_profile: MethodProfile
-    findings: list[SourceFinding] = Field(default_factory=list, max_length=12)
+    findings: list[SourceFindingProposal] = Field(default_factory=list, max_length=12)
     limitations: list[CompactText] = Field(default_factory=list, max_length=10)
     uncertainties_and_disputes: list[CompactText] = Field(default_factory=list, max_length=10)
     boundary_conditions: list[CompactText] = Field(default_factory=list, max_length=10)
@@ -275,7 +353,16 @@ class SourceDossierProposal(StrictModel):
     coverage_gaps: list[CompactText] = Field(default_factory=list, max_length=8)
 
 
-class SourceDossier(SourceDossierProposal):
+class SourceDossier(StrictModel):
+    executive_synthesis: str = Field(min_length=1, max_length=6000)
+    method_profile: MethodProfile
+    findings: list[SourceFinding] = Field(default_factory=list, max_length=12)
+    limitations: list[CompactText] = Field(default_factory=list, max_length=10)
+    uncertainties_and_disputes: list[CompactText] = Field(default_factory=list, max_length=10)
+    boundary_conditions: list[CompactText] = Field(default_factory=list, max_length=10)
+    practical_implications: list[CompactText] = Field(default_factory=list, max_length=10)
+    distinctive_contributions: list[CompactText] = Field(default_factory=list, max_length=10)
+    coverage_gaps: list[CompactText] = Field(default_factory=list, max_length=8)
     schema_version: int = 1
     dossier_id: UUID = Field(default_factory=uuid4)
     execution_run_id: UUID

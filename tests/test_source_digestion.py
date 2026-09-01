@@ -12,7 +12,6 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     EvidenceStrength,
     MethodProfile,
     SourceDossier,
-    SourceDossierProposal,
     SourceFinding,
 )
 from comunicamundo_v4.hefesto.source_digestion import (
@@ -31,12 +30,29 @@ def _source(size: int, *, title: str = "Source") -> NormalizedSource:
 
 
 def _dossier(plan, *, project_id, run_id, findings: int = 4) -> SourceDossier:
+    paragraph = plan.sections[0].paragraphs[0]
+    sentence = paragraph.sentences[0]
     anchor = EvidenceAnchor(
         section_id=plan.sections[0].section_id,
+        paragraph_id=paragraph.paragraph_id,
+        first_sentence_id=sentence.sentence_id,
+        last_sentence_id=sentence.sentence_id,
         locator="opening section",
-        excerpt="A substantive sentence about adolescent wellbeing and digital life.",
+        excerpt=sentence.text.strip(),
     )
-    proposal = SourceDossierProposal(
+    return SourceDossier(
+        execution_run_id=run_id,
+        project_id=project_id,
+        source_id=plan.source_id,
+        source_ordinal=plan.source_ordinal,
+        source_title=plan.title,
+        source_language=plan.language,
+        source_sha256=plan.source_sha256,
+        source_char_count=plan.source_char_count,
+        estimated_source_tokens=plan.estimated_source_tokens,
+        digestion_mode=plan.mode,
+        section_ids=[section.section_id for section in plan.sections],
+        model="test-model",
         executive_synthesis="Bounded synthesis.",
         method_profile=MethodProfile(
             source_kind="study",
@@ -55,30 +71,35 @@ def _dossier(plan, *, project_id, run_id, findings: int = 4) -> SourceDossier:
             for number in range(findings)
         ],
     )
-    return SourceDossier(
-        **proposal.model_dump(),
-        execution_run_id=run_id,
-        project_id=project_id,
-        source_id=plan.source_id,
-        source_ordinal=plan.source_ordinal,
-        source_title=plan.title,
-        source_language=plan.language,
-        source_sha256=plan.source_sha256,
-        source_char_count=plan.source_char_count,
-        estimated_source_tokens=plan.estimated_source_tokens,
-        digestion_mode=plan.mode,
-        section_ids=[section.section_id for section in plan.sections],
-        model="test-model",
-    )
 
 
-def test_short_and_medium_sources_use_one_whole_source_call() -> None:
+def test_source_size_allocates_analysts_without_cutting_paragraphs() -> None:
     source = _source(121_342)
     plan = SourceDigestionPlanner().plan_source(source, source_ordinal=0)
 
-    assert estimate_tokens(source.text) < 48_000
+    assert plan.mode is DigestionMode.HIERARCHICAL
+    assert plan.planned_model_calls == 3
+    assert len(plan.sections) == 2
+    assert "".join(section.text for section in plan.sections) == source.text
+    assert all(
+        paragraph.char_start >= section.char_start and paragraph.char_end <= section.char_end
+        for section in plan.sections
+        for paragraph in section.paragraphs
+    )
+
+
+def test_size_alone_cannot_force_a_cut_inside_one_semantic_paragraph() -> None:
+    source = NormalizedSource(
+        source_id=uuid4(),
+        text="A long but indivisible argument " + ("with context " * 10_000) + ".",
+        language="en",
+        title="One paragraph",
+    )
+
+    plan = SourceDigestionPlanner().plan_source(source, source_ordinal=0)
+
+    assert estimate_tokens(source.text) > 24_000
     assert plan.mode is DigestionMode.DIRECT
-    assert plan.planned_model_calls == 1
     assert len(plan.sections) == 1
     assert plan.sections[0].text == source.text
 
@@ -90,10 +111,10 @@ def test_long_source_is_split_without_overlap_gaps_or_content_loss() -> None:
     second = planner.plan_source(source, source_ordinal=3)
 
     assert first.mode is DigestionMode.HIERARCHICAL
-    assert 12 <= len(first.sections) <= 16
+    assert len(first.sections) == planner.max_analysts_per_source
     assert first.planned_model_calls == len(first.sections) + 1
     assert "".join(section.text for section in first.sections) == source.text
-    assert max(section.estimated_tokens for section in first.sections) <= planner.max_section_tokens
+    assert max(section.estimated_tokens for section in first.sections) <= planner.hard_section_tokens
     assert [section.section_id for section in first.sections] == [section.section_id for section in second.sections]
 
 
@@ -104,8 +125,8 @@ def test_realistic_a_and_b_call_shape_replaces_chunk_explosion() -> None:
     test_a = planner.plan(project_id=project_id, sources=[*common, _source(12_140)])
     test_b = planner.plan(project_id=project_id, sources=[*common, _source(956_001)])
 
-    assert test_a.planned_model_calls == 5  # four dossiers + one matrix
-    assert 17 <= test_b.planned_model_calls <= 22
+    assert test_a.planned_model_calls == 7
+    assert test_b.planned_model_calls == 15
     assert test_a.planned_model_calls < 77
     assert test_b.planned_model_calls < 298
 
@@ -126,7 +147,7 @@ def test_dossier_evidence_must_be_a_verbatim_source_excerpt() -> None:
             ]
         }
     )
-    with pytest.raises(ValueError, match="absent"):
+    with pytest.raises(ValueError, match="coordinates"):
         validate_dossier_evidence(invented, plan.sections)
 
 
@@ -159,10 +180,6 @@ def test_dossier_evidence_accepts_a_complete_sentence_longer_than_400_characters
     source = NormalizedSource(source_id=uuid4(), text=sentence, language="en", title="Long sentence")
     plan = SourceDigestionPlanner().plan_source(source, source_ordinal=0)
     dossier = _dossier(plan, project_id=uuid4(), run_id=uuid4(), findings=1)
-    anchor = dossier.findings[0].anchors[0].model_copy(update={"excerpt": sentence})
-    dossier = dossier.model_copy(
-        update={"findings": [dossier.findings[0].model_copy(update={"anchors": [anchor]})]}
-    )
 
     validate_dossier_evidence(dossier, plan.sections)
 
@@ -176,14 +193,15 @@ def test_dossier_evidence_cannot_join_sentences_across_paragraphs() -> None:
     )
     plan = SourceDigestionPlanner().plan_source(source, source_ordinal=0)
     dossier = _dossier(plan, project_id=uuid4(), run_id=uuid4(), findings=1)
+    second_sentence = plan.sections[0].paragraphs[1].sentences[0]
     anchor = dossier.findings[0].anchors[0].model_copy(
-        update={"excerpt": "First complete sentence. Second complete sentence."}
+        update={"last_sentence_id": second_sentence.sentence_id}
     )
     dossier = dossier.model_copy(
         update={"findings": [dossier.findings[0].model_copy(update={"anchors": [anchor]})]}
     )
 
-    with pytest.raises(ValueError, match="one source paragraph"):
+    with pytest.raises(ValueError, match="consecutive sentences"):
         validate_dossier_evidence(dossier, plan.sections)
 
 

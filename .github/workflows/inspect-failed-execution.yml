@@ -23,7 +23,7 @@ env:
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
-  CAPACITY_ARGS: --tokens-per-minute=${{ inputs.tokens_per_minute }},--max-concurrency=1,--per-project-concurrency=1
+  CAPACITY_ARGS: --tokens-per-minute=${{ inputs.tokens_per_minute }},--max-concurrency=8,--per-project-concurrency=6
 
 jobs:
   digest-to-axis:

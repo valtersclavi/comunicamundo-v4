@@ -52,6 +52,7 @@ class LLMGatewayResult:
     parsed: BaseModel | None
     response_id: str | None
     model_version: str | None
+    finish_reason: str | None
     usage: LLMUsage
     final_attempt: LLMAttemptRecord
 
@@ -64,6 +65,10 @@ class LLMCallError(RuntimeError):
 
 class InputBudgetExceeded(ValueError):
     pass
+
+
+class ProviderOutputTerminated(RuntimeError):
+    """The provider returned a response that cannot be treated as complete."""
 
 
 class VertexGenAITransport:
@@ -175,6 +180,34 @@ class LLMGateway:
             finished_monotonic = self._monotonic()
             finished_at = self._utc_now()
             usage = _usage_from_response(response)
+            finish_reason = _finish_reason_from_response(response)
+            try:
+                if finish_reason not in {None, "STOP"}:
+                    raise ProviderOutputTerminated(
+                        f"provider output ended with finish_reason={finish_reason}; the response was not accepted"
+                    )
+                parsed = _parsed_response(response, response_schema)
+            except Exception as error:
+                record = self._record(
+                    intent,
+                    attempt_number=attempt_number,
+                    status=LLMCallStatus.FAILED,
+                    queued_at=queued_at,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    elapsed_ms=_elapsed_ms(started_monotonic, finished_monotonic),
+                    usage=usage,
+                    response=response,
+                    finish_reason=finish_reason,
+                    retryable=False,
+                    error=error,
+                )
+                # A model response was already paid for. Persist the terminal
+                # parse/termination failure and never repeat it implicitly.
+                await self._ledger.append(record)
+                attempts.append(record)
+                raise LLMCallError(str(error), tuple(attempts)) from error
+
             record = self._record(
                 intent,
                 attempt_number=attempt_number,
@@ -185,15 +218,16 @@ class LLMGateway:
                 elapsed_ms=_elapsed_ms(started_monotonic, finished_monotonic),
                 usage=usage,
                 response=response,
+                finish_reason=finish_reason,
             )
             # A ledger failure must fail closed and must never repeat a paid call.
             await self._ledger.append(record)
-            parsed = _parsed_response(response, response_schema)
             return LLMGatewayResult(
                 text=str(getattr(response, "text", "") or ""),
                 parsed=parsed,
                 response_id=_optional_string(getattr(response, "response_id", None)),
                 model_version=_optional_string(getattr(response, "model_version", None)),
+                finish_reason=finish_reason,
                 usage=usage,
                 final_attempt=record,
             )
@@ -234,6 +268,7 @@ class LLMGateway:
         elapsed_ms: int,
         usage: LLMUsage | None = None,
         response: object | None = None,
+        finish_reason: str | None = None,
         retryable: bool = False,
         error: Exception | None = None,
     ) -> LLMAttemptRecord:
@@ -264,6 +299,7 @@ class LLMGateway:
             usage=usage,
             provider_response_id=_optional_string(getattr(response, "response_id", None)),
             provider_model_version=_optional_string(getattr(response, "model_version", None)),
+            provider_finish_reason=finish_reason,
             retryable=retryable,
             error_class=type(error).__name__ if error else None,
             error_message=str(error)[:4000] if error else None,
@@ -352,6 +388,18 @@ def _parsed_response(response: object, schema: type[ParsedT] | None) -> BaseMode
     if parsed is not None:
         return schema.model_validate(parsed)
     return schema.model_validate_json(str(getattr(response, "text", "")))
+
+
+def _finish_reason_from_response(response: object) -> str | None:
+    candidates = getattr(response, "candidates", None)
+    if not candidates:
+        return None
+    reason = getattr(candidates[0], "finish_reason", None)
+    if reason is None:
+        return None
+    raw = getattr(reason, "value", None) or getattr(reason, "name", None) or str(reason)
+    normalized = str(raw).rsplit(".", maxsplit=1)[-1].strip().upper()
+    return normalized or None
 
 
 def _integer(value: object, name: str) -> int:

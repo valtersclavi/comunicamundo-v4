@@ -22,12 +22,12 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     ArtifactPointer,
     CausalStatus,
     DominanceAssessment,
-    EvidenceAnchor,
+    EvidenceReference,
     EvidenceMatrixProposal,
     EvidenceStrength,
     MethodProfile,
     SourceDossierProposal,
-    SourceFinding,
+    SourceFindingProposal,
 )
 from comunicamundo_v4.hefesto.digestion_orchestrator import DigestionOrchestrator
 from comunicamundo_v4.hefesto.digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
@@ -215,6 +215,8 @@ class ResponsiveGateway:
         self.prompts.append((intent.task_type, prompt, system_instruction))
         if response_schema is SourceDossierProposal:
             section_id = re.search(r"section_id ([0-9a-f]{64})", prompt).group(1)
+            paragraph_id = re.search(r"\[PARAGRAPH ([0-9a-f]{64})\]", prompt).group(1)
+            sentence_id = re.search(r"\[SENTENCE ([0-9a-f]{64})\]", prompt).group(1)
             proposal = SourceDossierProposal(
                 executive_synthesis="A fonte descreve uma associação heterogênea.",
                 method_profile=MethodProfile(
@@ -225,15 +227,17 @@ class ResponsiveGateway:
                     temporal_scope="um período",
                 ),
                 findings=[
-                    SourceFinding(
+                    SourceFindingProposal(
                         finding="A associação varia entre adolescentes.",
                         causal_status=CausalStatus.CORRELATIONAL,
                         evidence_strength=EvidenceStrength.MODERATE,
                         anchors=[
-                            EvidenceAnchor(
+                            EvidenceReference(
                                 section_id=section_id,
+                                paragraph_id=paragraph_id,
+                                first_sentence_id=sentence_id,
+                                last_sentence_id=sentence_id,
                                 locator="trecho",
-                                excerpt="Evidence line.",
                             )
                         ],
                     )

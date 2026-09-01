@@ -88,12 +88,17 @@ def _intent(
     )
 
 
-def _response(*, parsed=None):
+def _response(*, parsed=None, finish_reason: str | None = None):
     return SimpleNamespace(
         text='{"synthesis":"síntese"}',
         parsed=parsed,
         response_id="response-1",
         model_version="gemini-2.5-flash-001",
+        candidates=(
+            [SimpleNamespace(finish_reason=finish_reason)]
+            if finish_reason is not None
+            else []
+        ),
         usage_metadata=SimpleNamespace(
             prompt_token_count=5_100,
             cached_content_token_count=100,
@@ -281,3 +286,48 @@ async def test_exact_count_allows_a_near_limit_prompt_that_really_fits() -> None
 
     assert len(transport.count_calls) == 1
     assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_structured_output_is_a_failed_paid_attempt_and_is_not_retried() -> None:
+    response = _response()
+    response.text = '{"synthesis":"truncated'
+    transport = FakeTransport([response, _response()])
+    ledger = MemoryLedger()
+    gateway = LLMGateway(transport, ledger=ledger, price_resolver=_rate_card)
+
+    with pytest.raises(LLMCallError, match="Invalid JSON"):
+        await gateway.generate(
+            _intent(max_attempts=2, response_schema=Proposal),
+            prompt=PROMPT,
+            response_schema=Proposal,
+        )
+
+    assert len(transport.calls) == 1
+    assert len(ledger.records) == 1
+    record = ledger.records[0]
+    assert record.status is LLMCallStatus.FAILED
+    assert record.retryable is False
+    assert record.usage.output_tokens == 600
+    assert record.rated_cost_usd == Decimal("0.009510000")
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_finish_reason_is_explicit_and_never_accepted_or_retried() -> None:
+    transport = FakeTransport(
+        [_response(parsed=Proposal(synthesis="partial"), finish_reason="MAX_TOKENS"), _response()]
+    )
+    ledger = MemoryLedger()
+    gateway = LLMGateway(transport, ledger=ledger)
+
+    with pytest.raises(LLMCallError, match="finish_reason=MAX_TOKENS"):
+        await gateway.generate(
+            _intent(max_attempts=2, response_schema=Proposal),
+            prompt=PROMPT,
+            response_schema=Proposal,
+        )
+
+    assert len(transport.calls) == 1
+    assert ledger.records[0].status is LLMCallStatus.FAILED
+    assert ledger.records[0].provider_finish_reason == "MAX_TOKENS"
+    assert ledger.records[0].error_class == "ProviderOutputTerminated"

@@ -122,27 +122,28 @@ class BoundedFairExecutor:
         *,
         max_concurrency: int,
         per_project_concurrency: int = 1,
+        fail_fast: bool = True,
     ) -> None:
         if max_concurrency <= 0 or per_project_concurrency <= 0:
             raise ValueError("concurrency limits must be positive")
         self._bucket = bucket
         self._max_concurrency = max_concurrency
         self._per_project_concurrency = per_project_concurrency
+        self._fail_fast = fail_fast
 
     async def run_all(self, work: Iterable[ScheduledWork[ResultT]]) -> list[ScheduledOutcome[ResultT]]:
         queue: FairProjectQueue[ScheduledWork[ResultT]] = FairProjectQueue()
-        total = 0
         for item in work:
             self._bucket.validate(item.reserved_capacity_tokens)
             queue.put(item.project_id, item)
-            total += 1
         outcomes: list[ScheduledOutcome[ResultT]] = []
         running: set[asyncio.Task[ScheduledOutcome[ResultT]]] = set()
         per_project: dict[UUID, int] = {}
+        halted = False
 
-        while len(outcomes) < total:
+        while len(queue) or running:
             deferred: list[tuple[UUID, ScheduledWork[ResultT]]] = []
-            while len(queue) and len(running) < self._max_concurrency:
+            while not halted and len(queue) and len(running) < self._max_concurrency:
                 project_id, item = queue.get()
                 if per_project.get(project_id, 0) >= self._per_project_concurrency:
                     deferred.append((project_id, item))
@@ -156,6 +157,8 @@ class BoundedFairExecutor:
                 queue.put(project_id, item)
 
             if not running:
+                if halted:
+                    break
                 if len(queue):
                     continue
                 break
@@ -164,6 +167,10 @@ class BoundedFairExecutor:
                 outcome = task.result()
                 outcomes.append(outcome)
                 per_project[outcome.project_id] -= 1
+                if self._fail_fast and outcome.error is not None:
+                    # Let already-started calls finish so their paid outcomes
+                    # remain observable, but never admit another unit.
+                    halted = True
 
         return outcomes
 

@@ -34,6 +34,7 @@ from .execution_contracts import LLMCallIntent, TokenBudget, text_sha256, work_u
 from .planning import fingerprint_brief
 from .source_digestion import (
     estimate_tokens,
+    materialize_findings,
     source_balance_metrics,
     validate_dossier_evidence,
     validate_reduced_dossier_evidence,
@@ -68,7 +69,7 @@ class DigestionRuntimeConfig:
     max_input_tokens: int = 250_000
     section_max_output_tokens: int = 5_000
     section_thinking_tokens: int = 1_000
-    dossier_max_output_tokens: int = 8_000
+    dossier_max_output_tokens: int = 12_000
     dossier_thinking_tokens: int = 2_000
     matrix_max_output_tokens: int = 12_000
     matrix_thinking_tokens: int = 3_000
@@ -159,8 +160,10 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: SectionDigestProposal) -> SectionDigest:
+            payload = proposal.model_dump(exclude={"findings"})
             return SectionDigest(
-                **proposal.model_dump(),
+                **payload,
+                findings=materialize_findings(proposal.findings, [section]),
                 source_id=source.source_id,
                 section_id=section.section_id,
                 section_sha256=section.content_sha256,
@@ -330,8 +333,10 @@ class DigestionCallFactory:
         source_plan: SourceDigestionPlan,
         proposal: SourceDossierProposal,
     ) -> SourceDossier:
+        payload = proposal.model_dump(exclude={"findings"})
         return SourceDossier(
-            **proposal.model_dump(),
+            **payload,
+            findings=materialize_findings(proposal.findings, source_plan.sections),
             execution_run_id=plan.execution_run_id,
             project_id=plan.project_id,
             source_id=source_plan.source_id,

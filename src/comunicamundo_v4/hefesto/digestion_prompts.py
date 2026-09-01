@@ -13,9 +13,26 @@ DIGESTION_SYSTEM_INSTRUCTION = """
 You are Hefesto's source analyst. Work only from the supplied source material. Do not add outside knowledge.
 Keep correlation, temporal association, quasi-experimental inference, and causation distinct. Never strengthen a
 source's claim. Preserve disagreements, null findings, boundary conditions, uncertainty, and methodological limits.
-Every substantive finding must include the exact supplied section_id and a verbatim excerpt made of one or more complete, consecutive sentences. Include consecutive sentences needed to preserve qualifications, but never cross the source paragraph; use another anchor for another paragraph.
+Every substantive finding must cite the supplied immutable coordinates: section_id, paragraph_id,
+first_sentence_id, and last_sentence_id. The first and last sentence must be in the same paragraph and identify a
+consecutive range in source order. Include enough consecutive sentences to preserve qualifications. Never return an
+excerpt: Hefesto reconstructs the exact source text from those coordinates after validating them.
 Return only the requested structured object in the requested language.
 """.strip()
+
+
+def _coordinate_text(section: SourceSection) -> str:
+    """Render model-facing source text with stable, compact evidence coordinates."""
+
+    blocks: list[str] = []
+    for paragraph in section.paragraphs:
+        lines = [f"[PARAGRAPH {paragraph.paragraph_id}]"]
+        lines.extend(
+            f"[SENTENCE {sentence.sentence_id}] {sentence.text.strip()}"
+            for sentence in paragraph.sentences
+        )
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, output_language: str) -> str:
@@ -30,15 +47,16 @@ def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, o
     }
     return f"""
 Create a bounded digest of this one section. Record only findings actually supported in the section. A references or
-administrative section may legitimately have no findings. Evidence excerpts must contain complete, consecutive
-sentences copied exactly from SECTION TEXT and must never cross a paragraph boundary. Do not infer a whole-source
-method or conclusion from this partial section.
+administrative section may legitimately have no findings. For every anchor, copy the section_id, paragraph_id,
+first_sentence_id, and last_sentence_id from the labels below. A range may contain several consecutive sentences but
+must stay within one paragraph. Do not return excerpts. Do not infer a whole-source method or conclusion from this
+partial section. Prefer a smaller set of meaningful findings over redundant detail.
 
 OUTPUT LANGUAGE: {output_language}
 SOURCE AND SECTION: {json.dumps(descriptor, ensure_ascii=False, sort_keys=True)}
 
-SECTION TEXT:
-{section.text}
+SECTION TEXT WITH EVIDENCE COORDINATES:
+{_coordinate_text(section)}
 """.strip()
 
 
@@ -46,10 +64,10 @@ def direct_source_dossier_prompt(*, source: NormalizedSource, section: SourceSec
     return f"""
 Build one compact source dossier from the complete source below. The dossier has a fixed output ceiling independent of
 source length: select the most decision-relevant findings, do not enumerate the document. Describe its actual method
-or institutional role. Treat recommendations as recommendations, not empirical effects. Evidence excerpts must be
-copied exactly and must use section_id {section.section_id}. Each excerpt must contain one or more complete,
-consecutive sentences and must stay inside one source paragraph. Use a separate anchor when another paragraph is
-needed. Keep each locator a brief source-location label, never a quotation, and return at most 10 practical implications.
+or institutional role. Treat recommendations as recommendations, not empirical effects. Every evidence anchor must
+copy section_id {section.section_id} plus a paragraph_id and consecutive first/last sentence IDs from the labels below.
+Never return excerpts. Use a separate anchor when another paragraph is needed. Keep each locator a brief
+source-location label, never a quotation, and return at most 10 practical implications.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}
@@ -57,8 +75,8 @@ EDITORIAL BRIEF:
 SOURCE:
 {json.dumps({"source_id": str(source.source_id), "title": source.title, "language": source.language, "metadata": source.metadata}, ensure_ascii=False, sort_keys=True)}
 
-COMPLETE SOURCE TEXT:
-{section.text}
+COMPLETE SOURCE TEXT WITH EVIDENCE COORDINATES:
+{_coordinate_text(section)}
 """.strip()
 
 
@@ -73,8 +91,8 @@ def reduced_source_dossier_prompt(
 Reduce the section digests into one compact source dossier. The output ceiling is the same as for a short source: a
 long source does not receive more representational weight merely because it has more pages or sections. Synthesize;
 do not concatenate. Preserve the strongest findings, counterevidence, qualifications, methods, and limits. Reuse only
-the supplied verbatim evidence anchors, without editing their excerpts or section_ids. Do not turn an association into
-causation during reduction.
+the supplied evidence coordinates. Return section_id, paragraph_id, first_sentence_id, last_sentence_id, and locator;
+never return excerpts. Do not alter a coordinate or turn an association into causation during reduction.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}

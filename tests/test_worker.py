@@ -41,7 +41,8 @@ def test_worker_exposes_both_approval_boundaries() -> None:
         ["resume-digest-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
     )
     assert resumed_v2.command == "resume-digest-v2"
-    assert resumed_v2.max_concurrency == 4
+    assert resumed_v2.max_concurrency == 8
+    assert resumed_v2.per_project_concurrency == 6
     proposed_v2 = parser.parse_args(
         ["propose-axis-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
     )

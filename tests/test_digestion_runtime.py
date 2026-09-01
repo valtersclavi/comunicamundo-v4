@@ -10,13 +10,14 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     CausalStatus,
     DigestionMode,
     DominanceAssessment,
-    EvidenceAnchor,
+    EvidenceReference,
     EvidenceMatrixProposal,
     EvidenceStrength,
     MethodProfile,
     SectionDigestProposal,
     SourceDossierProposal,
-    SourceFinding,
+    SourceFindingProposal,
+    SourceSection,
 )
 from comunicamundo_v4.hefesto.digestion_prompts import DIGESTION_SYSTEM_INSTRUCTION
 from comunicamundo_v4.hefesto.digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
@@ -47,16 +48,26 @@ def _source(text: str) -> NormalizedSource:
     return NormalizedSource(source_id=uuid4(), text=text, language="pt-BR", title="Estudo")
 
 
-def _finding(section_id: str, excerpt: str = "Evidência observada.") -> SourceFinding:
-    return SourceFinding(
+def _finding(section: SourceSection, *, locator: str = "trecho") -> SourceFindingProposal:
+    paragraph = section.paragraphs[0]
+    sentence = paragraph.sentences[0]
+    return SourceFindingProposal(
         finding="Foi observada uma associação.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
-        anchors=[EvidenceAnchor(section_id=section_id, locator="trecho", excerpt=excerpt)],
+        anchors=[
+            EvidenceReference(
+                section_id=section.section_id,
+                paragraph_id=paragraph.paragraph_id,
+                first_sentence_id=sentence.sentence_id,
+                last_sentence_id=sentence.sentence_id,
+                locator=locator,
+            )
+        ],
     )
 
 
-def _dossier_proposal(section_id: str, excerpt: str = "Evidência observada.") -> SourceDossierProposal:
+def _dossier_proposal(section: SourceSection, *, locator: str = "trecho") -> SourceDossierProposal:
     return SourceDossierProposal(
         executive_synthesis="Síntese delimitada da fonte.",
         method_profile=MethodProfile(
@@ -66,7 +77,7 @@ def _dossier_proposal(section_id: str, excerpt: str = "Evidência observada.") -
             measures_or_material="questionários",
             temporal_scope="um período",
         ),
-        findings=[_finding(section_id, excerpt)],
+        findings=[_finding(section, locator=locator)],
         limitations=["O desenho não identifica causalidade."],
     )
 
@@ -79,7 +90,7 @@ async def test_direct_dossier_is_an_immutable_budgeted_gateway_call() -> None:
     source_plan = plan.sources[0]
     factory = DigestionCallFactory(DigestionRuntimeConfig())
     call = factory.direct_dossier(plan=plan, source=source, source_plan=source_plan, brief=_brief())
-    gateway = FakeGateway(_dossier_proposal(source_plan.sections[0].section_id))
+    gateway = FakeGateway(_dossier_proposal(source_plan.sections[0]))
 
     dossier = await call.invoke(gateway)
 
@@ -87,26 +98,42 @@ async def test_direct_dossier_is_an_immutable_budgeted_gateway_call() -> None:
     assert dossier.digestion_mode is DigestionMode.DIRECT
     assert call.intent.prompt_sha256 == text_sha256(call.prompt)
     assert call.intent.system_instruction_sha256 == text_sha256(DIGESTION_SYSTEM_INSTRUCTION)
-    assert call.intent.budget.max_output_tokens == 8_000
+    assert call.intent.budget.max_output_tokens == 12_000
     assert gateway.calls[0][3] is SourceDossierProposal
 
 
 @pytest.mark.asyncio
-async def test_direct_dossier_fails_closed_on_invented_quote() -> None:
+async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
     source = _source("Evidência observada.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     factory = DigestionCallFactory(DigestionRuntimeConfig())
     call = factory.direct_dossier(plan=plan, source=source, source_plan=plan.sources[0], brief=_brief())
 
-    with pytest.raises(ValueError, match="absent"):
-        await call.invoke(FakeGateway(_dossier_proposal(plan.sources[0].sections[0].section_id, "Citação inventada.")))
+    section = plan.sources[0].sections[0]
+    proposal = _dossier_proposal(section)
+    invented = proposal.findings[0].anchors[0].model_copy(
+        update={"last_sentence_id": text_sha256("invented")}
+    )
+    proposal = proposal.model_copy(
+        update={
+            "findings": [
+                proposal.findings[0].model_copy(update={"anchors": [invented]})
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="consecutive sentences"):
+        await call.invoke(FakeGateway(proposal))
 
 
 @pytest.mark.asyncio
 async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> None:
     text = ("Evidência observada.\n\n" * 30).strip()
     source = _source(text)
-    planner = SourceDigestionPlanner(direct_source_tokens=10, target_section_tokens=30, max_section_tokens=40)
+    planner = SourceDigestionPlanner(
+        analyst_load_tokens=30,
+        max_analysts_per_source=4,
+        hard_section_tokens=100,
+    )
     plan = planner.plan(project_id=uuid4(), sources=[source])
     source_plan = plan.sources[0]
     factory = DigestionCallFactory(DigestionRuntimeConfig())
@@ -114,7 +141,7 @@ async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> N
     for section in source_plan.sections:
         proposal = SectionDigestProposal(
             synopsis="Resumo.",
-            findings=[_finding(section.section_id)],
+            findings=[_finding(section)],
         )
         call = factory.section_digest(
             plan=plan,
@@ -130,17 +157,15 @@ async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> N
         section_digests=digests,
         brief=_brief(),
     )
-    first_id = source_plan.sections[0].section_id
+    first_section = source_plan.sections[0]
 
-    dossier = await reduce_call.invoke(FakeGateway(_dossier_proposal(first_id)))
+    dossier = await reduce_call.invoke(FakeGateway(_dossier_proposal(first_section)))
     assert dossier.digestion_mode is DigestionMode.HIERARCHICAL
 
-    changed_locator = _dossier_proposal(first_id).model_copy(
+    changed_locator = _dossier_proposal(first_section).model_copy(
         update={
             "findings": [
-                _finding(first_id).model_copy(
-                    update={"anchors": [EvidenceAnchor(section_id=first_id, locator="inventado", excerpt="Evidência observada.")]}
-                )
+                _finding(first_section, locator="inventado")
             ]
         }
     )
@@ -156,7 +181,7 @@ async def test_matrix_call_preserves_source_order_and_produces_auditable_balance
     dossiers = []
     for source, source_plan in zip(sources, plan.sources, strict=True):
         call = factory.direct_dossier(plan=plan, source=source, source_plan=source_plan, brief=_brief())
-        dossiers.append(await call.invoke(FakeGateway(_dossier_proposal(source_plan.sections[0].section_id))))
+        dossiers.append(await call.invoke(FakeGateway(_dossier_proposal(source_plan.sections[0]))))
     proposal = EvidenceMatrixProposal(
         central_ideas=["Os efeitos dependem do contexto."],
         relations_and_tensions=["Associação não equivale a causalidade."],

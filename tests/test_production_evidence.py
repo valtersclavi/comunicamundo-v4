@@ -51,6 +51,9 @@ def _dossier(*, run_id, project_id, source_id, ordinal, raw_chars, findings):
                 anchors=[
                     EvidenceAnchor(
                         section_id=section,
+                        paragraph_id=f"{ordinal + 100:064x}",
+                        first_sentence_id=f"{index + 1000:064x}",
+                        last_sentence_id=f"{index + 1000:064x}",
                         locator=f"finding {index}",
                         excerpt=f"Evidence {ordinal}-{index}",
                     )

@@ -310,6 +310,7 @@ class LLMAttemptRecord(StrictModel):
     usage: LLMUsage | None = None
     provider_response_id: str | None = None
     provider_model_version: str | None = None
+    provider_finish_reason: str | None = None
     retryable: bool = False
     error_class: str | None = None
     error_message: str | None = None

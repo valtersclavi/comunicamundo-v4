@@ -33,8 +33,11 @@ def test_prompts_make_epistemic_and_balance_rules_explicit() -> None:
 
     assert "correlation" in DIGESTION_SYSTEM_INSTRUCTION.lower()
     assert "causation" in direct.lower()
-    assert "complete, consecutive sentences" in DIGESTION_SYSTEM_INSTRUCTION.lower()
-    assert "never cross the source paragraph" in DIGESTION_SYSTEM_INSTRUCTION.lower()
+    assert "consecutive range" in DIGESTION_SYSTEM_INSTRUCTION.lower()
+    assert "same paragraph" in DIGESTION_SYSTEM_INSTRUCTION.lower()
+    assert "never return excerpts" in direct.lower()
+    assert "[paragraph " in direct.lower()
+    assert "[sentence " in direct.lower()
     assert "fixed output ceiling" in direct.lower()
 
 
@@ -44,7 +47,16 @@ def test_matrix_prompt_uses_equal_ceiling_dossiers_and_never_requires_a_graph() 
         finding="An association was observed.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
-        anchors=[EvidenceAnchor(section_id=text_sha256("section"), locator="p. 1", excerpt="association")],
+        anchors=[
+            EvidenceAnchor(
+                section_id=text_sha256("section"),
+                paragraph_id=text_sha256("paragraph"),
+                first_sentence_id=text_sha256("sentence"),
+                last_sentence_id=text_sha256("sentence"),
+                locator="p. 1",
+                excerpt="association",
+            )
+        ],
     )
     dossier = SourceDossier(
         execution_run_id=run_id,
@@ -79,5 +91,4 @@ def test_matrix_prompt_uses_equal_ceiling_dossiers_and_never_requires_a_graph() 
     assert "single-source rules" in prompt
     assert "relations_and_tensions must contain at least one" in prompt
     assert "dominance_assessment.source_ids must be empty" in prompt
-    assert "graph" not in prompt
-
+    assert "knowledge graph" not in prompt

@@ -109,7 +109,12 @@ async def test_executor_bounds_one_hundred_projects_and_contains_failure() -> No
         for number in range(100)
     ]
     bucket = SmoothedTokenBucket(tokens_per_minute=1_200_000, burst_window_seconds=5)
-    executor = BoundedFairExecutor(bucket, max_concurrency=7, per_project_concurrency=1)
+    executor = BoundedFairExecutor(
+        bucket,
+        max_concurrency=7,
+        per_project_concurrency=1,
+        fail_fast=False,
+    )
 
     outcomes = await executor.run_all(work)
 
@@ -147,3 +152,31 @@ async def test_executor_rejects_oversized_unit_before_starting_any_work() -> Non
         await executor.run_all(work)
 
     assert started == []
+
+
+@pytest.mark.asyncio
+async def test_executor_fail_fast_does_not_start_pending_work() -> None:
+    project = uuid4()
+    started: list[str] = []
+
+    def operation(name: str, *, fail: bool = False):
+        async def run():
+            started.append(name)
+            if fail:
+                raise RuntimeError("terminal failure")
+            return name
+
+        return run
+
+    work = [
+        ScheduledWork("first", project, 1, operation("first", fail=True)),
+        ScheduledWork("second", project, 1, operation("second")),
+    ]
+    bucket = SmoothedTokenBucket(tokens_per_minute=120_000, burst_window_seconds=5)
+    executor = BoundedFairExecutor(bucket, max_concurrency=1)
+
+    outcomes = await executor.run_all(work)
+
+    assert started == ["first"]
+    assert len(outcomes) == 1
+    assert isinstance(outcomes[0].error, RuntimeError)

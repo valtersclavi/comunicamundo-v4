@@ -712,8 +712,8 @@ def _add_v2_capacity_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="verified Standard PayGo baseline TPM for this model; no guessed default",
     )
-    parser.add_argument("--max-concurrency", type=int, default=4)
-    parser.add_argument("--per-project-concurrency", type=int, default=4)
+    parser.add_argument("--max-concurrency", type=int, default=8)
+    parser.add_argument("--per-project-concurrency", type=int, default=6)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
