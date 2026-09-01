@@ -1,24 +1,34 @@
-name: inspect-failed-execution
+name: hefesto-v2-operator
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      request_uri:
+        description: "Canonical gs:// PlanningRequest URI"
+        required: true
+        type: string
+      tokens_per_minute:
+        description: "Internal admission-control ceiling"
+        required: true
+        default: "1000000"
+        type: string
 permissions:
   contents: read
   id-token: write
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
-  EXECUTION: hefesto-v4-rebuild-bgvht
-  REQUEST_URI: gs://comunicamundo-v4-hefesto-30524898837/requests/13101c35-723d-43fe-9b45-0082b49c0a76.json
+  JOB_NAME: hefesto-v4-rebuild
+  OPERATOR_REQUEST_URI: ${{ inputs.request_uri }}
+  HELPER_SERVICE: hefesto-v2-operator-state
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  CAPACITY_ARGS: --tokens-per-minute=${{ inputs.tokens_per_minute }},--max-concurrency=1,--per-project-concurrency=1
 
 jobs:
-  inspect:
-    if: ${{ contains(github.event.head_commit.message, '[inspect-execution]') }}
+  digest-to-axis:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 90
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -26,15 +36,233 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Describe failed execution only
+
+      - name: Resolve canonical Test A request and runtime state
         run: |
           set -euo pipefail
-          gcloud run jobs executions describe "${EXECUTION}" \
-            --project="${PROJECT_ID}" \
-            --region="${REGION}" \
-            --format='yaml(status)'
-      - name: Prove existing bucket read without exposing request
+          request_uri="${OPERATOR_REQUEST_URI}"
+          test -n "${request_uri}"
+          echo "OPERATOR_REQUEST_URI=${request_uri}" >> "${GITHUB_ENV}"
+
+          image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}"             --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          token="$(openssl rand -hex 32)"
+          echo "::add-mask::${token}"
+          cat > /tmp/state.py <<'PY'
+          import json
+          import os
+          from datetime import date, datetime
+          from decimal import Decimal
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from urllib.parse import parse_qs, urlparse
+
+          from google.cloud import firestore, storage
+
+          TOKEN = os.environ["STATE_TOKEN"]
+          REQUEST_URI = os.environ["REQUEST_URI"]
+
+          def clean(value):
+              if isinstance(value, (datetime, date)):
+                  return value.isoformat()
+              if isinstance(value, Decimal):
+                  return str(value)
+              if isinstance(value, dict):
+                  return {str(k): clean(v) for k, v in value.items()}
+              if isinstance(value, (list, tuple)):
+                  return [clean(v) for v in value]
+              return value
+
+          def request_data():
+              parsed = urlparse(REQUEST_URI)
+              raw = storage.Client().bucket(parsed.netloc).blob(parsed.path.lstrip("/")).download_as_bytes()
+              return json.loads(raw.decode("utf-8"))
+
+          def latest_state(project_id):
+              db = firestore.Client()
+              docs = list(db.collection("hefesto_execution_runs").where("project_id", "==", project_id).stream())
+              if not docs:
+                  docs = [
+                      snap for snap in db.collection("hefesto_execution_runs").stream()
+                      if str((snap.to_dict() or {}).get("project_id")) == project_id
+                  ]
+              if not docs:
+                  return {"error": "no execution run found", "project_id": project_id}
+              def key(snap):
+                  value = (snap.to_dict() or {}).get("updated_at")
+                  return value.timestamp() if hasattr(value, "timestamp") else 0
+              snap = max(docs, key=key)
+              return {"execution_run_id": snap.id, "run": clean(snap.to_dict() or {})}
+
+          def axis_state(execution_run_id):
+              db = firestore.Client()
+              snap = db.collection("hefesto_editorial_v2_runs").document(execution_run_id).get()
+              if not snap.exists:
+                  return {"error": "no editorial run found", "execution_run_id": execution_run_id}
+              run = snap.to_dict() or {}
+              pointer = ((run.get("artifacts") or {}).get("proposed_axis") or {})
+              uri = pointer.get("uri")
+              if not uri:
+                  return {"execution_run_id": execution_run_id, "run": clean(run), "axis": None}
+              parsed = urlparse(uri)
+              raw = storage.Client().bucket(parsed.netloc).blob(parsed.path.lstrip("/")).download_as_bytes()
+              return {
+                  "execution_run_id": execution_run_id,
+                  "run": clean(run),
+                  "axis": json.loads(raw.decode("utf-8")),
+              }
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  if self.headers.get("X-State-Token") != TOKEN:
+                      self.send_response(403)
+                      self.end_headers()
+                      return
+                  try:
+                      request = request_data()
+                      project_id = str(request["project_id"])
+                      parsed_path = urlparse(self.path)
+                      if parsed_path.path == "/project":
+                          result = {"project_id": project_id}
+                      elif parsed_path.path == "/axis":
+                          values = parse_qs(parsed_path.query).get("execution_run_id", [])
+                          if not values:
+                              raise ValueError("missing execution_run_id")
+                          result = axis_state(values[0])
+                      else:
+                          result = latest_state(project_id)
+                      code = 200
+                  except Exception as exc:
+                      result = {"error": type(exc).__name__, "message": str(exc)}
+                      code = 500
+                  body = json.dumps(result, ensure_ascii=False).encode()
+                  self.send_response(code)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+              def log_message(self, *args):
+                  return
+
+          ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("PORT", "8080"))), Handler).serve_forever()
+          PY
+          script_b64="$(base64 -w0 /tmp/state.py)"
+          gcloud run deploy "${HELPER_SERVICE}"             --project="${PROJECT_ID}" --region="${REGION}"             --image="${image}" --service-account="${RUNTIME_SA}"             --command=python             --args="^@^-c@import base64,os;exec(base64.b64decode(os.environ['STATE_SCRIPT_B64']))"             --cpu=1 --memory=512Mi --concurrency=1 --max-instances=1 --min-instances=0             --timeout=300 --allow-unauthenticated             --set-env-vars="REQUEST_URI=${request_uri},STATE_TOKEN=${token},STATE_SCRIPT_B64=${script_b64}"             --quiet
+          helper_url="$(gcloud run services describe "${HELPER_SERVICE}"             --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
+          project_json="$(curl -fsS --retry 8 --retry-all-errors --retry-delay 5             -H "X-State-Token: ${token}" "${helper_url}/project")"
+          project_id="$(jq -r '.project_id // empty' <<<"${project_json}")"
+          test -n "${project_id}"
+          echo "HELPER_URL=${helper_url}" >> "${GITHUB_ENV}"
+          echo "STATE_TOKEN=${token}" >> "${GITHUB_ENV}"
+          echo "OPERATOR_PROJECT_ID=${project_id}" >> "${GITHUB_ENV}"
+          echo "OPERATOR_PROJECT_ID=${project_id}"
+
+      - name: Operator — digest V2
         run: |
           set -euo pipefail
-          gcloud storage cat "${REQUEST_URI}" >/dev/null
-          echo 'BUCKET_READ: SUCCESS'
+          set +e
+          output="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args="digest-v2,--request=${OPERATOR_REQUEST_URI},${CAPACITY_ARGS}" --wait --format='value(metadata.name)' 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "${output}"
+          execution="$(printf '%s\n' "${output}" | grep -oE 'hefesto-v4-rebuild-[a-z0-9]+' | tail -1 || true)"
+          if [ -n "${execution}" ]; then
+            echo "OPERATOR_DIGEST_EXECUTION=${execution}" >> "${GITHUB_ENV}"
+          fi
+          if [ "${status}" -ne 0 ]; then
+            exit "${status}"
+          fi
+          test -n "${execution}"
+          echo "OPERATOR_DIGEST_EXECUTION=${execution}" >> "${GITHUB_ENV}"
+          echo "OPERATOR_DIGEST_EXECUTION=${execution}"
+          timing="$(gcloud run jobs executions describe "${execution}"             --project="${PROJECT_ID}" --region="${REGION}" --format=json             | jq -c '{created_at:(.metadata.creationTimestamp // .metadata.creationTime),started_at:.status.startTime,completed_at:.status.completionTime}')"
+          echo "OPERATOR_DIGEST_TIMING=${timing}" >> "${GITHUB_ENV}"
+          state_json="$(curl -fsS --retry 8 --retry-all-errors --retry-delay 5             -H "X-State-Token: ${STATE_TOKEN}" "${HELPER_URL}/state")"
+          execution_run_id="$(jq -r '.execution_run_id // empty' <<<"${state_json}")"
+          state="$(jq -r '.run.state // empty' <<<"${state_json}")"
+          test -n "${execution_run_id}"
+          test "${state}" = "understanding_ready"
+          echo "OPERATOR_EXECUTION_RUN_ID=${execution_run_id}" >> "${GITHUB_ENV}"
+          echo "OPERATOR_EXECUTION_RUN_ID=${execution_run_id}"
+
+      - name: Operator — propose Narrative Axis
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args="propose-axis-v2,--execution-run-id=${OPERATOR_EXECUTION_RUN_ID},${CAPACITY_ARGS}" --wait --format='value(metadata.name)' 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "${output}"
+          execution="$(printf '%s\n' "${output}" | grep -oE 'hefesto-v4-rebuild-[a-z0-9]+' | tail -1 || true)"
+          if [ -n "${execution}" ]; then
+            echo "OPERATOR_AXIS_EXECUTION=${execution}" >> "${GITHUB_ENV}"
+          fi
+          if [ "${status}" -ne 0 ]; then
+            exit "${status}"
+          fi
+          test -n "${execution}"
+          echo "OPERATOR_AXIS_EXECUTION=${execution}" >> "${GITHUB_ENV}"
+          echo "OPERATOR_AXIS_EXECUTION=${execution}"
+          timing="$(gcloud run jobs executions describe "${execution}"             --project="${PROJECT_ID}" --region="${REGION}" --format=json             | jq -c '{created_at:(.metadata.creationTimestamp // .metadata.creationTime),started_at:.status.startTime,completed_at:.status.completionTime}')"
+          echo "OPERATOR_AXIS_TIMING=${timing}" >> "${GITHUB_ENV}"
+          curl -fsS --retry 8 --retry-all-errors --retry-delay 5             -H "X-State-Token: ${STATE_TOKEN}"             "${HELPER_URL}/axis?execution_run_id=${OPERATOR_EXECUTION_RUN_ID}"             | tee /tmp/operator-axis.json
+          test "$(jq -r '.run.state // empty' /tmp/operator-axis.json)" = "axis_proposed"
+          jq -r '.axis.narrative_axis.statement' /tmp/operator-axis.json
+
+      - name: Record result through Narrative Axis
+        run: |
+          jq -n \
+            --arg project_id "${OPERATOR_PROJECT_ID}" \
+            --arg execution_run_id "${OPERATOR_EXECUTION_RUN_ID}" \
+            --arg digest_execution "${OPERATOR_DIGEST_EXECUTION}" \
+            --arg axis_execution "${OPERATOR_AXIS_EXECUTION}" \
+            --argjson digest_timing "${OPERATOR_DIGEST_TIMING}" \
+            --argjson axis_timing "${OPERATOR_AXIS_TIMING}" \
+            --slurpfile axis /tmp/operator-axis.json \
+            '{project_id:$project_id,execution_run_id:$execution_run_id,terminal_state:"axis_proposed",cloud_run:{digest:$digest_execution,axis:$axis_execution},timing:{digest:$digest_timing,axis:$axis_timing},narrative_axis:$axis[0].axis.narrative_axis,test_b:"not_started"}' \
+            | tee /tmp/operator-result.json
+
+      - name: Collect durable failure state
+        if: failure()
+        run: |
+          if [ -n "${OPERATOR_EXECUTION_RUN_ID:-}" ]; then
+            curl -sS --retry 4 --retry-all-errors --retry-delay 3 \
+              -H "X-State-Token: ${STATE_TOKEN}" \
+              "${HELPER_URL}/axis?execution_run_id=${OPERATOR_EXECUTION_RUN_ID}" \
+              | tee /tmp/operator-failure.json || true
+          else
+            curl -sS --retry 4 --retry-all-errors --retry-delay 3 \
+              -H "X-State-Token: ${STATE_TOKEN}" "${HELPER_URL}/state" \
+              | tee /tmp/operator-failure.json || true
+          fi
+
+      - name: Operator summary
+        if: always()
+        run: |
+          {
+            echo "# Hefesto V2 — digestão até Eixo Narrativo"
+            echo "- Request: \`${OPERATOR_REQUEST_URI}\`"
+            echo "- Digest execution: \`${OPERATOR_DIGEST_EXECUTION:-not-completed}\`"
+            echo "- Axis execution: \`${OPERATOR_AXIS_EXECUTION:-not-started}\`"
+            if [ -f /tmp/operator-result.json ]; then
+              echo "- State: \`axis_proposed\`"
+              echo "- Execution run: \`$(jq -r '.execution_run_id' /tmp/operator-result.json)\`"
+              echo "- Axis: $(jq -r '.narrative_axis.statement' /tmp/operator-result.json)"
+            elif [ -f /tmp/operator-failure.json ]; then
+              echo "- State: \`$(jq -r '.run.state // "unknown"' /tmp/operator-failure.json)\`"
+              echo "- Error: $(jq -r '.run.error_message // .message // "unavailable"' /tmp/operator-failure.json)"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hefesto-v2-operator-result
+          path: |
+            /tmp/operator-result.json
+            /tmp/operator-axis.json
+            /tmp/operator-failure.json
+          if-no-files-found: warn
+
+      - name: Delete temporary operator state reader
+        if: always()
+        run: |
+          gcloud run services delete "${HELPER_SERVICE}"             --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
