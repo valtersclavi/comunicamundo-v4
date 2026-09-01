@@ -162,7 +162,7 @@ def validate_dossier_evidence(dossier: SourceDossier, sections: Sequence[SourceS
             ]
             if not any(excerpt in paragraph for paragraph in paragraphs):
                 raise ValueError(
-                    "dossier evidence must be a contiguous excerpt contained in one source paragraph"
+                    "dossier evidence is absent from any one source paragraph"
                 )
 
 
