@@ -24,4 +24,16 @@ The temporary read-only state service runs with the canonical runtime identity a
 
 ## Evidence quotation contract
 
-The model cites immutable section, paragraph, and first/last sentence IDs; it never writes the excerpt. Hefesto validates that the IDs select complete, consecutive sentences inside one normalized paragraph and reconstructs the exact excerpt in code. There is no quotation-length ceiling. A second paragraph requires another anchor.\n\n## Semantic planning and capacity\n\nParagraphs are indivisible source-native units. Headings define preferred message blocks; unheaded prose uses paragraph boundaries. Source size controls the number of pooled analysts (24,000 estimated source tokens per analyst, capped at 8), but never creates a cut inside a paragraph. The separate 200,000-token hard section ceiling is provider admission safety only and can add a boundary only between complete paragraphs.\n\nThe default execution pool is 8 globally and 6 per project. The token bucket remains the final admission control, so configured concurrency is a ceiling rather than a promise that every slot starts at once. Source dossiers have a 12,000-token output budget; incomplete provider responses, including `MAX_TOKENS` and invalid structured JSON, are recorded as paid terminal failures and are never retried silently.
+The model cites immutable section, paragraph, and first/last sentence IDs; it never writes the excerpt or locator. Hefesto validates that the IDs select complete, consecutive sentences inside one normalized paragraph, then reconstructs the exact excerpt and its human-readable locator in code. There is no quotation-length ceiling. A second paragraph requires another anchor.
+
+## Semantic planning and capacity
+
+Paragraphs are indivisible source-native units. Headings define preferred message blocks; unheaded prose uses paragraph boundaries. Source size controls the number of pooled analysts (24,000 estimated source tokens per analyst, capped at 8), but never creates a cut inside a paragraph. The separate 200,000-token hard section ceiling is provider admission safety only and can add a boundary only between complete paragraphs.
+
+The default execution pool is 8 globally and 6 per project. The token bucket remains the final admission control, so configured concurrency is a ceiling rather than a promise that every slot starts at once. Source dossiers have a 12,000-token output budget; incomplete provider responses, including `MAX_TOKENS` and invalid structured JSON, are recorded as paid terminal failures and are never retried silently.
+
+## Generated-content guards
+
+Model-generated digestion, Narrative Axis, Editorial Project, and Hefesto Tip contracts do not impose editorial character or item-count ceilings. Distinct findings, methods, uncertainties, subjects, tips, and enrichment opportunities are preserved according to meaning rather than fitted to arbitrary counts. Required identities, evidence coordinates, enumerations, cross-artifact consistency, and non-empty fields remain validated.
+
+Per-call output-token budgets remain as high physical circuit breakers against runaway generation. They are not editorial targets, minimums, quotas, or instructions to fill a particular size. A provider response that actually exhausts one of those budgets fails visibly and is never silently truncated or retried.

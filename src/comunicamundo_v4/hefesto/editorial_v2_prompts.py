@@ -22,8 +22,8 @@ def axis_proposal_prompt(
     return f"""
 Propose the Narrative Axis before any Editorial Project exists.
 
-A Narrative Axis is one or two sentences defining the intellectual/editorial direction
-of the piece. It is not an outline, generic topic statement, invented opinion, or source
+A Narrative Axis defines the intellectual/editorial direction of the piece. It is not
+an outline, generic topic statement, invented opinion, or source
 summary. It may select a proposition, tension, lens, question, or hypothesis. Strength
 must come from selection and consequence, never from upgrading association into cause,
 limited evidence into certainty, or one source into consensus.
@@ -41,8 +41,8 @@ Persisted editorial understanding V2:
 Persisted cross-source evidence matrix:
 {matrix.model_dump_json(indent=2)}
 
-Return only the structured NarrativeAxisProposal in {brief.output_language}. The
-statement must contain one or two sentences and no Editorial Project.
+Return only the structured NarrativeAxisProposal in {brief.output_language}, with no
+Editorial Project.
 """.strip()
 
 
@@ -70,9 +70,9 @@ Cross-source evidence matrix:
 {matrix.model_dump_json(indent=2)}
 
 If every claim is warranted, set revision_required=false and reproduce the candidate
-unchanged as final_statement. Otherwise identify compact unsupported_upgrades and revise
-only those upgrades while preserving the candidate's editorial choice and force. Return
-one or two sentences in the candidate's language as a NarrativeAxisEvidenceReview.
+unchanged as final_statement. Otherwise identify every material unsupported upgrade and
+revise only those upgrades while preserving the candidate's editorial choice and force.
+Return a NarrativeAxisEvidenceReview in the candidate's language.
 """.strip()
 
 
@@ -84,7 +84,7 @@ def editorial_project_prompt(
     matrix: EvidenceMatrix,
 ) -> str:
     return f"""
-Build a compact Editorial Project governed by this APPROVED Narrative Axis:
+Build an Editorial Project governed by this APPROVED Narrative Axis:
 
 {axis}
 
@@ -97,8 +97,9 @@ cross-source synthesis, causality boundaries, meaningful divergences, and method
 limits; do not simply concatenate the source dossiers.
 
 Produce:
-1. a working title and concise editorial promise;
-2. core_subjects supported by the supplied sources, each with a compact development;
+1. a working title and editorial promise;
+2. core_subjects supported by the supplied sources, each developed enough to make its
+   editorial role and evidence boundary clear;
 3. llm_subjects: useful optional subjects coming mainly from model knowledge rather than
    the supplied sources. These are Dicas do Hefesto and are NOT part of the Project;
 4. enrichment_opportunities: places where additional sources would materially improve

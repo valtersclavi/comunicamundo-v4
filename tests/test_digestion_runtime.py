@@ -48,7 +48,7 @@ def _source(text: str) -> NormalizedSource:
     return NormalizedSource(source_id=uuid4(), text=text, language="pt-BR", title="Estudo")
 
 
-def _finding(section: SourceSection, *, locator: str = "trecho") -> SourceFindingProposal:
+def _finding(section: SourceSection) -> SourceFindingProposal:
     paragraph = section.paragraphs[0]
     sentence = paragraph.sentences[0]
     return SourceFindingProposal(
@@ -61,13 +61,12 @@ def _finding(section: SourceSection, *, locator: str = "trecho") -> SourceFindin
                 paragraph_id=paragraph.paragraph_id,
                 first_sentence_id=sentence.sentence_id,
                 last_sentence_id=sentence.sentence_id,
-                locator=locator,
             )
         ],
     )
 
 
-def _dossier_proposal(section: SourceSection, *, locator: str = "trecho") -> SourceDossierProposal:
+def _dossier_proposal(section: SourceSection) -> SourceDossierProposal:
     return SourceDossierProposal(
         executive_synthesis="Síntese delimitada da fonte.",
         method_profile=MethodProfile(
@@ -77,7 +76,7 @@ def _dossier_proposal(section: SourceSection, *, locator: str = "trecho") -> Sou
             measures_or_material="questionários",
             temporal_scope="um período",
         ),
-        findings=[_finding(section, locator=locator)],
+        findings=[_finding(section)],
         limitations=["O desenho não identifica causalidade."],
     )
 
@@ -100,6 +99,24 @@ async def test_direct_dossier_is_an_immutable_budgeted_gateway_call() -> None:
     assert call.intent.system_instruction_sha256 == text_sha256(DIGESTION_SYSTEM_INSTRUCTION)
     assert call.intent.budget.max_output_tokens == 12_000
     assert gateway.calls[0][3] is SourceDossierProposal
+    assert dossier.findings[0].anchors[0].locator == "section 1; paragraph 1; sentences 1"
+
+
+def test_intermediate_digest_has_no_editorial_quantity_or_prose_caps() -> None:
+    source = _source("Evidência observada.")
+    section = SourceDigestionPlanner().plan_source(source, source_ordinal=0).sections[0]
+    proposal = SectionDigestProposal(
+        synopsis="S" * 10_000,
+        findings=[_finding(section) for _ in range(30)],
+        methods=[f"Método distinto {index}: " + ("detalhe " * 100) for index in range(25)],
+        limitations=[f"Limitação {index}" for index in range(20)],
+        uncertainties=[f"Incerteza {index}" for index in range(20)],
+        distinctive_contributions=[f"Contribuição {index}" for index in range(20)],
+    )
+
+    assert len(proposal.methods) == 25
+    assert len(proposal.uncertainties) == 20
+    assert len(proposal.findings) == 30
 
 
 @pytest.mark.asyncio
@@ -162,15 +179,23 @@ async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> N
     dossier = await reduce_call.invoke(FakeGateway(_dossier_proposal(first_section)))
     assert dossier.digestion_mode is DigestionMode.HIERARCHICAL
 
-    changed_locator = _dossier_proposal(first_section).model_copy(
+    unused_paragraph = first_section.paragraphs[1]
+    unused_sentence = unused_paragraph.sentences[0]
+    reference = EvidenceReference(
+        section_id=first_section.section_id,
+        paragraph_id=unused_paragraph.paragraph_id,
+        first_sentence_id=unused_sentence.sentence_id,
+        last_sentence_id=unused_sentence.sentence_id,
+    )
+    changed_reference = _dossier_proposal(first_section).model_copy(
         update={
             "findings": [
-                _finding(first_section, locator="inventado")
+                _finding(first_section).model_copy(update={"anchors": [reference]})
             ]
         }
     )
     with pytest.raises(ValueError, match="absent from its section digests"):
-        await reduce_call.invoke(FakeGateway(changed_locator))
+        await reduce_call.invoke(FakeGateway(changed_reference))
 
 
 @pytest.mark.asyncio
@@ -208,4 +233,3 @@ def test_runtime_rejects_a_prompt_that_exceeds_its_declared_input_budget() -> No
 
     with pytest.raises(ValueError, match="estimated input"):
         factory.direct_dossier(plan=plan, source=source, source_plan=plan.sources[0], brief=_brief())
-

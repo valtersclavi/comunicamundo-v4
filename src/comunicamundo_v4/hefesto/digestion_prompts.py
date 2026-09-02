@@ -50,7 +50,7 @@ Create a bounded digest of this one section. Record only findings actually suppo
 administrative section may legitimately have no findings. For every anchor, copy the section_id, paragraph_id,
 first_sentence_id, and last_sentence_id from the labels below. A range may contain several consecutive sentences but
 must stay within one paragraph. Do not return excerpts. Do not infer a whole-source method or conclusion from this
-partial section. Prefer a smaller set of meaningful findings over redundant detail.
+partial section. Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
 OUTPUT LANGUAGE: {output_language}
 SOURCE AND SECTION: {json.dumps(descriptor, ensure_ascii=False, sort_keys=True)}
@@ -62,12 +62,12 @@ SECTION TEXT WITH EVIDENCE COORDINATES:
 
 def direct_source_dossier_prompt(*, source: NormalizedSource, section: SourceSection, brief: EditorialBrief) -> str:
     return f"""
-Build one compact source dossier from the complete source below. The dossier has a fixed output ceiling independent of
-source length: select the most decision-relevant findings, do not enumerate the document. Describe its actual method
-or institutional role. Treat recommendations as recommendations, not empirical effects. Every evidence anchor must
+Build one source dossier from the complete source below. Preserve every substantively distinct finding, qualification,
+methodological fact, limitation, and uncertainty; consolidate only genuinely redundant wording. Describe the source's
+actual method or institutional role. Treat recommendations as recommendations, not empirical effects. Every evidence anchor must
 copy section_id {section.section_id} plus a paragraph_id and consecutive first/last sentence IDs from the labels below.
-Never return excerpts. Use a separate anchor when another paragraph is needed. Keep each locator a brief
-source-location label, never a quotation, and return at most 10 practical implications.
+Never return excerpts or locators; Hefesto reconstructs both. Use a separate anchor when another paragraph is needed.
+Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}
@@ -88,11 +88,11 @@ def reduced_source_dossier_prompt(
 ) -> str:
     serialized = [item.model_dump(mode="json", exclude={"created_at"}) for item in section_digests]
     return f"""
-Reduce the section digests into one compact source dossier. The output ceiling is the same as for a short source: a
-long source does not receive more representational weight merely because it has more pages or sections. Synthesize;
-do not concatenate. Preserve the strongest findings, counterevidence, qualifications, methods, and limits. Reuse only
-the supplied evidence coordinates. Return section_id, paragraph_id, first_sentence_id, last_sentence_id, and locator;
-never return excerpts. Do not alter a coordinate or turn an association into causation during reduction.
+Reduce the section digests into one source dossier. A long source does not receive more representational weight merely
+because it has more pages or sections. Synthesize rather than concatenate, but preserve every substantively distinct
+finding, counterevidence item, qualification, method, limitation, and uncertainty. Reuse only
+the supplied evidence coordinates. Return section_id, paragraph_id, first_sentence_id, and last_sentence_id; never
+return excerpts or locators. Do not alter a coordinate or turn an association into causation during reduction.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}

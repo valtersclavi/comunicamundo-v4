@@ -18,7 +18,7 @@ class HefestoTipTiming(_StrictModel):
 
 
 class HefestoTipTimingResult(_StrictModel):
-    timings: list[HefestoTipTiming] = Field(default_factory=list, max_length=12)
+    timings: list[HefestoTipTiming] = Field(default_factory=list)
 
 
 class HefestoTipIncorporationDecision(_StrictModel):

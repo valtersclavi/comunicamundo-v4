@@ -37,19 +37,19 @@ class NarrativeAxisStatus(StrEnum):
 
 
 class NarrativeAxisProposal(StrictModel):
-    statement: str = Field(min_length=1, max_length=800)
+    statement: str = Field(min_length=1)
 
 
 class NarrativeAxisEvidenceReview(StrictModel):
-    candidate_statement: str = Field(min_length=1, max_length=800)
+    candidate_statement: str = Field(min_length=1)
     revision_required: bool
-    unsupported_upgrades: list[str] = Field(default_factory=list, max_length=8)
-    final_statement: str = Field(min_length=1, max_length=800)
+    unsupported_upgrades: list[str] = Field(default_factory=list)
+    final_statement: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def _inspectable_decision(self) -> "NarrativeAxisEvidenceReview":
         if self.revision_required and not [item for item in self.unsupported_upgrades if item.strip()]:
-            raise ValueError("revision requires compact unsupported-upgrade reasons")
+            raise ValueError("revision requires unsupported-upgrade reasons")
         return self
 
 
@@ -59,7 +59,7 @@ class NarrativeAxis(StrictModel):
     narrative_axis_id: UUID = Field(default_factory=uuid4)
     project_id: UUID
     parent_axis_id: UUID | None = None
-    statement: str = Field(min_length=1, max_length=800)
+    statement: str = Field(min_length=1)
     status: NarrativeAxisStatus = NarrativeAxisStatus.PROPOSED
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     approved_at: datetime | None = None
@@ -87,9 +87,9 @@ class EditorialSubjectProposal(StrictModel):
 class EditorialProjectProposal(StrictModel):
     working_title: str = Field(min_length=1)
     editorial_promise: str = Field(min_length=1)
-    core_subjects: list[EditorialSubjectProposal] = Field(min_length=1, max_length=20)
-    llm_subjects: list[str] = Field(default_factory=list, max_length=12)
-    enrichment_opportunities: list[str] = Field(default_factory=list, max_length=12)
+    core_subjects: list[EditorialSubjectProposal] = Field(min_length=1)
+    llm_subjects: list[str] = Field(default_factory=list)
+    enrichment_opportunities: list[str] = Field(default_factory=list)
 
 
 class EditorialSubject(StrictModel):
@@ -111,13 +111,13 @@ class EditorialProject(StrictModel):
     project_id: UUID
     parent_project_id: UUID | None = None
     narrative_axis_id: UUID
-    narrative_axis: str = Field(min_length=1, max_length=800)
+    narrative_axis: str = Field(min_length=1)
     brief: EditorialBrief
     working_title: str = Field(min_length=1)
     editorial_promise: str = Field(min_length=1)
-    core_subjects: list[EditorialSubject] = Field(min_length=1, max_length=20)
-    llm_subjects: list[str] = Field(default_factory=list, max_length=12)
-    enrichment_opportunities: list[str] = Field(default_factory=list, max_length=12)
+    core_subjects: list[EditorialSubject] = Field(min_length=1)
+    llm_subjects: list[str] = Field(default_factory=list)
+    enrichment_opportunities: list[str] = Field(default_factory=list)
     status: EditorialProjectStatus = EditorialProjectStatus.PROPOSED
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     approved_at: datetime | None = None

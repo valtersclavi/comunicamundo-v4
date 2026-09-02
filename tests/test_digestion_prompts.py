@@ -38,7 +38,8 @@ def test_prompts_make_epistemic_and_balance_rules_explicit() -> None:
     assert "never return excerpts" in direct.lower()
     assert "[paragraph " in direct.lower()
     assert "[sentence " in direct.lower()
-    assert "fixed output ceiling" in direct.lower()
+    assert "preserve every substantively distinct" in direct.lower()
+    assert "never return excerpts or locators" in direct.lower()
 
 
 def test_matrix_prompt_uses_equal_ceiling_dossiers_and_never_requires_a_graph() -> None:

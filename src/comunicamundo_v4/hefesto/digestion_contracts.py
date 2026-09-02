@@ -16,13 +16,13 @@ from .contracts import StrictModel
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
-CompactText = Annotated[str, Field(min_length=1, max_length=1200)]
-ShortText = Annotated[str, Field(min_length=1, max_length=600)]
+CompactText = Annotated[str, Field(min_length=1)]
+ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v3"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v2"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v2"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v1"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v4"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v3"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v3"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v2"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -272,55 +272,55 @@ class EvidenceReference(StrictModel):
     paragraph_id: Sha256
     first_sentence_id: Sha256
     last_sentence_id: Sha256
-    locator: str = Field(min_length=1, max_length=300)
 
 
 class EvidenceAnchor(EvidenceReference):
     # Evidence is bounded semantically by its source paragraph, not by an
     # arbitrary character count. Long academic sentences must remain whole.
+    locator: str = Field(min_length=1)
     excerpt: str = Field(min_length=1)
 
 
 class SourceFinding(StrictModel):
-    finding: str = Field(min_length=1, max_length=1200)
+    finding: str = Field(min_length=1)
     causal_status: CausalStatus
     evidence_strength: EvidenceStrength
-    anchors: list[EvidenceAnchor] = Field(min_length=1, max_length=3)
-    qualifications: list[ShortText] = Field(default_factory=list, max_length=4)
+    anchors: list[EvidenceAnchor] = Field(min_length=1)
+    qualifications: list[ShortText] = Field(default_factory=list)
 
 
 class SourceFindingProposal(StrictModel):
-    finding: str = Field(min_length=1, max_length=1200)
+    finding: str = Field(min_length=1)
     causal_status: CausalStatus
     evidence_strength: EvidenceStrength
-    anchors: list[EvidenceReference] = Field(min_length=1, max_length=3)
-    qualifications: list[ShortText] = Field(default_factory=list, max_length=4)
+    anchors: list[EvidenceReference] = Field(min_length=1)
+    qualifications: list[ShortText] = Field(default_factory=list)
 
 
 class MethodProfile(StrictModel):
-    source_kind: str = Field(min_length=1, max_length=200)
-    design: str = Field(min_length=1, max_length=500)
-    population_or_scope: str = Field(min_length=1, max_length=1000)
-    measures_or_material: str = Field(min_length=1, max_length=1000)
-    temporal_scope: str = Field(min_length=1, max_length=500)
+    source_kind: str = Field(min_length=1)
+    design: str = Field(min_length=1)
+    population_or_scope: str = Field(min_length=1)
+    measures_or_material: str = Field(min_length=1)
+    temporal_scope: str = Field(min_length=1)
 
 
 class SectionDigestProposal(StrictModel):
-    synopsis: str = Field(min_length=1, max_length=2500)
-    findings: list[SourceFindingProposal] = Field(default_factory=list, max_length=8)
-    methods: list[CompactText] = Field(default_factory=list, max_length=4)
-    limitations: list[CompactText] = Field(default_factory=list, max_length=6)
-    uncertainties: list[CompactText] = Field(default_factory=list, max_length=6)
-    distinctive_contributions: list[CompactText] = Field(default_factory=list, max_length=6)
+    synopsis: str = Field(min_length=1)
+    findings: list[SourceFindingProposal] = Field(default_factory=list)
+    methods: list[CompactText] = Field(default_factory=list)
+    limitations: list[CompactText] = Field(default_factory=list)
+    uncertainties: list[CompactText] = Field(default_factory=list)
+    distinctive_contributions: list[CompactText] = Field(default_factory=list)
 
 
 class SectionDigest(StrictModel):
-    synopsis: str = Field(min_length=1, max_length=2500)
-    findings: list[SourceFinding] = Field(default_factory=list, max_length=8)
-    methods: list[CompactText] = Field(default_factory=list, max_length=4)
-    limitations: list[CompactText] = Field(default_factory=list, max_length=6)
-    uncertainties: list[CompactText] = Field(default_factory=list, max_length=6)
-    distinctive_contributions: list[CompactText] = Field(default_factory=list, max_length=6)
+    synopsis: str = Field(min_length=1)
+    findings: list[SourceFinding] = Field(default_factory=list)
+    methods: list[CompactText] = Field(default_factory=list)
+    limitations: list[CompactText] = Field(default_factory=list)
+    uncertainties: list[CompactText] = Field(default_factory=list)
+    distinctive_contributions: list[CompactText] = Field(default_factory=list)
     schema_version: int = 1
     source_id: UUID
     section_id: Sha256
@@ -342,27 +342,27 @@ class SectionDigest(StrictModel):
 
 
 class SourceDossierProposal(StrictModel):
-    executive_synthesis: str = Field(min_length=1, max_length=6000)
+    executive_synthesis: str = Field(min_length=1)
     method_profile: MethodProfile
-    findings: list[SourceFindingProposal] = Field(default_factory=list, max_length=12)
-    limitations: list[CompactText] = Field(default_factory=list, max_length=10)
-    uncertainties_and_disputes: list[CompactText] = Field(default_factory=list, max_length=10)
-    boundary_conditions: list[CompactText] = Field(default_factory=list, max_length=10)
-    practical_implications: list[CompactText] = Field(default_factory=list, max_length=10)
-    distinctive_contributions: list[CompactText] = Field(default_factory=list, max_length=10)
-    coverage_gaps: list[CompactText] = Field(default_factory=list, max_length=8)
+    findings: list[SourceFindingProposal] = Field(default_factory=list)
+    limitations: list[CompactText] = Field(default_factory=list)
+    uncertainties_and_disputes: list[CompactText] = Field(default_factory=list)
+    boundary_conditions: list[CompactText] = Field(default_factory=list)
+    practical_implications: list[CompactText] = Field(default_factory=list)
+    distinctive_contributions: list[CompactText] = Field(default_factory=list)
+    coverage_gaps: list[CompactText] = Field(default_factory=list)
 
 
 class SourceDossier(StrictModel):
-    executive_synthesis: str = Field(min_length=1, max_length=6000)
+    executive_synthesis: str = Field(min_length=1)
     method_profile: MethodProfile
-    findings: list[SourceFinding] = Field(default_factory=list, max_length=12)
-    limitations: list[CompactText] = Field(default_factory=list, max_length=10)
-    uncertainties_and_disputes: list[CompactText] = Field(default_factory=list, max_length=10)
-    boundary_conditions: list[CompactText] = Field(default_factory=list, max_length=10)
-    practical_implications: list[CompactText] = Field(default_factory=list, max_length=10)
-    distinctive_contributions: list[CompactText] = Field(default_factory=list, max_length=10)
-    coverage_gaps: list[CompactText] = Field(default_factory=list, max_length=8)
+    findings: list[SourceFinding] = Field(default_factory=list)
+    limitations: list[CompactText] = Field(default_factory=list)
+    uncertainties_and_disputes: list[CompactText] = Field(default_factory=list)
+    boundary_conditions: list[CompactText] = Field(default_factory=list)
+    practical_implications: list[CompactText] = Field(default_factory=list)
+    distinctive_contributions: list[CompactText] = Field(default_factory=list)
+    coverage_gaps: list[CompactText] = Field(default_factory=list)
     schema_version: int = 1
     dossier_id: UUID = Field(default_factory=uuid4)
     execution_run_id: UUID
@@ -397,9 +397,9 @@ class SourceDossier(StrictModel):
 
 
 class CrossSourceAgreement(StrictModel):
-    statement: str = Field(min_length=1, max_length=1800)
+    statement: str = Field(min_length=1)
     source_ids: list[UUID] = Field(min_length=2)
-    qualification: str = Field(min_length=1, max_length=1200)
+    qualification: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def _multiple_sources(self) -> "CrossSourceAgreement":
@@ -410,37 +410,37 @@ class CrossSourceAgreement(StrictModel):
 
 class SourcePosition(StrictModel):
     source_ids: list[UUID] = Field(min_length=1)
-    position: str = Field(min_length=1, max_length=1500)
+    position: str = Field(min_length=1)
 
 
 class CrossSourceDivergence(StrictModel):
-    question_or_tension: str = Field(min_length=1, max_length=1500)
-    positions: list[SourcePosition] = Field(min_length=2, max_length=8)
-    reconciliation: str = Field(min_length=1, max_length=1600)
+    question_or_tension: str = Field(min_length=1)
+    positions: list[SourcePosition] = Field(min_length=2)
+    reconciliation: str = Field(min_length=1)
 
 
 class UniqueContribution(StrictModel):
     source_id: UUID
-    ideas: list[CompactText] = Field(min_length=1, max_length=8)
+    ideas: list[CompactText] = Field(min_length=1)
 
 
 class CausalityAssessment(StrictModel):
-    claim: str = Field(min_length=1, max_length=1800)
+    claim: str = Field(min_length=1)
     source_ids: list[UUID] = Field(min_length=1)
     causal_status: CausalStatus
-    explanation: str = Field(min_length=1, max_length=1600)
+    explanation: str = Field(min_length=1)
 
 
 class MethodologicalLimit(StrictModel):
-    limitation: str = Field(min_length=1, max_length=1600)
+    limitation: str = Field(min_length=1)
     source_ids: list[UUID] = Field(min_length=1)
-    consequence: str = Field(min_length=1, max_length=1200)
+    consequence: str = Field(min_length=1)
 
 
 class DominanceAssessment(StrictModel):
     long_source_dominance_detected: bool
-    source_ids: list[UUID] = Field(default_factory=list, max_length=50)
-    explanation: str = Field(min_length=1, max_length=1800)
+    source_ids: list[UUID] = Field(default_factory=list)
+    explanation: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def _named_when_detected(self) -> "DominanceAssessment":
@@ -460,18 +460,18 @@ class SourceBalanceMetric(StrictModel):
 
 
 class EvidenceMatrixProposal(StrictModel):
-    central_ideas: list[CompactText] = Field(min_length=1, max_length=20)
-    relations_and_tensions: list[CompactText] = Field(min_length=1, max_length=20)
-    nuances: list[CompactText] = Field(default_factory=list, max_length=16)
-    source_limits: list[CompactText] = Field(default_factory=list, max_length=16)
-    editorial_opportunities: list[CompactText] = Field(default_factory=list, max_length=16)
-    agreements: list[CrossSourceAgreement] = Field(default_factory=list, max_length=16)
-    divergences: list[CrossSourceDivergence] = Field(default_factory=list, max_length=16)
-    unique_contributions: list[UniqueContribution] = Field(default_factory=list, max_length=20)
-    causality_assessments: list[CausalityAssessment] = Field(default_factory=list, max_length=20)
-    methodological_limits: list[MethodologicalLimit] = Field(default_factory=list, max_length=20)
+    central_ideas: list[CompactText] = Field(min_length=1)
+    relations_and_tensions: list[CompactText] = Field(min_length=1)
+    nuances: list[CompactText] = Field(default_factory=list)
+    source_limits: list[CompactText] = Field(default_factory=list)
+    editorial_opportunities: list[CompactText] = Field(default_factory=list)
+    agreements: list[CrossSourceAgreement] = Field(default_factory=list)
+    divergences: list[CrossSourceDivergence] = Field(default_factory=list)
+    unique_contributions: list[UniqueContribution] = Field(default_factory=list)
+    causality_assessments: list[CausalityAssessment] = Field(default_factory=list)
+    methodological_limits: list[MethodologicalLimit] = Field(default_factory=list)
     dominance_assessment: DominanceAssessment
-    integrated_synthesis: str = Field(min_length=1, max_length=12000)
+    integrated_synthesis: str = Field(min_length=1)
 
 
 class EvidenceMatrix(EvidenceMatrixProposal):
@@ -531,12 +531,12 @@ class EditorialUnderstandingV2(StrictModel):
     evidence_matrix_id: UUID
     evidence_matrix_sha256: Sha256
     contract_version: str = Field(default=EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION, min_length=1)
-    central_ideas: list[str] = Field(min_length=1, max_length=20)
-    relations_and_tensions: list[str] = Field(min_length=1, max_length=20)
-    nuances: list[str] = Field(default_factory=list, max_length=16)
-    source_limits: list[str] = Field(default_factory=list, max_length=16)
-    editorial_opportunities: list[str] = Field(default_factory=list, max_length=16)
-    synthesis: str = Field(min_length=1, max_length=12000)
+    central_ideas: list[str] = Field(min_length=1)
+    relations_and_tensions: list[str] = Field(min_length=1)
+    nuances: list[str] = Field(default_factory=list)
+    source_limits: list[str] = Field(default_factory=list)
+    editorial_opportunities: list[str] = Field(default_factory=list)
+    synthesis: str = Field(min_length=1)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

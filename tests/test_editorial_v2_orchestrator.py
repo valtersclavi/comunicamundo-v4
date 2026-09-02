@@ -9,9 +9,11 @@ import pytest
 
 from comunicamundo_v4.hefesto.contracts import (
     EditorialBrief,
+    EditorialProject,
     EditorialProjectProposal,
     EditorialProjectStatus,
     EditorialSubjectProposal,
+    NarrativeAxis,
     NarrativeAxisEvidenceReview,
     NarrativeAxisProposal,
     NarrativeAxisStatus,
@@ -34,6 +36,7 @@ from comunicamundo_v4.hefesto.digestion_runtime import DigestionCallFactory, Dig
 from comunicamundo_v4.hefesto.editorial_v2_contracts import (
     EditorialProjectRecordV2,
     EditorialV2State,
+    HefestoTipV2,
     NarrativeAxisRecordV2,
 )
 from comunicamundo_v4.hefesto.editorial_v2_orchestrator import EditorialV2Orchestrator
@@ -237,7 +240,6 @@ class ResponsiveGateway:
                                 paragraph_id=paragraph_id,
                                 first_sentence_id=sentence_id,
                                 last_sentence_id=sentence_id,
-                                locator="trecho",
                             )
                         ],
                     )
@@ -399,3 +401,39 @@ async def test_axis_and_project_prompts_use_matrix_and_explicit_causality_bounda
     assert "causality assessments" in prompt_by_task["narrative_axis_proposal_v2"]
     assert "do not simply concatenate" in prompt_by_task["editorial_project_proposal_v2"]
     assert "Dicas do Hefesto and are NOT part" in prompt_by_task["editorial_project_proposal_v2"]
+    assert "one or two sentences" not in prompt_by_task["narrative_axis_proposal_v2"]
+
+
+def test_editorial_v2_outputs_have_no_editorial_size_or_quantity_caps() -> None:
+    def assert_no_editorial_caps(schema) -> None:
+        serialized = str(schema.model_json_schema())
+        assert "maxLength" not in serialized
+        assert "maxItems" not in serialized
+
+    for schema in (
+        NarrativeAxisProposal,
+        NarrativeAxisEvidenceReview,
+        EditorialProjectProposal,
+        NarrativeAxis,
+        EditorialProject,
+        HefestoTipV2,
+        HefestoTipTimingResult,
+    ):
+        assert_no_editorial_caps(schema)
+
+    long_statement = "Eixo sustentado pela evidência. " * 100
+    many_subjects = [
+        EditorialSubjectProposal(title=f"Assunto {index}", development="Desenvolvimento editorial.")
+        for index in range(30)
+    ]
+    axis = NarrativeAxisProposal(statement=long_statement)
+    project = EditorialProjectProposal(
+        working_title="Projeto amplo",
+        editorial_promise="Preservar toda distinção substantiva.",
+        core_subjects=many_subjects,
+        llm_subjects=[f"Dica {index}" for index in range(20)],
+        enrichment_opportunities=[f"Oportunidade {index}" for index in range(20)],
+    )
+
+    assert axis.statement == long_statement.strip()
+    assert len(project.core_subjects) == 30

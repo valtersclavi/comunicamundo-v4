@@ -395,7 +395,12 @@ def _materialize_anchor(
     ].strip()
     if not excerpt:
         raise ValueError("evidence reference reconstructed an empty excerpt")
-    return EvidenceAnchor(**reference.model_dump(), excerpt=excerpt)
+    sentence_label = str(first + 1) if first == last else f"{first + 1}-{last + 1}"
+    locator = (
+        f"section {section.ordinal + 1}; paragraph {paragraph.ordinal + 1}; "
+        f"sentences {sentence_label}"
+    )
+    return EvidenceAnchor(**reference.model_dump(), locator=locator, excerpt=excerpt)
 
 
 def validate_dossier_evidence(dossier: SourceDossier, sections: Sequence[SourceSection]) -> None:
@@ -406,7 +411,10 @@ def validate_dossier_evidence(dossier: SourceDossier, sections: Sequence[SourceS
         raise ValueError("dossier and source plan disagree about their sections")
     for finding in dossier.findings:
         for anchor in finding.anchors:
-            rebuilt = _materialize_anchor(EvidenceReference.model_validate(anchor.model_dump(exclude={"excerpt"})), section_map)
+            rebuilt = _materialize_anchor(
+                EvidenceReference.model_validate(anchor.model_dump(exclude={"excerpt", "locator"})),
+                section_map,
+            )
             if normalize("NFKC", rebuilt.excerpt) != normalize("NFKC", anchor.excerpt):
                 raise ValueError("dossier evidence does not match its immutable sentence coordinates")
 
@@ -424,7 +432,6 @@ def validate_reduced_dossier_evidence(
             anchor.paragraph_id,
             anchor.first_sentence_id,
             anchor.last_sentence_id,
-            anchor.locator,
         )
         for digest in section_digests
         for finding in digest.findings
@@ -437,7 +444,6 @@ def validate_reduced_dossier_evidence(
                 anchor.paragraph_id,
                 anchor.first_sentence_id,
                 anchor.last_sentence_id,
-                anchor.locator,
             )
             if identity not in allowed:
                 raise ValueError("reduced dossier contains an anchor absent from its section digests")

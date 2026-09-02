@@ -21,10 +21,10 @@ from .digestion_contracts import ArtifactPointer
 from .execution_contracts import Sha256
 
 
-EDITORIAL_V2_ENGINE_VERSION = "hefesto-editorial-v2.0"
-AXIS_V2_PROMPT_VERSION = "narrative-axis-v2.0"
-PROJECT_V2_PROMPT_VERSION = "editorial-project-v2.0"
-TIP_TIMING_V2_PROMPT_VERSION = "hefesto-tip-timing-v2.0"
+EDITORIAL_V2_ENGINE_VERSION = "hefesto-editorial-v2.1"
+AXIS_V2_PROMPT_VERSION = "narrative-axis-v2.1"
+PROJECT_V2_PROMPT_VERSION = "editorial-project-v2.1"
+TIP_TIMING_V2_PROMPT_VERSION = "hefesto-tip-timing-v2.1"
 
 
 class EditorialV2State(StrEnum):
@@ -127,9 +127,9 @@ class NarrativeAxisRecordV2(StrictModel):
 
 
 class HefestoTipV2(StrictModel):
-    text: str = Field(min_length=1, max_length=1200)
+    text: str = Field(min_length=1)
     incremental_minutes: int = Field(ge=1, le=120)
-    display_text: str = Field(min_length=1, max_length=1300)
+    display_text: str = Field(min_length=1)
 
 
 class EditorialProjectRecordV2(StrictModel):
@@ -141,8 +141,8 @@ class EditorialProjectRecordV2(StrictModel):
     prompt_version: str = Field(default=PROJECT_V2_PROMPT_VERSION, min_length=1)
     model: str = Field(min_length=1)
     proposal: EditorialProjectProposal
-    generated_tips: list[HefestoTipV2] = Field(default_factory=list, max_length=12)
-    accepted_tips: list[str] = Field(default_factory=list, max_length=12)
+    generated_tips: list[HefestoTipV2] = Field(default_factory=list)
+    accepted_tips: list[str] = Field(default_factory=list)
     editorial_project: EditorialProject
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

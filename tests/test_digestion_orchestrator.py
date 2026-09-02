@@ -167,7 +167,6 @@ def _finding(section_id, paragraph_id, sentence_id):
                 paragraph_id=paragraph_id,
                 first_sentence_id=sentence_id,
                 last_sentence_id=sentence_id,
-                locator="trecho",
             )
         ],
     )
