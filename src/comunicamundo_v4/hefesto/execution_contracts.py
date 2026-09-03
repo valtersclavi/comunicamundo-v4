@@ -192,11 +192,12 @@ class WorkUnit(StrictModel):
 
 
 class TokenBudget(StrictModel):
-    """Admission envelope for one call, independent from provider pricing."""
+    """Provider safety envelope plus an independent admission forecast."""
 
     estimated_input_tokens: int = Field(ge=1)
     max_input_tokens: int = Field(ge=1)
     max_output_tokens: int = Field(ge=1)
+    capacity_output_tokens: int | None = Field(default=None, ge=1)
     thinking_budget_tokens: int = Field(ge=0)
     context_window_tokens: int = Field(ge=2)
     input_capacity_weight: Decimal = Field(default=Decimal("1"), gt=0)
@@ -209,6 +210,11 @@ class TokenBudget(StrictModel):
             raise ValueError("estimated input exceeds its explicit maximum")
         if self.thinking_budget_tokens > self.max_output_tokens:
             raise ValueError("thinking budget is part of, and cannot exceed, max output")
+        if (
+            self.capacity_output_tokens is not None
+            and self.capacity_output_tokens > self.max_output_tokens
+        ):
+            raise ValueError("admission forecast cannot exceed the provider output safety ceiling")
         if self.max_input_tokens + self.max_output_tokens > self.context_window_tokens:
             raise ValueError("input and output budgets exceed the model context window")
         return self
@@ -216,11 +222,13 @@ class TokenBudget(StrictModel):
     @computed_field
     @property
     def reserved_capacity_tokens(self) -> int:
-        visible_output = self.max_output_tokens - self.thinking_budget_tokens
+        output_forecast = self.capacity_output_tokens or self.max_output_tokens
+        reasoning = min(output_forecast, self.thinking_budget_tokens)
+        visible_output = output_forecast - reasoning
         weighted = (
             Decimal(self.estimated_input_tokens) * self.input_capacity_weight
             + Decimal(visible_output) * self.output_capacity_weight
-            + Decimal(self.thinking_budget_tokens) * self.reasoning_capacity_weight
+            + Decimal(reasoning) * self.reasoning_capacity_weight
         )
         return int(weighted.quantize(Decimal("1"), rounding=ROUND_CEILING))
 

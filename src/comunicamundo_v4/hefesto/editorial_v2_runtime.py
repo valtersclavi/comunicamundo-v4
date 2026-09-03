@@ -57,13 +57,17 @@ class EditorialV2RuntimeConfig:
     temperature: float = 0.2
     context_window_tokens: int = 1_048_576
     max_input_tokens: int = 120_000
-    axis_max_output_tokens: int = 2_000
+    axis_max_output_tokens: int = 65_536
+    axis_capacity_output_tokens: int = 2_000
     axis_thinking_tokens: int = 500
-    review_max_output_tokens: int = 2_500
+    review_max_output_tokens: int = 65_536
+    review_capacity_output_tokens: int = 2_500
     review_thinking_tokens: int = 750
-    project_max_output_tokens: int = 6_000
+    project_max_output_tokens: int = 65_536
+    project_capacity_output_tokens: int = 12_000
     project_thinking_tokens: int = 1_500
-    tip_max_output_tokens: int = 2_000
+    tip_max_output_tokens: int = 65_536
+    tip_capacity_output_tokens: int = 2_000
     tip_thinking_tokens: int = 500
     max_attempts: int = 3
 
@@ -74,13 +78,13 @@ class EditorialV2RuntimeConfig:
             raise ValueError("temperature must fit the provider contract")
         if self.max_input_tokens <= 0 or self.context_window_tokens <= 0:
             raise ValueError("input and context budgets must be positive")
-        for output, thinking in (
-            (self.axis_max_output_tokens, self.axis_thinking_tokens),
-            (self.review_max_output_tokens, self.review_thinking_tokens),
-            (self.project_max_output_tokens, self.project_thinking_tokens),
-            (self.tip_max_output_tokens, self.tip_thinking_tokens),
+        for output, capacity, thinking in (
+            (self.axis_max_output_tokens, self.axis_capacity_output_tokens, self.axis_thinking_tokens),
+            (self.review_max_output_tokens, self.review_capacity_output_tokens, self.review_thinking_tokens),
+            (self.project_max_output_tokens, self.project_capacity_output_tokens, self.project_thinking_tokens),
+            (self.tip_max_output_tokens, self.tip_capacity_output_tokens, self.tip_thinking_tokens),
         ):
-            if output <= 0 or thinking < 0 or thinking > output:
+            if output <= 0 or capacity <= 0 or capacity > output or thinking < 0 or thinking > output:
                 raise ValueError("each editorial task requires a coherent output budget")
             if self.max_input_tokens + output > self.context_window_tokens:
                 raise ValueError("editorial task budget exceeds the model context window")
@@ -145,6 +149,7 @@ class EditorialV2CallFactory:
             response_schema=NarrativeAxisProposal,
             input_sha256s=[understanding_sha256, matrix_sha256, fingerprint_brief(brief)],
             max_output_tokens=self.config.axis_max_output_tokens,
+            capacity_output_tokens=self.config.axis_capacity_output_tokens,
             thinking_tokens=self.config.axis_thinking_tokens,
         )
 
@@ -177,6 +182,7 @@ class EditorialV2CallFactory:
                 canonical_sha256(candidate.model_dump(mode="json")),
             ],
             max_output_tokens=self.config.review_max_output_tokens,
+            capacity_output_tokens=self.config.review_capacity_output_tokens,
             thinking_tokens=self.config.review_thinking_tokens,
         )
 
@@ -212,6 +218,7 @@ class EditorialV2CallFactory:
                 fingerprint_brief(brief),
             ],
             max_output_tokens=self.config.project_max_output_tokens,
+            capacity_output_tokens=self.config.project_capacity_output_tokens,
             thinking_tokens=self.config.project_thinking_tokens,
         )
 
@@ -236,6 +243,7 @@ class EditorialV2CallFactory:
                 fingerprint_brief(brief),
             ],
             max_output_tokens=self.config.tip_max_output_tokens,
+            capacity_output_tokens=self.config.tip_capacity_output_tokens,
             thinking_tokens=self.config.tip_thinking_tokens,
         )
 
@@ -250,6 +258,7 @@ class EditorialV2CallFactory:
         response_schema: type[OutputT],
         input_sha256s: list[str],
         max_output_tokens: int,
+        capacity_output_tokens: int,
         thinking_tokens: int,
     ) -> PreparedEditorialCall[OutputT]:
         estimated_input = estimate_tokens(prompt) + estimate_tokens(EDITORIAL_V2_SYSTEM_INSTRUCTION)
@@ -257,6 +266,7 @@ class EditorialV2CallFactory:
             estimated_input_tokens=estimated_input,
             max_input_tokens=self.config.max_input_tokens,
             max_output_tokens=max_output_tokens,
+            capacity_output_tokens=capacity_output_tokens,
             thinking_budget_tokens=thinking_tokens,
             context_window_tokens=self.config.context_window_tokens,
         )

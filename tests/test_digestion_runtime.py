@@ -97,7 +97,8 @@ async def test_direct_dossier_is_an_immutable_budgeted_gateway_call() -> None:
     assert dossier.digestion_mode is DigestionMode.DIRECT
     assert call.intent.prompt_sha256 == text_sha256(call.prompt)
     assert call.intent.system_instruction_sha256 == text_sha256(DIGESTION_SYSTEM_INSTRUCTION)
-    assert call.intent.budget.max_output_tokens == 12_000
+    assert call.intent.budget.max_output_tokens == 65_536
+    assert call.intent.budget.capacity_output_tokens == 16_000
     assert gateway.calls[0][3] is SourceDossierProposal
     assert dossier.findings[0].anchors[0].locator == "section 1; paragraph 1; sentences 1"
 
@@ -223,7 +224,8 @@ async def test_matrix_call_preserves_source_order_and_produces_auditable_balance
     assert matrix.source_ids == [source.source_id for source in sources]
     assert len(matrix.source_balance) == 2
     assert sum(item.dossier_character_share for item in matrix.source_balance) == pytest.approx(1)
-    assert matrix_call.intent.budget.max_output_tokens == 12_000
+    assert matrix_call.intent.budget.max_output_tokens == 65_536
+    assert matrix_call.intent.budget.capacity_output_tokens == 16_000
 
 
 def test_runtime_rejects_a_prompt_that_exceeds_its_declared_input_budget() -> None:

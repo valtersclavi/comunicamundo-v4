@@ -27,11 +27,26 @@ def test_token_budget_reserves_weighted_output_and_reasoning_capacity() -> None:
     assert budget.reserved_capacity_tokens == 24_000
 
 
+def test_provider_safety_ceiling_does_not_become_an_editorial_admission_limit() -> None:
+    budget = TokenBudget(
+        estimated_input_tokens=24_000,
+        max_input_tokens=250_000,
+        max_output_tokens=65_536,
+        capacity_output_tokens=12_000,
+        thinking_budget_tokens=1_000,
+        context_window_tokens=1_048_576,
+    )
+
+    assert budget.max_output_tokens == 65_536
+    assert budget.reserved_capacity_tokens == 36_000
+
+
 @pytest.mark.parametrize(
     "updates",
     [
         {"estimated_input_tokens": 20_001},
         {"thinking_budget_tokens": 2_001},
+        {"capacity_output_tokens": 2_001},
         {"max_input_tokens": 29_000},
     ],
 )

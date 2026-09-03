@@ -67,11 +67,14 @@ class DigestionRuntimeConfig:
     temperature: float = 0.1
     context_window_tokens: int = 1_048_576
     max_input_tokens: int = 250_000
-    section_max_output_tokens: int = 5_000
+    section_max_output_tokens: int = 65_536
+    section_capacity_output_tokens: int = 12_000
     section_thinking_tokens: int = 1_000
-    dossier_max_output_tokens: int = 12_000
+    dossier_max_output_tokens: int = 65_536
+    dossier_capacity_output_tokens: int = 16_000
     dossier_thinking_tokens: int = 2_000
-    matrix_max_output_tokens: int = 12_000
+    matrix_max_output_tokens: int = 65_536
+    matrix_capacity_output_tokens: int = 16_000
     matrix_thinking_tokens: int = 3_000
     max_attempts: int = 3
 
@@ -82,12 +85,12 @@ class DigestionRuntimeConfig:
             raise ValueError("temperature must fit the provider contract")
         if self.max_input_tokens <= 0 or self.context_window_tokens <= 0:
             raise ValueError("input and context budgets must be positive")
-        for output, thinking in (
-            (self.section_max_output_tokens, self.section_thinking_tokens),
-            (self.dossier_max_output_tokens, self.dossier_thinking_tokens),
-            (self.matrix_max_output_tokens, self.matrix_thinking_tokens),
+        for output, capacity, thinking in (
+            (self.section_max_output_tokens, self.section_capacity_output_tokens, self.section_thinking_tokens),
+            (self.dossier_max_output_tokens, self.dossier_capacity_output_tokens, self.dossier_thinking_tokens),
+            (self.matrix_max_output_tokens, self.matrix_capacity_output_tokens, self.matrix_thinking_tokens),
         ):
-            if output <= 0 or thinking < 0 or thinking > output:
+            if output <= 0 or capacity <= 0 or capacity > output or thinking < 0 or thinking > output:
                 raise ValueError("each task requires a coherent output and thinking budget")
             if self.max_input_tokens + output > self.context_window_tokens:
                 raise ValueError("task budget exceeds the model context window")
@@ -156,6 +159,7 @@ class DigestionCallFactory:
             response_schema=SectionDigestProposal,
             input_sha256s=[section.section_id, section.content_sha256],
             max_output_tokens=self.config.section_max_output_tokens,
+            capacity_output_tokens=self.config.section_capacity_output_tokens,
             thinking_tokens=self.config.section_thinking_tokens,
         )
 
@@ -203,6 +207,7 @@ class DigestionCallFactory:
                 fingerprint_brief(brief),
             ],
             max_output_tokens=self.config.dossier_max_output_tokens,
+            capacity_output_tokens=self.config.dossier_capacity_output_tokens,
             thinking_tokens=self.config.dossier_thinking_tokens,
         )
 
@@ -260,6 +265,7 @@ class DigestionCallFactory:
                 fingerprint_brief(brief),
             ],
             max_output_tokens=self.config.dossier_max_output_tokens,
+            capacity_output_tokens=self.config.dossier_capacity_output_tokens,
             thinking_tokens=self.config.dossier_thinking_tokens,
         )
 
@@ -303,6 +309,7 @@ class DigestionCallFactory:
             response_schema=EvidenceMatrixProposal,
             input_sha256s=[*[item.content_sha256 for item in dossiers], fingerprint_brief(brief)],
             max_output_tokens=self.config.matrix_max_output_tokens,
+            capacity_output_tokens=self.config.matrix_capacity_output_tokens,
             thinking_tokens=self.config.matrix_thinking_tokens,
         )
 
@@ -361,6 +368,7 @@ class DigestionCallFactory:
         response_schema: type[BaseModel],
         input_sha256s: list[str],
         max_output_tokens: int,
+        capacity_output_tokens: int,
         thinking_tokens: int,
     ) -> LLMCallIntent:
         estimated_input = estimate_tokens(prompt) + estimate_tokens(DIGESTION_SYSTEM_INSTRUCTION)
@@ -368,6 +376,7 @@ class DigestionCallFactory:
             estimated_input_tokens=estimated_input,
             max_input_tokens=self.config.max_input_tokens,
             max_output_tokens=max_output_tokens,
+            capacity_output_tokens=capacity_output_tokens,
             thinking_budget_tokens=thinking_tokens,
             context_window_tokens=self.config.context_window_tokens,
         )

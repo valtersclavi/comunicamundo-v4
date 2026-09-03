@@ -21,7 +21,7 @@ from .digestion_contracts import ArtifactPointer
 from .execution_contracts import Sha256
 
 
-EDITORIAL_V2_ENGINE_VERSION = "hefesto-editorial-v2.1"
+EDITORIAL_V2_ENGINE_VERSION = "hefesto-editorial-v2.2"
 AXIS_V2_PROMPT_VERSION = "narrative-axis-v2.1"
 PROJECT_V2_PROMPT_VERSION = "editorial-project-v2.1"
 TIP_TIMING_V2_PROMPT_VERSION = "hefesto-tip-timing-v2.1"
