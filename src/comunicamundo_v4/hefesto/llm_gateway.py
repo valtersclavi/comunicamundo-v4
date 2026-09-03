@@ -346,10 +346,21 @@ def _provider_response_schema(schema: type[BaseModel]) -> dict[str, Any]:
     return _strip_provider_schema_constraints(schema.model_json_schema())
 
 
-def _strip_provider_schema_constraints(value: Any) -> Any:
+def _strip_provider_schema_constraints(value: Any, *, named_schema_map: bool = False) -> Any:
     if isinstance(value, dict):
+        if named_schema_map:
+            # Keys under `properties` and `$defs` are user/model field names,
+            # not JSON Schema keywords. A legitimate field named `title` must
+            # survive even though schema metadata named `title` is omitted.
+            return {
+                key: _strip_provider_schema_constraints(item)
+                for key, item in value.items()
+            }
         return {
-            key: _strip_provider_schema_constraints(item)
+            key: _strip_provider_schema_constraints(
+                item,
+                named_schema_map=key in {"properties", "$defs", "definitions"},
+            )
             for key, item in value.items()
             if key not in _PROVIDER_SCHEMA_OMIT_KEYS
         }

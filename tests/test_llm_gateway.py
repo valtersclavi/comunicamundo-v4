@@ -14,7 +14,11 @@ from comunicamundo_v4.hefesto.execution_contracts import (
     TokenPriceCard,
     text_sha256,
 )
-from comunicamundo_v4.hefesto.llm_gateway import LLMCallError, LLMGateway
+from comunicamundo_v4.hefesto.llm_gateway import (
+    LLMCallError,
+    LLMGateway,
+    _provider_response_schema,
+)
 
 
 PROMPT = "Sintetize as evidências sem inventar causalidade."
@@ -22,6 +26,15 @@ PROMPT = "Sintetize as evidências sem inventar causalidade."
 
 class Proposal(BaseModel):
     synthesis: str = Field(min_length=1, max_length=1_200)
+
+
+class TitledSubject(BaseModel):
+    title: str = Field(min_length=1)
+    development: str = Field(min_length=1)
+
+
+class TitledProject(BaseModel):
+    core_subjects: list[TitledSubject] = Field(min_length=1)
 
 
 class MemoryLedger:
@@ -157,6 +170,15 @@ async def test_gateway_uses_explicit_budgets_and_persists_provider_usage() -> No
     assert record.status is LLMCallStatus.SUCCEEDED
     assert record.provider_response_id == "response-1"
     assert record.rated_cost_usd == Decimal("0.009510000")
+
+
+def test_provider_schema_preserves_a_property_named_title() -> None:
+    schema = _provider_response_schema(TitledProject)
+    subject = schema["$defs"]["TitledSubject"]
+
+    assert set(subject["required"]) == {"title", "development"}
+    assert set(subject["properties"]) == {"title", "development"}
+    assert "title" not in subject["properties"]["title"]
 
 
 @pytest.mark.asyncio
