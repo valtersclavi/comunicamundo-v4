@@ -57,10 +57,10 @@ def _finding(section: SourceSection) -> SourceFindingProposal:
         evidence_strength=EvidenceStrength.MODERATE,
         anchors=[
             EvidenceReference(
-                section_id=section.section_id,
-                paragraph_id=paragraph.paragraph_id,
-                first_sentence_id=sentence.sentence_id,
-                last_sentence_id=sentence.sentence_id,
+                section_ordinal=section.ordinal + 1,
+                paragraph_ordinal=paragraph.ordinal + 1,
+                first_sentence_ordinal=sentence.ordinal + 1,
+                last_sentence_ordinal=sentence.ordinal + 1,
             )
         ],
     )
@@ -130,7 +130,7 @@ async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
     section = plan.sources[0].sections[0]
     proposal = _dossier_proposal(section)
     invented = proposal.findings[0].anchors[0].model_copy(
-        update={"last_sentence_id": text_sha256("invented")}
+        update={"last_sentence_ordinal": 999}
     )
     proposal = proposal.model_copy(
         update={
@@ -139,7 +139,7 @@ async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
             ]
         }
     )
-    with pytest.raises(ValueError, match="consecutive sentences"):
+    with pytest.raises(ValueError, match="sentence ordinal outside"):
         await call.invoke(FakeGateway(proposal))
 
 
@@ -183,10 +183,10 @@ async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> N
     unused_paragraph = first_section.paragraphs[1]
     unused_sentence = unused_paragraph.sentences[0]
     reference = EvidenceReference(
-        section_id=first_section.section_id,
-        paragraph_id=unused_paragraph.paragraph_id,
-        first_sentence_id=unused_sentence.sentence_id,
-        last_sentence_id=unused_sentence.sentence_id,
+        section_ordinal=first_section.ordinal + 1,
+        paragraph_ordinal=unused_paragraph.ordinal + 1,
+        first_sentence_ordinal=unused_sentence.ordinal + 1,
+        last_sentence_ordinal=unused_sentence.ordinal + 1,
     )
     changed_reference = _dossier_proposal(first_section).model_copy(
         update={

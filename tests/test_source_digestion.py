@@ -33,6 +33,10 @@ def _dossier(plan, *, project_id, run_id, findings: int = 4) -> SourceDossier:
     paragraph = plan.sections[0].paragraphs[0]
     sentence = paragraph.sentences[0]
     anchor = EvidenceAnchor(
+        section_ordinal=plan.sections[0].ordinal + 1,
+        paragraph_ordinal=paragraph.ordinal + 1,
+        first_sentence_ordinal=sentence.ordinal + 1,
+        last_sentence_ordinal=sentence.ordinal + 1,
         section_id=plan.sections[0].section_id,
         paragraph_id=paragraph.paragraph_id,
         first_sentence_id=sentence.sentence_id,
@@ -195,13 +199,16 @@ def test_dossier_evidence_cannot_join_sentences_across_paragraphs() -> None:
     dossier = _dossier(plan, project_id=uuid4(), run_id=uuid4(), findings=1)
     second_sentence = plan.sections[0].paragraphs[1].sentences[0]
     anchor = dossier.findings[0].anchors[0].model_copy(
-        update={"last_sentence_id": second_sentence.sentence_id}
+        update={
+            "paragraph_ordinal": plan.sections[0].paragraphs[1].ordinal + 1,
+            "last_sentence_id": second_sentence.sentence_id,
+        }
     )
     dossier = dossier.model_copy(
         update={"findings": [dossier.findings[0].model_copy(update={"anchors": [anchor]})]}
     )
 
-    with pytest.raises(ValueError, match="consecutive sentences"):
+    with pytest.raises(ValueError, match="hashes do not match"):
         validate_dossier_evidence(dossier, plan.sections)
 
 

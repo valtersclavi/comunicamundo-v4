@@ -352,7 +352,7 @@ def materialize_findings(
     findings: Sequence[SourceFindingProposal],
     sections: Sequence[SourceSection],
 ) -> list[SourceFinding]:
-    """Reconstruct exact excerpts from consecutive sentence IDs inside one paragraph."""
+    """Resolve ordinals and reconstruct exact excerpts inside one paragraph."""
 
     section_map = {section.section_id: section for section in sections}
     materialized: list[SourceFinding] = []
@@ -374,20 +374,24 @@ def _materialize_anchor(
     reference: EvidenceReference,
     section_map: dict[str, SourceSection],
 ) -> EvidenceAnchor:
-    section = section_map.get(reference.section_id)
+    section = next(
+        (item for item in section_map.values() if item.ordinal + 1 == reference.section_ordinal),
+        None,
+    )
     if section is None:
-        raise ValueError("evidence reference names a section outside the source")
+        raise ValueError("evidence reference names a section ordinal outside the source")
     paragraph = next(
-        (item for item in section.paragraphs if item.paragraph_id == reference.paragraph_id),
+        (item for item in section.paragraphs if item.ordinal + 1 == reference.paragraph_ordinal),
         None,
     )
     if paragraph is None:
-        raise ValueError("evidence reference names a paragraph outside its section")
-    sentence_indexes = {item.sentence_id: index for index, item in enumerate(paragraph.sentences)}
-    first = sentence_indexes.get(reference.first_sentence_id)
-    last = sentence_indexes.get(reference.last_sentence_id)
-    if first is None or last is None or first > last:
-        raise ValueError("evidence reference must select consecutive sentences in source order")
+        raise ValueError("evidence reference names a paragraph ordinal outside its section")
+    first = reference.first_sentence_ordinal - 1
+    last = reference.last_sentence_ordinal - 1
+    if first > last:
+        raise ValueError("evidence reference sentences must be in source order")
+    if first >= len(paragraph.sentences) or last >= len(paragraph.sentences):
+        raise ValueError("evidence reference names a sentence ordinal outside its paragraph")
     selected = paragraph.sentences[first:last + 1]
     excerpt = paragraph.text[
         selected[0].char_start - paragraph.char_start:
@@ -400,7 +404,15 @@ def _materialize_anchor(
         f"section {section.ordinal + 1}; paragraph {paragraph.ordinal + 1}; "
         f"sentences {sentence_label}"
     )
-    return EvidenceAnchor(**reference.model_dump(), locator=locator, excerpt=excerpt)
+    return EvidenceAnchor(
+        **reference.model_dump(),
+        section_id=section.section_id,
+        paragraph_id=paragraph.paragraph_id,
+        first_sentence_id=selected[0].sentence_id,
+        last_sentence_id=selected[-1].sentence_id,
+        locator=locator,
+        excerpt=excerpt,
+    )
 
 
 def validate_dossier_evidence(dossier: SourceDossier, sections: Sequence[SourceSection]) -> None:
@@ -412,9 +424,25 @@ def validate_dossier_evidence(dossier: SourceDossier, sections: Sequence[SourceS
     for finding in dossier.findings:
         for anchor in finding.anchors:
             rebuilt = _materialize_anchor(
-                EvidenceReference.model_validate(anchor.model_dump(exclude={"excerpt", "locator"})),
+                EvidenceReference.model_validate(
+                    anchor.model_dump(include=set(EvidenceReference.model_fields))
+                ),
                 section_map,
             )
+            immutable_identity = (
+                rebuilt.section_id,
+                rebuilt.paragraph_id,
+                rebuilt.first_sentence_id,
+                rebuilt.last_sentence_id,
+            )
+            persisted_identity = (
+                anchor.section_id,
+                anchor.paragraph_id,
+                anchor.first_sentence_id,
+                anchor.last_sentence_id,
+            )
+            if immutable_identity != persisted_identity:
+                raise ValueError("dossier evidence hashes do not match their ordinal coordinates")
             if normalize("NFKC", rebuilt.excerpt) != normalize("NFKC", anchor.excerpt):
                 raise ValueError("dossier evidence does not match its immutable sentence coordinates")
 

@@ -217,9 +217,9 @@ class ResponsiveGateway:
         self.calls.append(intent.task_type)
         self.prompts.append((intent.task_type, prompt, system_instruction))
         if response_schema is SourceDossierProposal:
-            section_id = re.search(r"section_id ([0-9a-f]{64})", prompt).group(1)
-            paragraph_id = re.search(r"\[PARAGRAPH ([0-9a-f]{64})\]", prompt).group(1)
-            sentence_id = re.search(r"\[SENTENCE ([0-9a-f]{64})\]", prompt).group(1)
+            section_ordinal = int(re.search(r"section_ordinal (\d+)", prompt).group(1))
+            paragraph_ordinal = int(re.search(r"\[SECTION \d+; PARAGRAPH (\d+)\]", prompt).group(1))
+            sentence_ordinal = int(re.search(r"\[SENTENCE (\d+)\]", prompt).group(1))
             proposal = SourceDossierProposal(
                 executive_synthesis="A fonte descreve uma associação heterogênea.",
                 method_profile=MethodProfile(
@@ -236,10 +236,10 @@ class ResponsiveGateway:
                         evidence_strength=EvidenceStrength.MODERATE,
                         anchors=[
                             EvidenceReference(
-                                section_id=section_id,
-                                paragraph_id=paragraph_id,
-                                first_sentence_id=sentence_id,
-                                last_sentence_id=sentence_id,
+                                section_ordinal=section_ordinal,
+                                paragraph_ordinal=paragraph_ordinal,
+                                first_sentence_ordinal=sentence_ordinal,
+                                last_sentence_ordinal=sentence_ordinal,
                             )
                         ],
                     )

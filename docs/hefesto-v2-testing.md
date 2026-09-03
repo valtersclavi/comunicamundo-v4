@@ -24,7 +24,7 @@ The temporary read-only state service runs with the canonical runtime identity a
 
 ## Evidence quotation contract
 
-The model cites immutable section, paragraph, and first/last sentence IDs; it never writes the excerpt or locator. Hefesto validates that the IDs select complete, consecutive sentences inside one normalized paragraph, then reconstructs the exact excerpt and its human-readable locator in code. There is no quotation-length ceiling. A second paragraph requires another anchor.
+The model selects evidence with small, one-based section, source-paragraph, and first/last sentence ordinals; it never copies opaque hashes or writes the excerpt or locator. Hefesto validates that the ordinals select complete, consecutive sentences inside one normalized paragraph, resolves their immutable content IDs, then reconstructs the exact excerpt and its human-readable locator in code. There is no quotation-length ceiling. A second paragraph requires another anchor.
 
 ## Semantic planning and capacity
 

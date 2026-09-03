@@ -19,9 +19,9 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v5"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v3"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v3"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v6"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v4"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v4"
 EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v2"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
@@ -266,15 +266,27 @@ class DigestionRunResult(StrictModel):
 
 
 class EvidenceReference(StrictModel):
-    """Compact model output; code reconstructs the verbatim excerpt."""
+    """Human-sized model output; code resolves immutable source identities."""
 
+    section_ordinal: int = Field(ge=1)
+    paragraph_ordinal: int = Field(ge=1)
+    first_sentence_ordinal: int = Field(ge=1)
+    last_sentence_ordinal: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _ordered_sentence_range(self) -> "EvidenceReference":
+        if self.first_sentence_ordinal > self.last_sentence_ordinal:
+            raise ValueError("evidence reference sentences must be in source order")
+        return self
+
+
+class EvidenceAnchor(EvidenceReference):
+    # Ordinals are the compact, model-facing coordinates. These hashes are
+    # resolved by code and make the persisted anchor immutable and auditable.
     section_id: Sha256
     paragraph_id: Sha256
     first_sentence_id: Sha256
     last_sentence_id: Sha256
-
-
-class EvidenceAnchor(EvidenceReference):
     # Evidence is bounded semantically by its source paragraph, not by an
     # arbitrary character count. Long academic sentences must remain whole.
     locator: str = Field(min_length=1)

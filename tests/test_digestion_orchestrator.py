@@ -114,14 +114,14 @@ class ResponsiveGateway:
 
     async def generate(self, intent, *, prompt, system_instruction=None, response_schema=None):
         self.calls.append(intent.work_unit_id)
-        section_match = re.search(r'"section_id": "([0-9a-f]{64})"', prompt) or re.search(
-            r"section_id ([0-9a-f]{64})", prompt
+        section_match = re.search(r'"section_ordinal": (\d+)', prompt) or re.search(
+            r"section_ordinal (\d+)", prompt
         )
-        paragraph_match = re.search(r"\[PARAGRAPH ([0-9a-f]{64})\]", prompt) or re.search(
-            r'"paragraph_id": "([0-9a-f]{64})"', prompt
+        paragraph_match = re.search(r"\[SECTION \d+; PARAGRAPH (\d+)\]", prompt) or re.search(
+            r'"paragraph_ordinal": (\d+)', prompt
         )
-        sentence_match = re.search(r"\[SENTENCE ([0-9a-f]{64})\]", prompt) or re.search(
-            r'"first_sentence_id": "([0-9a-f]{64})"', prompt
+        sentence_match = re.search(r"\[SENTENCE (\d+)\]", prompt) or re.search(
+            r'"first_sentence_ordinal": (\d+)', prompt
         )
         if response_schema is SectionDigestProposal:
             proposal = SectionDigestProposal(
@@ -156,17 +156,17 @@ class ResponsiveGateway:
         return SimpleNamespace(parsed=proposal)
 
 
-def _finding(section_id, paragraph_id, sentence_id):
+def _finding(section_ordinal, paragraph_ordinal, sentence_ordinal):
     return SourceFindingProposal(
         finding="Foi observada uma associação.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
         anchors=[
             EvidenceReference(
-                section_id=section_id,
-                paragraph_id=paragraph_id,
-                first_sentence_id=sentence_id,
-                last_sentence_id=sentence_id,
+                section_ordinal=int(section_ordinal),
+                paragraph_ordinal=int(paragraph_ordinal),
+                first_sentence_ordinal=int(sentence_ordinal),
+                last_sentence_ordinal=int(sentence_ordinal),
             )
         ],
     )

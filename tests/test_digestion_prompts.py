@@ -36,8 +36,10 @@ def test_prompts_make_epistemic_and_balance_rules_explicit() -> None:
     assert "consecutive range" in DIGESTION_SYSTEM_INSTRUCTION.lower()
     assert "same paragraph" in DIGESTION_SYSTEM_INSTRUCTION.lower()
     assert "never return excerpts" in direct.lower()
-    assert "[paragraph " in direct.lower()
+    assert "[section 1; paragraph 1]" in direct.lower()
     assert "[sentence " in direct.lower()
+    assert plan.sections[0].section_id not in direct
+    assert plan.sections[0].paragraphs[0].paragraph_id not in direct
     assert "preserve every substantively distinct" in direct.lower()
     assert "never return excerpts or locators" in direct.lower()
 
@@ -50,6 +52,10 @@ def test_matrix_prompt_uses_equal_ceiling_dossiers_and_never_requires_a_graph() 
         evidence_strength=EvidenceStrength.MODERATE,
         anchors=[
             EvidenceAnchor(
+                section_ordinal=1,
+                paragraph_ordinal=1,
+                first_sentence_ordinal=1,
+                last_sentence_ordinal=1,
                 section_id=text_sha256("section"),
                 paragraph_id=text_sha256("paragraph"),
                 first_sentence_id=text_sha256("sentence"),

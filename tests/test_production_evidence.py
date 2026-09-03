@@ -50,6 +50,10 @@ def _dossier(*, run_id, project_id, source_id, ordinal, raw_chars, findings):
                 evidence_strength=EvidenceStrength.MODERATE,
                 anchors=[
                     EvidenceAnchor(
+                        section_ordinal=ordinal + 1,
+                        paragraph_ordinal=ordinal + 1,
+                        first_sentence_ordinal=index + 1,
+                        last_sentence_ordinal=index + 1,
                         section_id=section,
                         paragraph_id=f"{ordinal + 100:064x}",
                         first_sentence_id=f"{index + 1000:064x}",

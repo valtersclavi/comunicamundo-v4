@@ -13,22 +13,23 @@ DIGESTION_SYSTEM_INSTRUCTION = """
 You are Hefesto's source analyst. Work only from the supplied source material. Do not add outside knowledge.
 Keep correlation, temporal association, quasi-experimental inference, and causation distinct. Never strengthen a
 source's claim. Preserve disagreements, null findings, boundary conditions, uncertainty, and methodological limits.
-Every substantive finding must cite the supplied immutable coordinates: section_id, paragraph_id,
-first_sentence_id, and last_sentence_id. The first and last sentence must be in the same paragraph and identify a
-consecutive range in source order. Include enough consecutive sentences to preserve qualifications. Never return an
-excerpt: Hefesto reconstructs the exact source text from those coordinates after validating them.
+Every substantive finding must cite the supplied human-sized coordinates: section_ordinal, paragraph_ordinal,
+first_sentence_ordinal, and last_sentence_ordinal. Ordinals are one-based. The first and last sentence must be in the
+same paragraph and identify a consecutive range in source order. Include enough consecutive sentences to preserve
+qualifications. Never return an excerpt: Hefesto resolves immutable hashes and reconstructs the exact source text
+from those coordinates after validating them.
 Return only the requested structured object in the requested language.
 """.strip()
 
 
 def _coordinate_text(section: SourceSection) -> str:
-    """Render model-facing source text with stable, compact evidence coordinates."""
+    """Render model-facing text with small, unambiguous one-based coordinates."""
 
     blocks: list[str] = []
     for paragraph in section.paragraphs:
-        lines = [f"[PARAGRAPH {paragraph.paragraph_id}]"]
+        lines = [f"[SECTION {section.ordinal + 1}; PARAGRAPH {paragraph.ordinal + 1}]"]
         lines.extend(
-            f"[SENTENCE {sentence.sentence_id}] {sentence.text.strip()}"
+            f"[SENTENCE {sentence.ordinal + 1}] {sentence.text.strip()}"
             for sentence in paragraph.sentences
         )
         blocks.append("\n".join(lines))
@@ -41,14 +42,13 @@ def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, o
         "title": source.title,
         "language": source.language,
         "metadata": source.metadata,
-        "section_id": section.section_id,
-        "section_ordinal": section.ordinal,
+        "section_ordinal": section.ordinal + 1,
         "heading_hint": section.heading_hint,
     }
     return f"""
 Create a bounded digest of this one section. Record only findings actually supported in the section. A references or
-administrative section may legitimately have no findings. For every anchor, copy the section_id, paragraph_id,
-first_sentence_id, and last_sentence_id from the labels below. A range may contain several consecutive sentences but
+administrative section may legitimately have no findings. For every anchor, copy section_ordinal, paragraph_ordinal,
+first_sentence_ordinal, and last_sentence_ordinal from the labels below. All ordinals are one-based. A range may contain several consecutive sentences but
 must stay within one paragraph. Do not return excerpts. Do not infer a whole-source method or conclusion from this
 partial section. Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
@@ -65,7 +65,7 @@ def direct_source_dossier_prompt(*, source: NormalizedSource, section: SourceSec
 Build one source dossier from the complete source below. Preserve every substantively distinct finding, qualification,
 methodological fact, limitation, and uncertainty; consolidate only genuinely redundant wording. Describe the source's
 actual method or institutional role. Treat recommendations as recommendations, not empirical effects. Every evidence anchor must
-copy section_id {section.section_id} plus a paragraph_id and consecutive first/last sentence IDs from the labels below.
+copy section_ordinal {section.ordinal + 1} plus a paragraph_ordinal and consecutive first/last sentence ordinals from the labels below.
 Never return excerpts or locators; Hefesto reconstructs both. Use a separate anchor when another paragraph is needed.
 Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
@@ -91,8 +91,9 @@ def reduced_source_dossier_prompt(
 Reduce the section digests into one source dossier. A long source does not receive more representational weight merely
 because it has more pages or sections. Synthesize rather than concatenate, but preserve every substantively distinct
 finding, counterevidence item, qualification, method, limitation, and uncertainty. Reuse only
-the supplied evidence coordinates. Return section_id, paragraph_id, first_sentence_id, and last_sentence_id; never
-return excerpts or locators. Do not alter a coordinate or turn an association into causation during reduction.
+the supplied evidence coordinates. Return section_ordinal, paragraph_ordinal, first_sentence_ordinal, and
+last_sentence_ordinal; never return excerpts, locators, or hashes. Do not alter a coordinate or turn an association
+into causation during reduction.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}
