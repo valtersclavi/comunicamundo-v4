@@ -37,6 +37,18 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     )
     assert digested.command == "digest-v2"
     assert digested.tokens_per_minute == 1_000_000
+    complete = parser.parse_args(
+        [
+            "run-v2",
+            "--request",
+            "gs://bucket/request.json",
+            "--auto-approve-without-tips",
+            "--tokens-per-minute",
+            "1000000",
+        ]
+    )
+    assert complete.command == "run-v2"
+    assert complete.auto_approve_without_tips is True
     resumed_v2 = parser.parse_args(
         ["resume-digest-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
     )

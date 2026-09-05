@@ -8,8 +8,9 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Generic, TypeVar
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import psycopg
 from psycopg.rows import dict_row
@@ -326,6 +327,49 @@ class PostgresUsageReader:
                 (project_id,),
             )).fetchall()
         return [LLMAttemptRecord.model_validate(row["payload"]) for row in rows]
+
+
+class PostgresStageRecorder:
+    def __init__(self, database: PostgresDatabase) -> None:
+        self._database = database
+
+    async def record(
+        self,
+        *,
+        execution_run_id: UUID,
+        project_id: UUID,
+        stage: str,
+        status: str,
+        started_at: datetime,
+        finished_at: datetime,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        if status not in {"succeeded", "failed"}:
+            raise ValueError("stage status must be succeeded or failed")
+        duration_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
+        identity = uuid5(
+            NAMESPACE_URL,
+            f"hefesto:stage:{execution_run_id}:{stage}:{started_at.isoformat()}",
+        )
+        payload = details or {}
+        async with self._database.connection() as connection:
+            async with connection.transaction():
+                result = await connection.execute(
+                    """INSERT INTO hefesto.stage_events
+                       (stage_event_id,execution_run_id,project_id,stage,status,started_at,finished_at,duration_ms,details)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                    (identity, execution_run_id, project_id, stage, status, started_at,
+                     finished_at, duration_ms, _json(payload)),
+                )
+                if result.rowcount == 0:
+                    row = await (await connection.execute(
+                        "SELECT status,duration_ms,details FROM hefesto.stage_events WHERE stage_event_id=%s",
+                        (identity,),
+                    )).fetchone()
+                    if row is None or (row["status"], row["duration_ms"], row["details"]) != (
+                        status, duration_ms, payload
+                    ):
+                        raise ValueError(f"conflicting immutable stage event {identity}")
 
 
 class PostgresKnowledgeRepository:
