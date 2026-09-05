@@ -391,7 +391,12 @@ def _materialize_anchor(
     if first > last:
         raise ValueError("evidence reference sentences must be in source order")
     if first >= len(paragraph.sentences) or last >= len(paragraph.sentences):
-        raise ValueError("evidence reference names a sentence ordinal outside its paragraph")
+        raise ValueError(
+            "evidence reference names a sentence ordinal outside its paragraph: "
+            f"section={reference.section_ordinal}, paragraph={reference.paragraph_ordinal}, "
+            f"requested={reference.first_sentence_ordinal}-{reference.last_sentence_ordinal}, "
+            f"sentence_count={len(paragraph.sentences)}"
+        )
     selected = paragraph.sentences[first:last + 1]
     excerpt = paragraph.text[
         selected[0].char_start - paragraph.char_start:
