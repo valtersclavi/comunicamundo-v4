@@ -120,6 +120,14 @@ def test_intermediate_digest_has_no_editorial_quantity_or_prose_caps() -> None:
     assert len(proposal.findings) == 30
 
 
+@pytest.mark.parametrize(
+    "transport_value",
+    ["null_finding", "null_result", "no_effect", "no_association"],
+)
+def test_null_outcome_labels_do_not_replace_the_causal_dimension(transport_value: str) -> None:
+    assert CausalStatus(transport_value) is CausalStatus.NO_CAUSAL_CLAIM
+
+
 @pytest.mark.asyncio
 async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
     source = _source("Evidência observada.")
