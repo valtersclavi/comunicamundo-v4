@@ -19,10 +19,10 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v8"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v6"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v6"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v4"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v9"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v7"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v7"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v5"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -293,6 +293,23 @@ class EvidenceReference(StrictModel):
     paragraph_ordinal: int = Field(ge=1)
     first_sentence_ordinal: int = Field(ge=1)
     last_sentence_ordinal: int = Field(ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _canonicalize_sentence_range(cls, value: object) -> object:
+        # Reversed endpoints describe the same consecutive interval. Normalize
+        # that transport-only ordering mistake; the resolver still rejects
+        # missing sentences, cross-paragraph ranges, and invented coordinates.
+        if isinstance(value, dict):
+            first = value.get("first_sentence_ordinal")
+            last = value.get("last_sentence_ordinal")
+            if isinstance(first, int) and isinstance(last, int) and first > last:
+                return {
+                    **value,
+                    "first_sentence_ordinal": last,
+                    "last_sentence_ordinal": first,
+                }
+        return value
 
     @model_validator(mode="after")
     def _ordered_sentence_range(self) -> "EvidenceReference":
