@@ -26,6 +26,31 @@ env:
   PROJECT_CONCURRENCY: "6"
 
 jobs:
+  inspect-execution:
+    if: contains(github.event.head_commit.message, '[inspect-execution=')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Read one failed execution without rerunning it
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          if [[ "${COMMIT_MESSAGE}" =~ \[inspect-execution=([a-z0-9-]+)\] ]]; then
+            execution="${BASH_REMATCH[1]}"
+          else
+            exit 1
+          fi
+          filter="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\" AND labels.\"run.googleapis.com/execution_name\"=\"${execution}\""
+          gcloud logging read "${filter}" --project="${PROJECT_ID}" --freshness=6h \
+            --limit=200 --order=asc --format=json
+
   run-proof:
     if: >-
       contains(github.event.head_commit.message, '[postgres-canary]') ||
