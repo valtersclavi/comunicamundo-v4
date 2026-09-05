@@ -12,7 +12,7 @@ import json
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .execution_contracts import (
     LLMAttemptRecord,
@@ -424,7 +424,29 @@ def _parsed_response(response: object, schema: type[ParsedT] | None) -> BaseMode
         return parsed
     if parsed is not None:
         return schema.model_validate(parsed)
-    return schema.model_validate_json(str(getattr(response, "text", "")))
+    text = str(getattr(response, "text", ""))
+    try:
+        return schema.model_validate_json(text)
+    except ValidationError as original_error:
+        # Gemini can occasionally return one complete JSON value followed by
+        # a Markdown fence or explanatory text even when application/json was
+        # requested. Recover only the first complete JSON value, then apply
+        # the original Pydantic model in full. Truncated JSON still fails with
+        # the provider's original validation error.
+        try:
+            value = _first_complete_json_value(text)
+        except (json.JSONDecodeError, ValueError):
+            raise original_error
+        return schema.model_validate(value)
+
+
+def _first_complete_json_value(text: str) -> object:
+    payload = text.lstrip("\ufeff\x00 \t\r\n")
+    starts = [position for position in (payload.find("{"), payload.find("[")) if position >= 0]
+    if not starts:
+        raise ValueError("structured response contains no JSON object or array")
+    value, _ = json.JSONDecoder().raw_decode(payload[min(starts) :])
+    return value
 
 
 def _finish_reason_from_response(response: object) -> str | None:
