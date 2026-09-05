@@ -39,7 +39,9 @@ def _coordinate_text(section: SourceSection) -> str:
     for paragraph in section.paragraphs:
         lines = [f"[SECTION {section.ordinal + 1}; PARAGRAPH {paragraph.ordinal + 1}]"]
         lines.extend(
-            f"[SENTENCE {sentence.ordinal + 1}] {sentence.text.strip()}"
+            f"[SENTENCE {sentence.ordinal + 1}] "
+            f"[SECTION {section.ordinal + 1}; PARAGRAPH {paragraph.ordinal + 1}] "
+            f"{sentence.text.strip()}"
             for sentence in paragraph.sentences
         )
         blocks.append("\n".join(lines))
