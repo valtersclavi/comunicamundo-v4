@@ -20,10 +20,10 @@ EvidenceKey = Annotated[str, Field(pattern=r"^E_[0-9a-f]{16}$")]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v13"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v11"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v11"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v9"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v14"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v12"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v12"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v10"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
