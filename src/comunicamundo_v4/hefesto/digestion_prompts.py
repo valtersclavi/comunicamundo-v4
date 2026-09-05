@@ -21,7 +21,8 @@ transport value. The accepted causal_status values are no_causal_claim, correlat
 quasi_experimental, causal, mixed, and unclear.
 Every substantive finding must cite the supplied human-sized coordinates: section_ordinal, paragraph_ordinal,
 first_sentence_ordinal, and last_sentence_ordinal. Ordinals are one-based. The first and last sentence must be in the
-same paragraph and identify a consecutive range in source order. Include enough consecutive sentences to preserve
+same paragraph and identify a consecutive range in ascending source order (first_sentence_ordinal must be less than
+or equal to last_sentence_ordinal). Include enough consecutive sentences to preserve
 qualifications. Never return an excerpt: Hefesto resolves immutable hashes and reconstructs the exact source text
 from those coordinates after validating them.
 Return only the requested structured object in the requested language.

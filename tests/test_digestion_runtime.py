@@ -133,6 +133,18 @@ def test_temporal_aliases_preserve_longitudinal_causal_status(transport_value: s
     assert CausalStatus(transport_value) is CausalStatus.LONGITUDINAL_ASSOCIATION
 
 
+def test_evidence_reference_canonicalizes_reversed_transport_endpoints() -> None:
+    reference = EvidenceReference(
+        section_ordinal=1,
+        paragraph_ordinal=2,
+        first_sentence_ordinal=4,
+        last_sentence_ordinal=1,
+    )
+
+    assert reference.first_sentence_ordinal == 1
+    assert reference.last_sentence_ordinal == 4
+
+
 @pytest.mark.asyncio
 async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
     source = _source("Evidência observada.")
