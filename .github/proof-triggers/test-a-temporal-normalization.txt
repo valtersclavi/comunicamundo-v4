@@ -1,0 +1,1 @@
+Run Test A from scratch after temporal-association normalization.
