@@ -14,7 +14,7 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     DigestionExecutionRun,
     DigestionRunState,
     DominanceAssessment,
-    EvidenceReference,
+    EvidenceKeyReference,
     EvidenceMatrixProposal,
     EvidenceStrength,
     MethodProfile,
@@ -114,19 +114,13 @@ class ResponsiveGateway:
 
     async def generate(self, intent, *, prompt, system_instruction=None, response_schema=None):
         self.calls.append(intent.work_unit_id)
-        section_match = re.search(r'"section_ordinal": (\d+)', prompt) or re.search(
-            r"section_ordinal (\d+)", prompt
-        )
-        paragraph_match = re.search(r"\[SECTION \d+; PARAGRAPH (\d+)\]", prompt) or re.search(
-            r'"paragraph_ordinal": (\d+)', prompt
-        )
-        sentence_match = re.search(r"\[SENTENCE (\d+)\]", prompt) or re.search(
-            r'"first_sentence_ordinal": (\d+)', prompt
+        evidence_match = re.search(r"\[EVIDENCE_KEY (E_[0-9a-f]{16})\]", prompt) or re.search(
+            r'"first_evidence_key": "(E_[0-9a-f]{16})"', prompt
         )
         if response_schema is SectionDigestProposal:
             proposal = SectionDigestProposal(
                 synopsis="Resumo da seção.",
-                findings=[_finding(section_match.group(1), paragraph_match.group(1), sentence_match.group(1))],
+                findings=[_finding(evidence_match.group(1))],
             )
         elif response_schema is SourceDossierProposal:
             proposal = SourceDossierProposal(
@@ -138,7 +132,7 @@ class ResponsiveGateway:
                     measures_or_material="questionário",
                     temporal_scope="um período",
                 ),
-                findings=[_finding(section_match.group(1), paragraph_match.group(1), sentence_match.group(1))],
+                findings=[_finding(evidence_match.group(1))],
                 limitations=["Não identifica causalidade."],
             )
         elif response_schema is EvidenceMatrixProposal:
@@ -156,17 +150,15 @@ class ResponsiveGateway:
         return SimpleNamespace(parsed=proposal)
 
 
-def _finding(section_ordinal, paragraph_ordinal, sentence_ordinal):
+def _finding(evidence_key):
     return SourceFindingProposal(
         finding="Foi observada uma associação.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
         anchors=[
-            EvidenceReference(
-                section_ordinal=int(section_ordinal),
-                paragraph_ordinal=int(paragraph_ordinal),
-                first_sentence_ordinal=int(sentence_ordinal),
-                last_sentence_ordinal=int(sentence_ordinal),
+            EvidenceKeyReference(
+                first_evidence_key=evidence_key,
+                last_evidence_key=evidence_key,
             )
         ],
     )
