@@ -72,7 +72,24 @@ jobs:
             --task-timeout=3600s \
             --max-retries=0 \
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET}" \
+            --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" \
             --quiet
+      - name: Migrate and verify PostgreSQL
+        run: |
+          set -euo pipefail
+          migration_execution="$(gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --args=migrate-postgres --wait --format='value(metadata.name)')"
+          test -n "${migration_execution}"
+          check_execution="$(gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --args=check-postgres --wait --format='value(metadata.name)')"
+          test -n "${check_execution}"
+          {
+            echo "### PostgreSQL"
+            echo "- migration: ${migration_execution}"
+            echo "- pooled check: ${check_execution}"
+          } >> "${GITHUB_STEP_SUMMARY}"
       - name: No-model startup smoke
         run: |
           set -euo pipefail

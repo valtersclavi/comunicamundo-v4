@@ -32,6 +32,7 @@ from .digestion_prompts import (
 )
 from .execution_contracts import LLMCallIntent, TokenBudget, text_sha256, work_unit_key
 from .planning import fingerprint_brief
+from .llm_gateway import bind_json_output_contract
 from .source_digestion import (
     estimate_tokens,
     materialize_findings,
@@ -151,6 +152,7 @@ class DigestionCallFactory:
             section=section,
             output_language=source.language,
         )
+        prompt = bind_json_output_contract(prompt, SectionDigestProposal)
         intent = self._intent(
             plan=plan,
             task_type="section_digest",
@@ -195,6 +197,7 @@ class DigestionCallFactory:
             raise ValueError("direct dossier call requires a direct source plan")
         section = source_plan.sections[0]
         prompt = direct_source_dossier_prompt(source=source, section=section, brief=brief)
+        prompt = bind_json_output_contract(prompt, SourceDossierProposal)
         intent = self._intent(
             plan=plan,
             task_type="source_dossier_direct",
@@ -252,6 +255,7 @@ class DigestionCallFactory:
             section_digests=ordered,
             brief=brief,
         )
+        prompt = bind_json_output_contract(prompt, SourceDossierProposal)
         intent = self._intent(
             plan=plan,
             task_type="source_dossier_reduce",
@@ -301,6 +305,7 @@ class DigestionCallFactory:
         if [item.source_id for item in dossiers] != expected:
             raise ValueError("matrix dossiers must match the planned source order exactly")
         prompt = evidence_matrix_prompt(dossiers=dossiers, brief=brief)
+        prompt = bind_json_output_contract(prompt, EvidenceMatrixProposal)
         intent = self._intent(
             plan=plan,
             task_type="evidence_matrix",

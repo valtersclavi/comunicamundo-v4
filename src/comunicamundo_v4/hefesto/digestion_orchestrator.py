@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import Protocol, cast
 from uuid import UUID
 
 from .contracts import NormalizedSource, PlanningRequest
@@ -38,6 +38,16 @@ class DigestionExecutionError(RuntimeError):
         self.failed_work_unit_ids = tuple(failed_work_unit_ids)
 
 
+class DigestionKnowledgeRepository(Protocol):
+    async def persist_plan(
+        self, plan: DigestionPlan, sources: Sequence[NormalizedSource]
+    ) -> None: ...
+
+    async def persist_findings(
+        self, plan: DigestionPlan, output: SectionDigest | SourceDossier
+    ) -> None: ...
+
+
 class DigestionOrchestrator:
     """Runs independent units in bounded parallel phases and checkpoints every result."""
 
@@ -51,6 +61,7 @@ class DigestionOrchestrator:
         artifacts: DigestionArtifactStore,
         runs: ExecutionRunRepository,
         work: WorkRepository,
+        knowledge: DigestionKnowledgeRepository | None = None,
         worker_id: str,
         lease_ttl: timedelta = timedelta(minutes=15),
     ) -> None:
@@ -62,6 +73,7 @@ class DigestionOrchestrator:
         self._artifacts = artifacts
         self._runs = runs
         self._work = work
+        self._knowledge = knowledge
         self._durable = DurableCallExecutor(
             gateway=gateway,
             artifacts=artifacts,
@@ -88,6 +100,8 @@ class DigestionOrchestrator:
             artifacts=DigestionArtifactRefs(request=request_pointer, plan=plan_pointer),
         )
         await self._runs.create(run)
+        if self._knowledge is not None:
+            await self._knowledge.persist_plan(plan, request.sources)
         return await self._advance(run, plan, request)
 
     async def resume(self, execution_run_id: UUID) -> DigestionRunResult:
@@ -292,9 +306,15 @@ class DigestionOrchestrator:
 
     async def _persist_output(self, plan: DigestionPlan, output: object) -> ArtifactPointer:
         if isinstance(output, SectionDigest):
-            return await self._artifacts.persist_section_digest(plan, output)
+            pointer = await self._artifacts.persist_section_digest(plan, output)
+            if self._knowledge is not None:
+                await self._knowledge.persist_findings(plan, output)
+            return pointer
         if isinstance(output, SourceDossier):
-            return await self._artifacts.persist_source_dossier(plan, output)
+            pointer = await self._artifacts.persist_source_dossier(plan, output)
+            if self._knowledge is not None:
+                await self._knowledge.persist_findings(plan, output)
+            return pointer
         if isinstance(output, EvidenceMatrix):
             return await self._artifacts.persist_evidence_matrix(plan, output)
         raise TypeError(f"unsupported digestion output: {type(output).__name__}")

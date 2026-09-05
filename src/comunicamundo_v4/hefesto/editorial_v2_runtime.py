@@ -28,6 +28,7 @@ from .editorial_v2_prompts import (
 )
 from .execution_contracts import LLMCallIntent, TokenBudget, text_sha256, work_unit_key
 from .hefesto_tips import HefestoTipTimingResult
+from .llm_gateway import bind_json_output_contract
 from .planning import fingerprint_brief
 from .source_digestion import estimate_tokens
 
@@ -140,6 +141,7 @@ class EditorialV2CallFactory:
         matrix_sha256: str,
     ) -> PreparedEditorialCall[NarrativeAxisProposal]:
         prompt = axis_proposal_prompt(brief=brief, understanding=understanding, matrix=matrix)
+        prompt = bind_json_output_contract(prompt, NarrativeAxisProposal)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project_id,
@@ -169,6 +171,7 @@ class EditorialV2CallFactory:
             understanding=understanding,
             matrix=matrix,
         )
+        prompt = bind_json_output_contract(prompt, NarrativeAxisEvidenceReview)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project_id,
@@ -204,6 +207,7 @@ class EditorialV2CallFactory:
             understanding=understanding,
             matrix=matrix,
         )
+        prompt = bind_json_output_contract(prompt, EditorialProjectProposal)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project_id,
@@ -231,6 +235,7 @@ class EditorialV2CallFactory:
         proposal: EditorialProjectProposal,
     ) -> PreparedEditorialCall[HefestoTipTimingResult]:
         prompt = tip_timing_prompt(brief=brief, proposal=proposal)
+        prompt = bind_json_output_contract(prompt, HefestoTipTimingResult)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project_id,
