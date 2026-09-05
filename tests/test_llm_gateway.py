@@ -335,6 +335,44 @@ async def test_invalid_structured_output_is_a_failed_paid_attempt_and_is_not_ret
 
 
 @pytest.mark.asyncio
+async def test_complete_json_is_validated_when_provider_appends_extra_text() -> None:
+    response = _response()
+    response.text = '```json\n{"synthesis":"síntese"}\n```\nResposta concluída.'
+    transport = FakeTransport([response])
+    ledger = MemoryLedger()
+    gateway = LLMGateway(transport, ledger=ledger)
+
+    result = await gateway.generate(
+        _intent(response_schema=Proposal),
+        prompt=PROMPT,
+        response_schema=Proposal,
+    )
+
+    assert result.parsed == Proposal(synthesis="síntese")
+    assert len(transport.calls) == 1
+    assert ledger.records[0].status is LLMCallStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_recovered_json_still_receives_full_schema_validation() -> None:
+    response = _response()
+    response.text = '{"synthesis":""}\ntrailing text'
+    transport = FakeTransport([response])
+    ledger = MemoryLedger()
+    gateway = LLMGateway(transport, ledger=ledger)
+
+    with pytest.raises(LLMCallError, match="at least 1 character"):
+        await gateway.generate(
+            _intent(response_schema=Proposal),
+            prompt=PROMPT,
+            response_schema=Proposal,
+        )
+
+    assert len(transport.calls) == 1
+    assert ledger.records[0].status is LLMCallStatus.FAILED
+
+
+@pytest.mark.asyncio
 async def test_max_tokens_finish_reason_is_explicit_and_never_accepted_or_retried() -> None:
     transport = FakeTransport(
         [_response(parsed=Proposal(synthesis="partial"), finish_reason="MAX_TOKENS"), _response()]
