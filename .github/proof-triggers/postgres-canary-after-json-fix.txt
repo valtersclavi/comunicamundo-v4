@@ -1,0 +1,1 @@
+Run the complete relational canary after robust structured-output recovery.
