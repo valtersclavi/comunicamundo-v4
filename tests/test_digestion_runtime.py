@@ -10,6 +10,7 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     CausalStatus,
     DigestionMode,
     DominanceAssessment,
+    EvidenceKeyReference,
     EvidenceReference,
     EvidenceMatrixProposal,
     EvidenceStrength,
@@ -22,7 +23,7 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
 from comunicamundo_v4.hefesto.digestion_prompts import DIGESTION_SYSTEM_INSTRUCTION
 from comunicamundo_v4.hefesto.digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
 from comunicamundo_v4.hefesto.execution_contracts import text_sha256
-from comunicamundo_v4.hefesto.source_digestion import SourceDigestionPlanner
+from comunicamundo_v4.hefesto.source_digestion import SourceDigestionPlanner, evidence_key
 
 
 class FakeGateway:
@@ -56,11 +57,9 @@ def _finding(section: SourceSection) -> SourceFindingProposal:
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
         anchors=[
-            EvidenceReference(
-                section_ordinal=section.ordinal + 1,
-                paragraph_ordinal=paragraph.ordinal + 1,
-                first_sentence_ordinal=sentence.ordinal + 1,
-                last_sentence_ordinal=sentence.ordinal + 1,
+            EvidenceKeyReference(
+                first_evidence_key=evidence_key(sentence.sentence_id),
+                last_evidence_key=evidence_key(sentence.sentence_id),
             )
         ],
     )
@@ -153,7 +152,7 @@ def test_causal_vocabulary_in_strength_is_epistemically_indeterminate(
 
 
 @pytest.mark.asyncio
-async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
+async def test_direct_dossier_fails_closed_on_invented_evidence_key() -> None:
     source = _source("Evidência observada.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     factory = DigestionCallFactory(DigestionRuntimeConfig())
@@ -162,7 +161,7 @@ async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
     section = plan.sources[0].sections[0]
     proposal = _dossier_proposal(section)
     invented = proposal.findings[0].anchors[0].model_copy(
-        update={"last_sentence_ordinal": 999}
+        update={"last_evidence_key": "E_ffffffffffffffff"}
     )
     proposal = proposal.model_copy(
         update={
@@ -171,7 +170,70 @@ async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
             ]
         }
     )
-    with pytest.raises(ValueError, match="sentence ordinal outside"):
+    with pytest.raises(ValueError, match="unknown key"):
+        await call.invoke(FakeGateway(proposal))
+
+
+@pytest.mark.asyncio
+async def test_opaque_keys_resolve_an_exact_consecutive_sentence_range() -> None:
+    source = _source("Primeira frase. Segunda frase.\n\nTerceira frase.")
+    plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
+    section = plan.sources[0].sections[0]
+    paragraph = section.paragraphs[0]
+    first, second = paragraph.sentences
+    proposal = _dossier_proposal(section)
+    ranged = EvidenceKeyReference(
+        first_evidence_key=evidence_key(first.sentence_id),
+        last_evidence_key=evidence_key(second.sentence_id),
+    )
+    proposal = proposal.model_copy(
+        update={
+            "findings": [
+                proposal.findings[0].model_copy(update={"anchors": [ranged]})
+            ]
+        }
+    )
+    call = DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
+        plan=plan,
+        source=source,
+        source_plan=plan.sources[0],
+        brief=_brief(),
+    )
+
+    dossier = await call.invoke(FakeGateway(proposal))
+    anchor = dossier.findings[0].anchors[0]
+    assert anchor.first_sentence_id == first.sentence_id
+    assert anchor.last_sentence_id == second.sentence_id
+    assert anchor.excerpt == paragraph.text.strip()
+
+
+@pytest.mark.asyncio
+async def test_opaque_key_range_cannot_cross_paragraphs() -> None:
+    source = _source("Primeira frase.\n\nSegunda frase.")
+    plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
+    section = plan.sources[0].sections[0]
+    first = section.paragraphs[0].sentences[0]
+    second = section.paragraphs[1].sentences[0]
+    proposal = _dossier_proposal(section)
+    crossed = EvidenceKeyReference(
+        first_evidence_key=evidence_key(first.sentence_id),
+        last_evidence_key=evidence_key(second.sentence_id),
+    )
+    proposal = proposal.model_copy(
+        update={
+            "findings": [
+                proposal.findings[0].model_copy(update={"anchors": [crossed]})
+            ]
+        }
+    )
+    call = DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
+        plan=plan,
+        source=source,
+        source_plan=plan.sources[0],
+        brief=_brief(),
+    )
+
+    with pytest.raises(ValueError, match="crosses source paragraphs"):
         await call.invoke(FakeGateway(proposal))
 
 
@@ -214,11 +276,9 @@ async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> N
 
     unused_paragraph = first_section.paragraphs[1]
     unused_sentence = unused_paragraph.sentences[0]
-    reference = EvidenceReference(
-        section_ordinal=first_section.ordinal + 1,
-        paragraph_ordinal=unused_paragraph.ordinal + 1,
-        first_sentence_ordinal=unused_sentence.ordinal + 1,
-        last_sentence_ordinal=unused_sentence.ordinal + 1,
+    reference = EvidenceKeyReference(
+        first_evidence_key=evidence_key(unused_sentence.sentence_id),
+        last_evidence_key=evidence_key(unused_sentence.sentence_id),
     )
     changed_reference = _dossier_proposal(first_section).model_copy(
         update={

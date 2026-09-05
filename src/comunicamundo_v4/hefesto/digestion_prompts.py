@@ -6,7 +6,7 @@ from typing import Sequence
 
 from .contracts import EditorialBrief, NormalizedSource
 from .digestion_contracts import SectionDigest, SourceDossier, SourceSection
-from .source_digestion import source_balance_metrics
+from .source_digestion import evidence_key, source_balance_metrics
 
 
 DIGESTION_SYSTEM_INSTRUCTION = """
@@ -22,25 +22,24 @@ quasi_experimental, causal, mixed, and unclear.
 The evidence_strength field is a separate assessment of support. Its only values are strong, moderate, limited, and
 indeterminate. Never put a causal_status value in evidence_strength; use indeterminate when the source does not support
 a defensible strength assessment.
-Every substantive finding must cite the supplied human-sized coordinates: section_ordinal, paragraph_ordinal,
-first_sentence_ordinal, and last_sentence_ordinal. Ordinals are one-based. The first and last sentence must be in the
-same paragraph and identify a consecutive range in ascending source order (first_sentence_ordinal must be less than
-or equal to last_sentence_ordinal). Include enough consecutive sentences to preserve
-qualifications. Never return an excerpt: Hefesto resolves immutable hashes and reconstructs the exact source text
-from those coordinates after validating them.
+Every substantive finding must cite supplied opaque evidence keys. Copy first_evidence_key and last_evidence_key
+exactly from the labels; use the same key twice for one sentence. Both endpoints must belong to the same paragraph.
+Include enough consecutive sentences to preserve qualifications. Never invent or calculate a key and never return
+an excerpt: Hefesto resolves immutable sentence rows and reconstructs the exact source text after validating the keys.
 Return only the requested structured object in the requested language.
 """.strip()
 
 
 def _coordinate_text(section: SourceSection) -> str:
-    """Render model-facing text with small, unambiguous one-based coordinates."""
+    """Render model-facing text with opaque sentence handles and human context."""
 
     blocks: list[str] = []
     for paragraph in section.paragraphs:
         lines = [f"[SECTION {section.ordinal + 1}; PARAGRAPH {paragraph.ordinal + 1}]"]
         lines.extend(
-            f"[SENTENCE {sentence.ordinal + 1}] "
-            f"[SECTION {section.ordinal + 1}; PARAGRAPH {paragraph.ordinal + 1}] "
+            f"[EVIDENCE_KEY {evidence_key(sentence.sentence_id)}] "
+            f"[SECTION {section.ordinal + 1}; PARAGRAPH {paragraph.ordinal + 1}; "
+            f"SENTENCE {sentence.ordinal + 1}] "
             f"{sentence.text.strip()}"
             for sentence in paragraph.sentences
         )
@@ -59,9 +58,10 @@ def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, o
     }
     return f"""
 Create a bounded digest of this one section. Record only findings actually supported in the section. A references or
-administrative section may legitimately have no findings. For every anchor, copy section_ordinal, paragraph_ordinal,
-first_sentence_ordinal, and last_sentence_ordinal from the labels below. All ordinals are one-based. A range may contain several consecutive sentences but
-must stay within one paragraph. Do not return excerpts. Do not infer a whole-source method or conclusion from this
+administrative section may legitimately have no findings. For every anchor, copy first_evidence_key and
+last_evidence_key exactly from the labels below. Use the same key twice for one sentence. A range may contain several
+consecutive sentences but must stay within one paragraph. Do not return excerpts, hashes, or numeric coordinates. Do
+not infer a whole-source method or conclusion from this
 partial section. Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
 OUTPUT LANGUAGE: {output_language}
@@ -77,8 +77,9 @@ def direct_source_dossier_prompt(*, source: NormalizedSource, section: SourceSec
 Build one source dossier from the complete source below. Preserve every substantively distinct finding, qualification,
 methodological fact, limitation, and uncertainty; consolidate only genuinely redundant wording. Describe the source's
 actual method or institutional role. Treat recommendations as recommendations, not empirical effects. Every evidence anchor must
-copy section_ordinal {section.ordinal + 1} plus a paragraph_ordinal and consecutive first/last sentence ordinals from the labels below.
-Never return excerpts or locators; Hefesto reconstructs both. Use a separate anchor when another paragraph is needed.
+copy first_evidence_key and last_evidence_key exactly from the labels below. Use the same key for both fields when one
+sentence suffices. Never return excerpts or locators. Do not return hashes or numeric coordinates; Hefesto reconstructs them. Use a
+separate anchor when another paragraph is needed.
 Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
 EDITORIAL BRIEF:
@@ -98,14 +99,32 @@ def reduced_source_dossier_prompt(
     section_digests: Sequence[SectionDigest],
     brief: EditorialBrief,
 ) -> str:
-    serialized = [item.model_dump(mode="json", exclude={"created_at"}) for item in section_digests]
+    serialized = []
+    for item in section_digests:
+        payload = item.model_dump(mode="json", exclude={"created_at", "findings"})
+        payload["findings"] = [
+            {
+                "finding": finding.finding,
+                "causal_status": finding.causal_status.value,
+                "evidence_strength": finding.evidence_strength.value,
+                "qualifications": finding.qualifications,
+                "anchors": [
+                    {
+                        "first_evidence_key": evidence_key(anchor.first_sentence_id),
+                        "last_evidence_key": evidence_key(anchor.last_sentence_id),
+                    }
+                    for anchor in finding.anchors
+                ],
+            }
+            for finding in item.findings
+        ]
+        serialized.append(payload)
     return f"""
 Reduce the section digests into one source dossier. A long source does not receive more representational weight merely
 because it has more pages or sections. Synthesize rather than concatenate, but preserve every substantively distinct
-finding, counterevidence item, qualification, method, limitation, and uncertainty. Reuse only
-the supplied evidence coordinates. Return section_ordinal, paragraph_ordinal, first_sentence_ordinal, and
-last_sentence_ordinal; never return excerpts, locators, or hashes. Do not alter a coordinate or turn an association
-into causation during reduction.
+finding, counterevidence item, qualification, method, limitation, and uncertainty. Reuse only the supplied opaque
+evidence keys. Return first_evidence_key and last_evidence_key exactly as supplied; never return excerpts, locators,
+hashes, or numeric coordinates. Do not alter a key or turn an association into causation during reduction.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}
