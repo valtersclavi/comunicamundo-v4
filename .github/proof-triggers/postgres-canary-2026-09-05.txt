@@ -1,0 +1,2 @@
+Hefesto V2 PostgreSQL end-to-end canary.
+Created only to trigger the existing canonical proof workflow after deployment of PR #56.
