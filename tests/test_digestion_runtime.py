@@ -145,6 +145,13 @@ def test_evidence_reference_canonicalizes_reversed_transport_endpoints() -> None
     assert reference.last_sentence_ordinal == 4
 
 
+@pytest.mark.parametrize("transport_value", [status.value for status in CausalStatus])
+def test_causal_vocabulary_in_strength_is_epistemically_indeterminate(
+    transport_value: str,
+) -> None:
+    assert EvidenceStrength(transport_value) is EvidenceStrength.INDETERMINATE
+
+
 @pytest.mark.asyncio
 async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
     source = _source("Evidência observada.")
