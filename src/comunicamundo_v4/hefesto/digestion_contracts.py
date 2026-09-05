@@ -20,10 +20,10 @@ EvidenceKey = Annotated[str, Field(pattern=r"^E_[0-9a-f]{16}$")]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v12"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v10"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v10"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v8"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v13"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v11"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v11"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v9"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -365,6 +365,17 @@ class SourceFindingProposal(StrictModel):
     evidence_strength: EvidenceStrength
     anchors: list[EvidenceKeyReference] = Field(min_length=1)
     qualifications: list[ShortText] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _canonicalize_single_anchor(cls, value: object) -> object:
+        # Gemini may collapse a one-item JSON array into the item itself when
+        # the provider-side grammar is intentionally omitted for a large
+        # response. Cardinality is unambiguous, so restore the transport shape
+        # before applying the full contract.
+        if isinstance(value, dict) and isinstance(value.get("anchors"), dict):
+            return {**value, "anchors": [value["anchors"]]}
+        return value
 
 
 class MethodProfile(StrictModel):
