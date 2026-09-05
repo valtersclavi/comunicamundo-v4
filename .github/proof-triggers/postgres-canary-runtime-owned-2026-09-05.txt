@@ -1,0 +1,1 @@
+Triggers the runtime-owned PostgreSQL canary after deployment of PR #60.
