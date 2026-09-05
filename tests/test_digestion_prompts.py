@@ -35,6 +35,8 @@ def test_prompts_make_epistemic_and_balance_rules_explicit() -> None:
     assert "causation" in direct.lower()
     assert "consecutive range" in DIGESTION_SYSTEM_INSTRUCTION.lower()
     assert "same paragraph" in DIGESTION_SYSTEM_INSTRUCTION.lower()
+    assert "outcome direction" in DIGESTION_SYSTEM_INSTRUCTION.lower()
+    assert "null finding" in DIGESTION_SYSTEM_INSTRUCTION.lower()
     assert "never return excerpts" in direct.lower()
     assert "[section 1; paragraph 1]" in direct.lower()
     assert "[sentence " in direct.lower()
