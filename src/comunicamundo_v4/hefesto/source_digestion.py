@@ -15,6 +15,7 @@ from .digestion_contracts import (
     DigestionPlan,
     EditorialUnderstandingV2,
     EvidenceAnchor,
+    EvidenceKeyReference,
     EvidenceReference,
     EvidenceMatrix,
     SourceFinding,
@@ -354,10 +355,17 @@ def materialize_findings(
 ) -> list[SourceFinding]:
     """Resolve ordinals and reconstruct exact excerpts inside one paragraph."""
 
-    section_map = {section.section_id: section for section in sections}
+    evidence_map: dict[str, tuple[SourceSection, SourceParagraph, int]] = {}
+    for section in sections:
+        for paragraph in section.paragraphs:
+            for sentence_index, sentence in enumerate(paragraph.sentences):
+                key = evidence_key(sentence.sentence_id)
+                if key in evidence_map:
+                    raise ValueError(f"evidence key collision: {key}")
+                evidence_map[key] = (section, paragraph, sentence_index)
     materialized: list[SourceFinding] = []
     for finding in findings:
-        anchors = [_materialize_anchor(reference, section_map) for reference in finding.anchors]
+        anchors = [_materialize_key_anchor(reference, evidence_map) for reference in finding.anchors]
         materialized.append(
             SourceFinding(
                 finding=finding.finding,
@@ -370,7 +378,64 @@ def materialize_findings(
     return materialized
 
 
-def _materialize_anchor(
+def evidence_key(sentence_id: str) -> str:
+    """Return a compact opaque handle; full immutable IDs remain code-owned."""
+
+    return f"E_{sentence_id[:16]}"
+
+
+def _materialize_key_anchor(
+    reference: EvidenceKeyReference,
+    evidence_map: dict[str, tuple[SourceSection, SourceParagraph, int]],
+) -> EvidenceAnchor:
+    first_match = evidence_map.get(reference.first_evidence_key)
+    last_match = evidence_map.get(reference.last_evidence_key)
+    if first_match is None or last_match is None:
+        missing = [
+            key for key, match in (
+                (reference.first_evidence_key, first_match),
+                (reference.last_evidence_key, last_match),
+            ) if match is None
+        ]
+        raise ValueError(f"evidence reference contains an unknown key: {', '.join(missing)}")
+    first_section, first_paragraph, first_index = first_match
+    last_section, last_paragraph, last_index = last_match
+    if first_section.section_id != last_section.section_id:
+        raise ValueError("evidence key range crosses source sections")
+    if first_paragraph.paragraph_id != last_paragraph.paragraph_id:
+        raise ValueError("evidence key range crosses source paragraphs")
+    if first_index > last_index:
+        first_index, last_index = last_index, first_index
+    selected = first_paragraph.sentences[first_index:last_index + 1]
+    excerpt = first_paragraph.text[
+        selected[0].char_start - first_paragraph.char_start:
+        selected[-1].char_end - first_paragraph.char_start
+    ].strip()
+    if not excerpt:
+        raise ValueError("evidence key range reconstructed an empty excerpt")
+    sentence_label = (
+        str(first_index + 1)
+        if first_index == last_index
+        else f"{first_index + 1}-{last_index + 1}"
+    )
+    return EvidenceAnchor(
+        section_ordinal=first_section.ordinal + 1,
+        paragraph_ordinal=first_paragraph.ordinal + 1,
+        first_sentence_ordinal=first_index + 1,
+        last_sentence_ordinal=last_index + 1,
+        section_id=first_section.section_id,
+        paragraph_id=first_paragraph.paragraph_id,
+        first_sentence_id=selected[0].sentence_id,
+        last_sentence_id=selected[-1].sentence_id,
+        locator=(
+            f"section {first_section.ordinal + 1}; paragraph {first_paragraph.ordinal + 1}; "
+            f"sentences {sentence_label}"
+        ),
+        excerpt=excerpt,
+    )
+
+
+def _materialize_ordinal_anchor(
     reference: EvidenceReference,
     section_map: dict[str, SourceSection],
 ) -> EvidenceAnchor:
@@ -428,7 +493,7 @@ def validate_dossier_evidence(dossier: SourceDossier, sections: Sequence[SourceS
         raise ValueError("dossier and source plan disagree about their sections")
     for finding in dossier.findings:
         for anchor in finding.anchors:
-            rebuilt = _materialize_anchor(
+            rebuilt = _materialize_ordinal_anchor(
                 EvidenceReference.model_validate(
                     anchor.model_dump(include=set(EvidenceReference.model_fields))
                 ),
