@@ -57,7 +57,12 @@ def stage_proof_request(
         original = _download(source_url) if source_url.startswith("http") else _canary_text().encode()
         if not original or len(original) > MAX_ORIGINAL_BYTES:
             raise ValueError(f"source {ordinal} has an aberrant original size")
-        text, pages = _extract_text(original, extension=extension)
+        try:
+            text, pages = _extract_text(original, extension=extension)
+        except Exception as error:
+            raise ValueError(
+                f"source {ordinal} ({title!r}) extraction failed: {error}"
+            ) from error
         object_name = f"{ROOT_PREFIX}/projects/{project_id}/sources/{source_id}/original.{extension}"
         original_uri = f"gs://{bucket_name}/{object_name}"
         _persist_immutable(storage_client, bucket_name, object_name, original, _content_type(extension))
@@ -186,7 +191,7 @@ def _source_definitions(variant: ProofVariant) -> list[tuple[str, str, str]]:
         "pdf",
     )
     return [
-        ("Social media use in adolescents with and without mental health conditions", "https://www.repository.cam.ac.uk/bitstreams/cce5f271-e777-41cc-8347-1334a197750f/download", "pdf"),
+        ("Social media use in adolescents with and without mental health conditions", "https://www.nature.com/articles/s41562-025-02134-4.pdf", "pdf"),
         ("Mechanisms linking social media use to adolescent mental health vulnerability", "https://www.repository.cam.ac.uk/bitstreams/b3cb127e-41ec-4275-b103-914447cb90b4/download", "pdf"),
         ("Windows of developmental sensitivity to social media", "https://www.repository.cam.ac.uk/bitstreams/d4d58e50-b1d0-4ae8-b8c7-3853c0357002/download", "pdf"),
         fourth,
