@@ -19,10 +19,10 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v7"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v5"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v5"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v3"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v8"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v6"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v6"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v4"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -59,6 +59,11 @@ class CausalStatus(StrEnum):
             "no_association",
         }:
             return cls.NO_CAUSAL_CLAIM
+        if isinstance(value, str) and value.strip().lower() in {
+            "temporal_association",
+            "temporal",
+        }:
+            return cls.LONGITUDINAL_ASSOCIATION
         return None
 
 
