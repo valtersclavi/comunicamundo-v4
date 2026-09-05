@@ -17,11 +17,10 @@ env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
   JOB_NAME: hefesto-v4-rebuild
-  BUCKET: comunicamundo-v4-hefesto-30524898837
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
-  # Admission budget, not a content limit. Calls retain their contract-specific budgets.
+  # Admission budget, not a content limit. Calls retain contract-specific budgets.
   ADMISSION_TPM: "2000000"
   MAX_CONCURRENCY: "8"
   PROJECT_CONCURRENCY: "6"
@@ -52,154 +51,6 @@ jobs:
             echo "VARIANT=B" >> "${GITHUB_ENV}"
           fi
 
-      - name: Prepare original sources
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/hefesto-proof/sources
-          if [[ "${PROOF}" == "postgres-canary" ]]; then
-            python - <<'PY'
-          from pathlib import Path
-
-          text = """ADOLESCÊNCIA, VIDA DIGITAL E SAÚDE MENTAL
-
-          Pesquisas observacionais encontram associações entre certos padrões de uso de redes sociais e sintomas de ansiedade ou depressão em adolescentes. Uma associação, isoladamente, não demonstra que a plataforma causou o desfecho: sofrimento prévio também pode alterar a forma de uso.
-
-          O efeito médio esconde diferenças importantes. Uso passivo, comparação social, exposição a hostilidade e privação de sono podem aumentar riscos, enquanto contato com pares e acesso a comunidades de apoio podem beneficiar alguns jovens.
-
-          Idade, gênero, vulnerabilidades anteriores, contexto familiar e desenho da plataforma modificam os resultados. Por isso, recomendações universais baseadas apenas em tempo de tela têm alcance limitado.
-
-          Estudos longitudinais ajudam a ordenar os acontecimentos no tempo, mas ainda enfrentam confundimento e medidas autorrelatadas. Experimentos naturais e dados mais granulares podem fortalecer inferências futuras.
-
-          Uma resposta responsável combina educação digital, diálogo familiar, proteção contra assédio e atenção clínica aos sinais de sofrimento. A evidência favorece cuidado proporcional ao risco, não alarmismo nem indiferença."""
-          Path('/tmp/hefesto-proof/sources/source-1.txt').write_text(text, encoding='utf-8')
-          PY
-          else
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq poppler-utils
-            if [[ "${VARIANT}" == "A" ]]; then
-              fourth_url="https://nap.nationalacademies.org/resource/27396/Highlights_for_Social_Media_and_Adolescent_Health.pdf"
-            else
-              fourth_url="https://www.ncbi.nlm.nih.gov/books/n/nap27396/pdf/"
-            fi
-            urls=(
-              "https://www.repository.cam.ac.uk/bitstreams/cce5f271-e777-41cc-8347-1334a197750f/download"
-              "https://www.repository.cam.ac.uk/bitstreams/b3cb127e-41ec-4275-b103-914447cb90b4/download"
-              "https://www.repository.cam.ac.uk/bitstreams/d4d58e50-b1d0-4ae8-b8c7-3853c0357002/download"
-              "${fourth_url}"
-            )
-            for index in 1 2 3 4; do
-              pdf="/tmp/hefesto-proof/sources/source-${index}.pdf"
-              curl -fL --retry 4 --retry-all-errors --connect-timeout 30 --max-time 900 \
-                -A 'Mozilla/5.0 Hefesto-V4-relational-proof' \
-                "${urls[$((index-1))]}" -o "${pdf}"
-              test -s "${pdf}"
-              pdfinfo "${pdf}" > "/tmp/hefesto-proof/sources/source-${index}.pdfinfo"
-              pdftotext -enc UTF-8 "${pdf}" "/tmp/hefesto-proof/sources/source-${index}.txt"
-              test -s "/tmp/hefesto-proof/sources/source-${index}.txt"
-            done
-          fi
-
-      - name: Build normalized request and source manifest
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import hashlib
-          import json
-          import os
-          import re
-          import uuid
-          from pathlib import Path
-
-          root = Path('/tmp/hefesto-proof')
-          project_id = str(uuid.uuid4())
-          is_canary = os.environ['PROOF'] == 'postgres-canary'
-          count = 1 if is_canary else 4
-          titles = ['Adolescência, vida digital e saúde mental — canário'] if is_canary else [
-              'Social media use in adolescents with and without mental health conditions',
-              'Mechanisms linking social media use to adolescent mental health vulnerability',
-              'Windows of developmental sensitivity to social media',
-              'Social Media and Adolescent Health — Highlights' if os.environ['VARIANT'] == 'A'
-              else 'Social Media and Adolescent Health — Full Report',
-          ]
-          urls = ['generated://hefesto/postgres-canary'] if is_canary else [
-              'https://www.repository.cam.ac.uk/bitstreams/cce5f271-e777-41cc-8347-1334a197750f/download',
-              'https://www.repository.cam.ac.uk/bitstreams/b3cb127e-41ec-4275-b103-914447cb90b4/download',
-              'https://www.repository.cam.ac.uk/bitstreams/d4d58e50-b1d0-4ae8-b8c7-3853c0357002/download',
-              'https://nap.nationalacademies.org/resource/27396/Highlights_for_Social_Media_and_Adolescent_Health.pdf'
-              if os.environ['VARIANT'] == 'A' else 'https://www.ncbi.nlm.nih.gov/books/n/nap27396/pdf/',
-          ]
-
-          def normalize(raw: str) -> str:
-              pages = []
-              for page in raw.replace('\r\n', '\n').replace('\r', '\n').split('\f'):
-                  lines = [line.rstrip() for line in page.splitlines()]
-                  while lines and not lines[0].strip():
-                      lines.pop(0)
-                  while lines and not lines[-1].strip():
-                      lines.pop()
-                  if lines:
-                      pages.append('\n'.join(lines))
-              return '\n\n'.join(pages).strip()
-
-          sources, manifest = [], []
-          for index in range(1, count + 1):
-              source_id = str(uuid.uuid4())
-              original = root / 'sources' / f"source-{index}.{'txt' if is_canary else 'pdf'}"
-              text_path = root / 'sources' / f'source-{index}.txt'
-              original_bytes = original.read_bytes()
-              text = normalize(text_path.read_text(encoding='utf-8', errors='replace'))
-              assert len(text) > (500 if is_canary else 1000), (index, len(text))
-              pages = 1
-              if not is_canary:
-                  info = (root / 'sources' / f'source-{index}.pdfinfo').read_text(errors='replace')
-                  pages = int(re.search(r'^Pages:\s+(\d+)\s*$', info, re.MULTILINE).group(1))
-              extension = original.suffix.lstrip('.')
-              gcs_uri = (
-                  f"gs://{os.environ['BUCKET']}/comunicamundo-v4-rebuild/projects/{project_id}/"
-                  f"sources/{source_id}/original.{extension}"
-              )
-              record = {
-                  'source_id': source_id,
-                  'text': text,
-                  'language': 'pt-BR' if is_canary else 'en',
-                  'title': titles[index - 1],
-                  'metadata': {
-                      'source_url': urls[index - 1],
-                      'original_gcs_uri': gcs_uri,
-                      'binary_sha256': hashlib.sha256(original_bytes).hexdigest(),
-                      'normalized_text_sha256': hashlib.sha256(text.encode()).hexdigest(),
-                      'pages': pages,
-                      'bytes': len(original_bytes),
-                      'normalized_characters': len(text),
-                      'test_variant': os.environ['VARIANT'],
-                      'extraction': 'original text' if is_canary else 'pdftotext UTF-8; page boundaries preserved; no semantic filtering',
-                  },
-              }
-              sources.append(record)
-              manifest.append({
-                  'ordinal': index, 'source_id': source_id, 'title': titles[index - 1],
-                  'url': urls[index - 1], 'original_local_path': str(original), **record['metadata'],
-              })
-
-          request = {
-              'project_id': project_id,
-              'brief': {
-                  'theme': 'O impacto das redes sociais na saúde mental dos adolescentes',
-                  'approach': 'Produza um artigo claro e rigoroso usando as fontes como matéria-prima editorial, distinguindo associação, causalidade, riscos, benefícios e limites.',
-                  'duration_minutes': 5 if is_canary else 10,
-                  'output_language': 'pt-BR',
-                  'audience': 'Leitores não especialistas interessados em adolescência, saúde mental e vida digital',
-                  'product': 'article',
-              },
-              'sources': sources,
-          }
-          (root / 'request.json').write_text(json.dumps(request, ensure_ascii=False), encoding='utf-8')
-          (root / 'source-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
-              output.write(f"NEW_PROJECT_ID={project_id}\n")
-          print(json.dumps({'proof': os.environ['PROOF'], 'variant': os.environ['VARIANT'], 'project_id': project_id}))
-          PY
-
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.PROJECT_ID }}
@@ -207,33 +58,6 @@ jobs:
           service_account: ${{ env.DEPLOYER_SA }}
 
       - uses: google-github-actions/setup-gcloud@v3
-
-      - name: Preserve originals and request in GCS
-        run: |
-          set -euo pipefail
-          access_token="$(gcloud auth print-access-token)"
-          upload_object() {
-            local source_path="$1"
-            local gcs_uri="$2"
-            local object_name="${gcs_uri#gs://${BUCKET}/}"
-            local encoded_name
-            encoded_name="$(jq -rn --arg value "${object_name}" '$value | @uri')"
-            curl --fail --silent --show-error \
-              -X POST \
-              -H "Authorization: Bearer ${access_token}" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@${source_path}" \
-              "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${encoded_name}" \
-              >/dev/null
-          }
-          while IFS=$'\t' read -r local_path gcs_uri; do
-            upload_object "${local_path}" "${gcs_uri}"
-          done < <(jq -r '.[] | [.original_local_path, .original_gcs_uri] | @tsv' /tmp/hefesto-proof/source-manifest.json)
-          request_uri="gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/request.json"
-          upload_object /tmp/hefesto-proof/request.json "${request_uri}"
-          upload_object /tmp/hefesto-proof/source-manifest.json \
-            "gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/source-manifest.json"
-          echo "REQUEST_URI=${request_uri}" >> "${GITHUB_ENV}"
 
       - name: Verify canonical Job boundary
         run: |
@@ -244,20 +68,20 @@ jobs:
           test -n "${deployed_image}"
           echo "DEPLOYED_IMAGE=${deployed_image}" >> "${GITHUB_ENV}"
 
-      - name: Run complete V2 pipeline on existing Job
+      - name: Run complete V2 proof on existing Job
         run: |
           set -euo pipefail
           execution="$(gcloud run jobs execute "${JOB_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
-            --args="run-v2,--request=${REQUEST_URI},--auto-approve-without-tips,--tokens-per-minute=${ADMISSION_TPM},--max-concurrency=${MAX_CONCURRENCY},--per-project-concurrency=${PROJECT_CONCURRENCY}" \
+            --args="run-proof-v2,--variant=${VARIANT},--tokens-per-minute=${ADMISSION_TPM},--max-concurrency=${MAX_CONCURRENCY},--per-project-concurrency=${PROJECT_CONCURRENCY}" \
             --format='value(metadata.name)')"
           test -n "${execution}"
           echo "EXECUTION=${execution}" >> "${GITHUB_ENV}"
           for attempt in $(seq 1 510); do
-            gcloud run jobs executions describe "${execution}" --project="${PROJECT_ID}" --region="${REGION}" --format=json > /tmp/hefesto-proof/execution.json
-            complete="$(jq -r '.status.conditions[]? | select(.type == "Completed") | .status' /tmp/hefesto-proof/execution.json | tail -1)"
+            gcloud run jobs executions describe "${execution}" --project="${PROJECT_ID}" --region="${REGION}" --format=json > /tmp/execution.json
+            complete="$(jq -r '.status.conditions[]? | select(.type == "Completed") | .status' /tmp/execution.json | tail -1)"
             if [[ "${complete}" == "True" ]]; then break; fi
-            if [[ "${complete}" == "False" ]]; then jq . /tmp/hefesto-proof/execution.json; exit 1; fi
+            if [[ "${complete}" == "False" ]]; then jq . /tmp/execution.json; exit 1; fi
             sleep 20
           done
           test "${complete:-}" = "True"
@@ -268,19 +92,19 @@ jobs:
           filter="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\" AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION}\""
           for attempt in $(seq 1 30); do
             gcloud logging read "${filter}" --project="${PROJECT_ID}" --freshness=3h \
-              --limit=200 --order=asc --format='value(textPayload)' > /tmp/hefesto-proof/container.log
+              --limit=200 --order=asc --format='value(textPayload)' > /tmp/container.log
             if python - <<'PY'
           import json
           import os
           from pathlib import Path
 
-          for line in Path('/tmp/hefesto-proof/container.log').read_text(errors='replace').splitlines():
+          for line in Path('/tmp/container.log').read_text(errors='replace').splitlines():
               try:
                   value = json.loads(line)
               except json.JSONDecodeError:
                   continue
-              if value.get('status') == 'complete' and value.get('project_id') == os.environ['NEW_PROJECT_ID']:
-                  Path('/tmp/hefesto-proof/result.json').write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
+              if value.get('status') == 'complete' and value.get('proof', {}).get('variant') == os.environ['VARIANT']:
+                  Path('/tmp/proof-result.json').write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
                   raise SystemExit(0)
           raise SystemExit(1)
           PY
@@ -289,18 +113,15 @@ jobs:
             fi
             sleep 10
           done
-          test -s /tmp/hefesto-proof/result.json
-          jq -e '(.status == "complete") and (.project_id == env.NEW_PROJECT_ID) and
-            (.digestion.source_count >= 1) and (.digestion.sentence_count >= 1) and
-            (.digestion.evidence_anchors >= 1) and (.article.word_count >= 1) and
-            (.rendered.html.uri | startswith("gs://")) and
+          test -s /tmp/proof-result.json
+          jq -e '(.status == "complete") and (.proof.variant == env.VARIANT) and
+            (.digestion.source_count == (.proof.sources | length)) and
+            (.digestion.sentence_count >= 1) and (.digestion.evidence_anchors >= 1) and
+            (.article.word_count >= 1) and (.rendered.html.uri | startswith("gs://")) and
             (.usage.report.usage_complete == true) and (.usage.report.pricing_complete == true)' \
-            /tmp/hefesto-proof/result.json >/dev/null
-          jq --slurpfile manifest /tmp/hefesto-proof/source-manifest.json \
-            --arg proof "${PROOF}" --arg variant "${VARIANT}" --arg execution "${EXECUTION}" \
-            '. + {proof: {name: $proof, variant: $variant, cloud_run_execution: $execution, source_manifest: $manifest[0]}}' \
-            /tmp/hefesto-proof/result.json > /tmp/hefesto-proof/proof-result.json
-          echo "HEFESTO_PROOF_RESULT_B64=$(base64 -w0 /tmp/hefesto-proof/proof-result.json)"
+            /tmp/proof-result.json >/dev/null
+          echo "NEW_PROJECT_ID=$(jq -r '.project_id' /tmp/proof-result.json)" >> "${GITHUB_ENV}"
+          echo "HEFESTO_PROOF_RESULT_B64=$(base64 -w0 /tmp/proof-result.json)"
 
       - name: Compare A and B
         if: env.VARIANT == 'B'
@@ -309,19 +130,18 @@ jobs:
         run: |
           set -euo pipefail
           a_run="$(gh run list --repo="${GITHUB_REPOSITORY}" --workflow=one-shot-social-media-multisource-ab \
-            --branch=main --status=success --limit=30 \
-            --json databaseId,displayTitle \
+            --branch=main --status=success --limit=30 --json databaseId,displayTitle \
             --jq '.[] | select(.displayTitle | contains("[social-media-multisource-a]")) | .databaseId' | head -1)"
           test -n "${a_run}"
-          gh run view "${a_run}" --repo="${GITHUB_REPOSITORY}" --log > /tmp/hefesto-proof/a-run.log
-          sed -n 's/^.*HEFESTO_PROOF_RESULT_B64=//p' /tmp/hefesto-proof/a-run.log | tail -1 | base64 -d > /tmp/hefesto-proof/a.json
-          test -s /tmp/hefesto-proof/a.json
+          gh run view "${a_run}" --repo="${GITHUB_REPOSITORY}" --log > /tmp/a-run.log
+          sed -n 's/^.*HEFESTO_PROOF_RESULT_B64=//p' /tmp/a-run.log | tail -1 | base64 -d > /tmp/a.json
+          test -s /tmp/a.json
           python - <<'PY'
           import json
           from pathlib import Path
 
-          a = json.loads(Path('/tmp/hefesto-proof/a.json').read_text())
-          b = json.loads(Path('/tmp/hefesto-proof/proof-result.json').read_text())
+          a = json.loads(Path('/tmp/a.json').read_text())
+          b = json.loads(Path('/tmp/proof-result.json').read_text())
           def metrics(item):
               report, digest = item['usage']['report'], item['digestion']
               return {
@@ -352,20 +172,10 @@ jobs:
               'A': am, 'B': bm,
               'delta_B_minus_A': {key: float(bm[key]) - float(am[key]) for key in numeric},
           }
-          Path('/tmp/hefesto-proof/comparison.json').write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding='utf-8')
+          Path('/tmp/comparison.json').write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding='utf-8')
           print(json.dumps(comparison, ensure_ascii=False, indent=2))
           PY
-          destination="gs://${BUCKET}/comunicamundo-v4-rebuild/proofs/social-media-multisource/comparison/${NEW_PROJECT_ID}.json"
-          access_token="$(gcloud auth print-access-token)"
-          object_name="${destination#gs://${BUCKET}/}"
-          encoded_name="$(jq -rn --arg value "${object_name}" '$value | @uri')"
-          curl --fail --silent --show-error -X POST \
-            -H "Authorization: Bearer ${access_token}" -H "Content-Type: application/json" \
-            --data-binary @/tmp/hefesto-proof/comparison.json \
-            "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${encoded_name}" \
-            >/dev/null
-          echo "HEFESTO_AB_COMPARISON_B64=$(base64 -w0 /tmp/hefesto-proof/comparison.json)"
-          echo "COMPARISON_URI=${destination}" >> "${GITHUB_ENV}"
+          echo "HEFESTO_AB_COMPARISON_B64=$(base64 -w0 /tmp/comparison.json)"
 
       - name: Proof summary
         if: always()
@@ -374,9 +184,8 @@ jobs:
             echo "# Hefesto V2 relational proof"
             echo "- Proof: \`${PROOF:-not-selected}\`"
             echo "- Variant: \`${VARIANT:-not-selected}\`"
-            echo "- Project: \`${NEW_PROJECT_ID:-not-created}\`"
+            echo "- Project: \`${NEW_PROJECT_ID:-read-from-receipt}\`"
             echo "- Existing Job: \`${JOB_NAME}\`"
             echo "- Execution: \`${EXECUTION:-not-started}\`"
             echo "- Image: \`${DEPLOYED_IMAGE:-not-read}\`"
-            echo "- Comparison: \`${COMPARISON_URI:-not-applicable}\`"
           } >> "${GITHUB_STEP_SUMMARY}"

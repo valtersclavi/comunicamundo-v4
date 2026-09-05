@@ -690,6 +690,34 @@ async def run_complete_v2_command(
         await metrics_database.close()
 
 
+async def run_proof_v2_command(
+    variant: str,
+    *,
+    tokens_per_minute: int,
+    max_concurrency: int,
+    per_project_concurrency: int,
+) -> dict[str, Any]:
+    """Stage fresh proof inputs as the runtime identity, then execute the V2 path."""
+
+    from .proof_requests import stage_proof_request
+
+    google_project = _required("GOOGLE_CLOUD_PROJECT")
+    bucket = _required("HEFESTO_GCS_BUCKET")
+    staged = await asyncio.to_thread(
+        stage_proof_request,
+        variant,
+        bucket_name=bucket,
+        storage_client=storage.Client(project=google_project),
+    )
+    result = await run_complete_v2_command(
+        staged.request_uri,
+        tokens_per_minute=tokens_per_minute,
+        max_concurrency=max_concurrency,
+        per_project_concurrency=per_project_concurrency,
+    )
+    return {**result, "proof": staged.model_dump(mode="json")}
+
+
 def _application():
     from .application import HefestoApplication
     from .runtime import VertexRuntimeSettings, build_vertex_runtime
@@ -713,6 +741,15 @@ async def _run(args: argparse.Namespace) -> None:
     if args.command == "run-v2":
         result = await run_complete_v2_command(
             args.request,
+            tokens_per_minute=args.tokens_per_minute,
+            max_concurrency=args.max_concurrency,
+            per_project_concurrency=args.per_project_concurrency,
+        )
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return
+    if args.command == "run-proof-v2":
+        result = await run_proof_v2_command(
+            args.variant,
             tokens_per_minute=args.tokens_per_minute,
             max_concurrency=args.max_concurrency,
             per_project_concurrency=args.per_project_concurrency,
@@ -845,6 +882,12 @@ def _parser() -> argparse.ArgumentParser:
         help="explicitly approve the Axis and Project while accepting zero Dicas",
     )
     _add_v2_capacity_arguments(run_v2)
+    run_proof_v2 = commands.add_parser(
+        "run-proof-v2",
+        help="stage fresh canonical canary/A/B sources and run the complete V2 path",
+    )
+    run_proof_v2.add_argument("--variant", choices=("canary", "A", "B"), required=True)
+    _add_v2_capacity_arguments(run_proof_v2)
     commands.add_parser(
         "check-postgres",
         help="verify the pooled runtime connection without exposing credentials",
