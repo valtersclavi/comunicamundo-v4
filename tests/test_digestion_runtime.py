@@ -168,6 +168,31 @@ def test_single_anchor_object_is_canonicalized_to_transport_list() -> None:
     assert proposal.anchors[0].first_evidence_key == "E_0123456789abcdef"
 
 
+def test_finding_objects_misplaced_in_text_lists_are_restored_and_deduplicated() -> None:
+    finding = {
+        "finding": "Achado sustentado.",
+        "causal_status": "correlational",
+        "evidence_strength": "moderate",
+        "anchors": {
+            "first_evidence_key": "E_0123456789abcdef",
+            "last_evidence_key": "E_0123456789abcdef",
+        },
+    }
+    proposal = SectionDigestProposal.model_validate(
+        {
+            "synopsis": "Síntese.",
+            "findings": [finding],
+            "methods": ["Estudo observacional.", finding],
+            "limitations": [finding],
+        }
+    )
+
+    assert len(proposal.findings) == 1
+    assert proposal.findings[0].finding == "Achado sustentado."
+    assert proposal.methods == ["Estudo observacional."]
+    assert proposal.limitations == []
+
+
 @pytest.mark.asyncio
 async def test_direct_dossier_fails_closed_on_invented_evidence_key() -> None:
     source = _source("Evidência observada.")

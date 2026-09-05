@@ -26,6 +26,8 @@ Every substantive finding must cite supplied opaque evidence keys. Copy first_ev
 exactly from the labels; use the same key twice for one sentence. Both endpoints must belong to the same paragraph.
 When a finding needs evidence from different paragraphs, return a separate anchor object for each paragraph.
 The anchors field is always a JSON array, including when it contains exactly one anchor object.
+Structured finding objects belong only in findings. Methods, limitations, uncertainties, and distinctive_contributions
+are arrays of text strings, never arrays of finding objects.
 Include enough consecutive sentences to preserve qualifications. Never invent or calculate a key and never return
 an excerpt: Hefesto resolves immutable sentence rows and reconstructs the exact source text after validating the keys.
 Return only the requested structured object in the requested language.
