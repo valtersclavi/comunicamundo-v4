@@ -16,6 +16,9 @@ source's claim. Preserve disagreements, null findings, boundary conditions, unce
 The causal_status field describes claim/design strength, never outcome direction. A null finding remains in the
 finding text and uses no_causal_claim; never use null_finding, null_result, no_effect, or no_association as a
 causal_status value.
+Use longitudinal_association for claims based on temporal or longitudinal association; temporal_association is not a
+transport value. The accepted causal_status values are no_causal_claim, correlational, longitudinal_association,
+quasi_experimental, causal, mixed, and unclear.
 Every substantive finding must cite the supplied human-sized coordinates: section_ordinal, paragraph_ordinal,
 first_sentence_ordinal, and last_sentence_ordinal. Ordinals are one-based. The first and last sentence must be in the
 same paragraph and identify a consecutive range in source order. Include enough consecutive sentences to preserve
