@@ -24,6 +24,7 @@ indeterminate. Never put a causal_status value in evidence_strength; use indeter
 a defensible strength assessment.
 Every substantive finding must cite supplied opaque evidence keys. Copy first_evidence_key and last_evidence_key
 exactly from the labels; use the same key twice for one sentence. Both endpoints must belong to the same paragraph.
+When a finding needs evidence from different paragraphs, return a separate anchor object for each paragraph.
 The anchors field is always a JSON array, including when it contains exactly one anchor object.
 Include enough consecutive sentences to preserve qualifications. Never invent or calculate a key and never return
 an excerpt: Hefesto resolves immutable sentence rows and reconstructs the exact source text after validating the keys.

@@ -225,7 +225,7 @@ async def test_opaque_keys_resolve_an_exact_consecutive_sentence_range() -> None
 
 
 @pytest.mark.asyncio
-async def test_opaque_key_range_cannot_cross_paragraphs() -> None:
+async def test_cross_paragraph_key_pair_becomes_two_single_sentence_anchors() -> None:
     source = _source("Primeira frase.\n\nSegunda frase.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     section = plan.sources[0].sections[0]
@@ -250,8 +250,15 @@ async def test_opaque_key_range_cannot_cross_paragraphs() -> None:
         brief=_brief(),
     )
 
-    with pytest.raises(ValueError, match="crosses source paragraphs"):
-        await call.invoke(FakeGateway(proposal))
+    dossier = await call.invoke(FakeGateway(proposal))
+    anchors = dossier.findings[0].anchors
+    assert len(anchors) == 2
+    assert [anchor.first_sentence_id for anchor in anchors] == [
+        first.sentence_id,
+        second.sentence_id,
+    ]
+    assert all(anchor.first_sentence_id == anchor.last_sentence_id for anchor in anchors)
+    assert anchors[0].paragraph_id != anchors[1].paragraph_id
 
 
 @pytest.mark.asyncio

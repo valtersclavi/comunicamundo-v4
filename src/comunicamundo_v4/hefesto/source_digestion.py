@@ -365,7 +365,11 @@ def materialize_findings(
                 evidence_map[key] = (section, paragraph, sentence_index)
     materialized: list[SourceFinding] = []
     for finding in findings:
-        anchors = [_materialize_key_anchor(reference, evidence_map) for reference in finding.anchors]
+        anchors = [
+            anchor
+            for reference in finding.anchors
+            for anchor in _materialize_key_anchors(reference, evidence_map)
+        ]
         materialized.append(
             SourceFinding(
                 finding=finding.finding,
@@ -384,10 +388,10 @@ def evidence_key(sentence_id: str) -> str:
     return f"E_{sentence_id[:16]}"
 
 
-def _materialize_key_anchor(
+def _materialize_key_anchors(
     reference: EvidenceKeyReference,
     evidence_map: dict[str, tuple[SourceSection, SourceParagraph, int]],
-) -> EvidenceAnchor:
+) -> list[EvidenceAnchor]:
     first_match = evidence_map.get(reference.first_evidence_key)
     last_match = evidence_map.get(reference.last_evidence_key)
     if first_match is None or last_match is None:
@@ -400,16 +404,33 @@ def _materialize_key_anchor(
         raise ValueError(f"evidence reference contains an unknown key: {', '.join(missing)}")
     first_section, first_paragraph, first_index = first_match
     last_section, last_paragraph, last_index = last_match
-    if first_section.section_id != last_section.section_id:
-        raise ValueError("evidence key range crosses source sections")
-    if first_paragraph.paragraph_id != last_paragraph.paragraph_id:
-        raise ValueError("evidence key range crosses source paragraphs")
+    if (
+        first_section.section_id != last_section.section_id
+        or first_paragraph.paragraph_id != last_paragraph.paragraph_id
+    ):
+        # The endpoints are two real, explicitly selected sentences, but they
+        # cannot form one quote range. Preserve both as independent anchors;
+        # never include the unselected text between their paragraphs.
+        return [
+            _resolved_key_anchor(first_section, first_paragraph, first_index, first_index),
+            _resolved_key_anchor(last_section, last_paragraph, last_index, last_index),
+        ]
     if first_index > last_index:
         first_index, last_index = last_index, first_index
-    selected = first_paragraph.sentences[first_index:last_index + 1]
-    excerpt = first_paragraph.text[
-        selected[0].char_start - first_paragraph.char_start:
-        selected[-1].char_end - first_paragraph.char_start
+
+    return [_resolved_key_anchor(first_section, first_paragraph, first_index, last_index)]
+
+
+def _resolved_key_anchor(
+    section: SourceSection,
+    paragraph: SourceParagraph,
+    first_index: int,
+    last_index: int,
+) -> EvidenceAnchor:
+    selected = paragraph.sentences[first_index:last_index + 1]
+    excerpt = paragraph.text[
+        selected[0].char_start - paragraph.char_start:
+        selected[-1].char_end - paragraph.char_start
     ].strip()
     if not excerpt:
         raise ValueError("evidence key range reconstructed an empty excerpt")
@@ -419,16 +440,16 @@ def _materialize_key_anchor(
         else f"{first_index + 1}-{last_index + 1}"
     )
     return EvidenceAnchor(
-        section_ordinal=first_section.ordinal + 1,
-        paragraph_ordinal=first_paragraph.ordinal + 1,
+        section_ordinal=section.ordinal + 1,
+        paragraph_ordinal=paragraph.ordinal + 1,
         first_sentence_ordinal=first_index + 1,
         last_sentence_ordinal=last_index + 1,
-        section_id=first_section.section_id,
-        paragraph_id=first_paragraph.paragraph_id,
+        section_id=section.section_id,
+        paragraph_id=paragraph.paragraph_id,
         first_sentence_id=selected[0].sentence_id,
         last_sentence_id=selected[-1].sentence_id,
         locator=(
-            f"section {first_section.ordinal + 1}; paragraph {first_paragraph.ordinal + 1}; "
+            f"section {section.ordinal + 1}; paragraph {paragraph.ordinal + 1}; "
             f"sentences {sentence_label}"
         ),
         excerpt=excerpt,
