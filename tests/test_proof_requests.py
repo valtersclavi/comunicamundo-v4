@@ -49,6 +49,7 @@ def test_ab_definitions_share_exactly_three_sources() -> None:
     assert a[3] != b[3]
     assert "Highlights" in a[3][0]
     assert "Full Report" in b[3][0]
+    assert a[0][1] == "https://www.nature.com/articles/s41562-025-02134-4.pdf"
 
 
 def test_text_extraction_normalizes_without_semantic_truncation() -> None:
