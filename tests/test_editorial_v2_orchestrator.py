@@ -24,7 +24,7 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     ArtifactPointer,
     CausalStatus,
     DominanceAssessment,
-    EvidenceReference,
+    EvidenceKeyReference,
     EvidenceMatrixProposal,
     EvidenceStrength,
     MethodProfile,
@@ -217,9 +217,10 @@ class ResponsiveGateway:
         self.calls.append(intent.task_type)
         self.prompts.append((intent.task_type, prompt, system_instruction))
         if response_schema is SourceDossierProposal:
-            section_ordinal = int(re.search(r"section_ordinal (\d+)", prompt).group(1))
-            paragraph_ordinal = int(re.search(r"\[SECTION \d+; PARAGRAPH (\d+)\]", prompt).group(1))
-            sentence_ordinal = int(re.search(r"\[SENTENCE (\d+)\]", prompt).group(1))
+            evidence_match = re.search(
+                r"\[EVIDENCE_KEY (E_[0-9a-f]{16})\]", prompt
+            ) or re.search(r'"first_evidence_key": "(E_[0-9a-f]{16})"', prompt)
+            evidence_value = evidence_match.group(1)
             proposal = SourceDossierProposal(
                 executive_synthesis="A fonte descreve uma associação heterogênea.",
                 method_profile=MethodProfile(
@@ -235,11 +236,9 @@ class ResponsiveGateway:
                         causal_status=CausalStatus.CORRELATIONAL,
                         evidence_strength=EvidenceStrength.MODERATE,
                         anchors=[
-                            EvidenceReference(
-                                section_ordinal=section_ordinal,
-                                paragraph_ordinal=paragraph_ordinal,
-                                first_sentence_ordinal=sentence_ordinal,
-                                last_sentence_ordinal=sentence_ordinal,
+                            EvidenceKeyReference(
+                                first_evidence_key=evidence_value,
+                                last_evidence_key=evidence_value,
                             )
                         ],
                     )
