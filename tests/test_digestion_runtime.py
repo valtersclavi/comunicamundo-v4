@@ -128,6 +128,11 @@ def test_null_outcome_labels_do_not_replace_the_causal_dimension(transport_value
     assert CausalStatus(transport_value) is CausalStatus.NO_CAUSAL_CLAIM
 
 
+@pytest.mark.parametrize("transport_value", ["temporal_association", "temporal"])
+def test_temporal_aliases_preserve_longitudinal_causal_status(transport_value: str) -> None:
+    assert CausalStatus(transport_value) is CausalStatus.LONGITUDINAL_ASSOCIATION
+
+
 @pytest.mark.asyncio
 async def test_direct_dossier_fails_closed_on_invented_coordinate() -> None:
     source = _source("Evidência observada.")
