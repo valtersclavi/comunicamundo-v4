@@ -19,10 +19,10 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v6"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v4"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v4"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v2"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v7"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v5"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v5"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v3"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -44,6 +44,22 @@ class CausalStatus(StrEnum):
     CAUSAL = "causal"
     MIXED = "mixed"
     UNCLEAR = "unclear"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "CausalStatus | None":
+        # Outcome direction and causal design are separate dimensions. Model
+        # transports sometimes put a null-outcome label in this field even
+        # though the finding text already preserves the null result. Such a
+        # label makes no causal claim, so normalize it without discarding the
+        # finding or weakening the persisted epistemic vocabulary.
+        if isinstance(value, str) and value.strip().lower() in {
+            "null_finding",
+            "null_result",
+            "no_effect",
+            "no_association",
+        }:
+            return cls.NO_CAUSAL_CLAIM
+        return None
 
 
 class EvidenceStrength(StrEnum):
