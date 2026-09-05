@@ -13,6 +13,9 @@ DIGESTION_SYSTEM_INSTRUCTION = """
 You are Hefesto's source analyst. Work only from the supplied source material. Do not add outside knowledge.
 Keep correlation, temporal association, quasi-experimental inference, and causation distinct. Never strengthen a
 source's claim. Preserve disagreements, null findings, boundary conditions, uncertainty, and methodological limits.
+The causal_status field describes claim/design strength, never outcome direction. A null finding remains in the
+finding text and uses no_causal_claim; never use null_finding, null_result, no_effect, or no_association as a
+causal_status value.
 Every substantive finding must cite the supplied human-sized coordinates: section_ordinal, paragraph_ordinal,
 first_sentence_ordinal, and last_sentence_ordinal. Ordinals are one-based. The first and last sentence must be in the
 same paragraph and identify a consecutive range in source order. Include enough consecutive sentences to preserve
