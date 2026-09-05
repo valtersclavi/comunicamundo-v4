@@ -5,6 +5,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: read
   contents: read
   id-token: write
 
@@ -211,13 +212,13 @@ jobs:
         run: |
           set -euo pipefail
           while IFS=$'\t' read -r local_path gcs_uri; do
-            gcloud storage cp "${local_path}" "${gcs_uri}" --if-generation-match=0 >/dev/null
+            gcloud storage cp "${local_path}" "${gcs_uri}" >/dev/null
           done < <(jq -r '.[] | [.original_local_path, .original_gcs_uri] | @tsv' /tmp/hefesto-proof/source-manifest.json)
           request_uri="gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/request.json"
-          gcloud storage cp /tmp/hefesto-proof/request.json "${request_uri}" --if-generation-match=0 >/dev/null
+          gcloud storage cp /tmp/hefesto-proof/request.json "${request_uri}" >/dev/null
           gcloud storage cp /tmp/hefesto-proof/source-manifest.json \
             "gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/source-manifest.json" \
-            --if-generation-match=0 >/dev/null
+            >/dev/null
           echo "REQUEST_URI=${request_uri}" >> "${GITHUB_ENV}"
 
       - name: Verify canonical Job boundary
@@ -247,12 +248,34 @@ jobs:
           done
           test "${complete:-}" = "True"
 
-      - name: Collect and validate immutable receipt
+      - name: Collect and validate immutable receipt from execution logs
         run: |
           set -euo pipefail
-          receipt_uri="$(gcloud storage ls "gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/executions/*/complete-run.json")"
-          test "$(printf '%s\n' "${receipt_uri}" | grep -c .)" -eq 1
-          gcloud storage cp "${receipt_uri}" /tmp/hefesto-proof/result.json >/dev/null
+          filter="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\" AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION}\""
+          for attempt in $(seq 1 30); do
+            gcloud logging read "${filter}" --project="${PROJECT_ID}" --freshness=3h \
+              --limit=200 --order=asc --format='value(textPayload)' > /tmp/hefesto-proof/container.log
+            if python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          for line in Path('/tmp/hefesto-proof/container.log').read_text(errors='replace').splitlines():
+              try:
+                  value = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if value.get('status') == 'complete' and value.get('project_id') == os.environ['NEW_PROJECT_ID']:
+                  Path('/tmp/hefesto-proof/result.json').write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
+                  raise SystemExit(0)
+          raise SystemExit(1)
+          PY
+            then
+              break
+            fi
+            sleep 10
+          done
+          test -s /tmp/hefesto-proof/result.json
           jq -e '(.status == "complete") and (.project_id == env.NEW_PROJECT_ID) and
             (.digestion.source_count >= 1) and (.digestion.sentence_count >= 1) and
             (.digestion.evidence_anchors >= 1) and (.article.word_count >= 1) and
@@ -263,16 +286,22 @@ jobs:
             --arg proof "${PROOF}" --arg variant "${VARIANT}" --arg execution "${EXECUTION}" \
             '. + {proof: {name: $proof, variant: $variant, cloud_run_execution: $execution, source_manifest: $manifest[0]}}' \
             /tmp/hefesto-proof/result.json > /tmp/hefesto-proof/proof-result.json
-          proof_root="gs://${BUCKET}/comunicamundo-v4-rebuild/proofs/${PROOF}/${VARIANT}"
-          gcloud storage cp /tmp/hefesto-proof/proof-result.json "${proof_root}/${NEW_PROJECT_ID}.json" --if-generation-match=0 >/dev/null
-          gcloud storage cp /tmp/hefesto-proof/proof-result.json "${proof_root}/latest.json" >/dev/null
+          echo "HEFESTO_PROOF_RESULT_B64=$(base64 -w0 /tmp/hefesto-proof/proof-result.json)"
 
       - name: Compare A and B
         if: env.VARIANT == 'B'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          comparison_root="gs://${BUCKET}/comunicamundo-v4-rebuild/proofs/social-media-multisource"
-          gcloud storage cp "${comparison_root}/A/latest.json" /tmp/hefesto-proof/a.json >/dev/null
+          a_run="$(gh run list --repo="${GITHUB_REPOSITORY}" --workflow=one-shot-social-media-multisource-ab \
+            --branch=main --status=success --limit=30 \
+            --json databaseId,displayTitle \
+            --jq '.[] | select(.displayTitle | contains("[social-media-multisource-a]")) | .databaseId' | head -1)"
+          test -n "${a_run}"
+          gh run view "${a_run}" --repo="${GITHUB_REPOSITORY}" --log > /tmp/hefesto-proof/a-run.log
+          sed -n 's/^.*HEFESTO_PROOF_RESULT_B64=//p' /tmp/hefesto-proof/a-run.log | tail -1 | base64 -d > /tmp/hefesto-proof/a.json
+          test -s /tmp/hefesto-proof/a.json
           python - <<'PY'
           import json
           from pathlib import Path
@@ -312,9 +341,9 @@ jobs:
           Path('/tmp/hefesto-proof/comparison.json').write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding='utf-8')
           print(json.dumps(comparison, ensure_ascii=False, indent=2))
           PY
-          destination="${comparison_root}/comparison/${NEW_PROJECT_ID}.json"
-          gcloud storage cp /tmp/hefesto-proof/comparison.json "${destination}" --if-generation-match=0 >/dev/null
-          gcloud storage cp /tmp/hefesto-proof/comparison.json "${comparison_root}/comparison/latest.json" >/dev/null
+          destination="gs://${BUCKET}/comunicamundo-v4-rebuild/proofs/social-media-multisource/comparison/${NEW_PROJECT_ID}.json"
+          gcloud storage cp /tmp/hefesto-proof/comparison.json "${destination}" >/dev/null
+          echo "HEFESTO_AB_COMPARISON_B64=$(base64 -w0 /tmp/hefesto-proof/comparison.json)"
           echo "COMPARISON_URI=${destination}" >> "${GITHUB_ENV}"
 
       - name: Proof summary
