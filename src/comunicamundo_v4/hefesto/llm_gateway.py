@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any, Protocol, TypeVar
 from uuid import NAMESPACE_URL, uuid5
+import json
 
 from google import genai
 from google.genai import types
@@ -24,6 +25,7 @@ from .execution_contracts import (
 
 
 ParsedT = TypeVar("ParsedT", bound=BaseModel)
+MAX_PROVIDER_SCHEMA_NODES = 50
 
 
 class AsyncModelsTransport(Protocol):
@@ -136,10 +138,14 @@ class LLMGateway:
         if system_instruction:
             config_kwargs["system_instruction"] = system_instruction
         if response_schema is not None:
-            config_kwargs.update(
-                response_mime_type="application/json",
-                response_json_schema=_provider_response_schema(response_schema),
-            )
+            config_kwargs["response_mime_type"] = "application/json"
+            provider_schema = _provider_response_schema(response_schema)
+            # Gemini compiles response schemas into a serving grammar. Deeply
+            # nested schemas can exceed that grammar's state budget even when
+            # every individual constraint is valid. Complex validation stays
+            # in Pydantic/PostgreSQL; only small schemas reach the provider.
+            if _schema_node_count(provider_schema) <= MAX_PROVIDER_SCHEMA_NODES:
+                config_kwargs["response_json_schema"] = provider_schema
         config = types.GenerateContentConfig(**config_kwargs)
 
         queued_at = self._utc_now()
@@ -344,6 +350,26 @@ def _provider_response_schema(schema: type[BaseModel]) -> dict[str, Any]:
     """Keep output shape while omitting constraints that explode provider grammar states."""
 
     return _strip_provider_schema_constraints(schema.model_json_schema())
+
+
+def bind_json_output_contract(prompt: str, schema: type[BaseModel]) -> str:
+    """Bind the full output shape to the hashed prompt, independent of provider grammar."""
+
+    contract = json.dumps(
+        _provider_response_schema(schema),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"{prompt}\n\nOUTPUT JSON CONTRACT (return only one JSON object):\n{contract}"
+
+
+def _schema_node_count(value: Any) -> int:
+    if isinstance(value, dict):
+        return 1 + sum(_schema_node_count(item) for item in value.values())
+    if isinstance(value, list):
+        return 1 + sum(_schema_node_count(item) for item in value)
+    return 1
 
 
 def _strip_provider_schema_constraints(value: Any, *, named_schema_map: bool = False) -> Any:

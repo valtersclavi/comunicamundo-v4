@@ -224,20 +224,26 @@ def run_plan_command(location: str) -> PlanningRun:
 def _v2_execution_services(
     *, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int
 ) -> _V2ExecutionServices:
-    from .digestion_persistence import FirestoreExecutionRunRepository, GcsDigestionArtifactStore
-    from .execution_persistence import FirestoreUsageLedger, FirestoreWorkRepository
+    from .digestion_persistence import GcsDigestionArtifactStore
     from .execution_scheduler import BoundedFairExecutor, SmoothedTokenBucket
     from .llm_gateway import LLMGateway, VertexGenAITransport
+    from .postgres import (
+        PostgresDatabase,
+        PostgresExecutionRunRepository,
+        PostgresKnowledgeRepository,
+        PostgresUsageLedger,
+        PostgresWorkRepository,
+    )
     from .pricing import price_resolver_from_environment
 
     project = _required("GOOGLE_CLOUD_PROJECT")
     bucket = _required("HEFESTO_GCS_BUCKET")
     location = _v2_location()
-    database = firestore.Client(project=project)
+    database = PostgresDatabase.from_runtime_environment(max_size=max_concurrency + 4)
     storage_client = storage.Client(project=project)
     gateway = LLMGateway(
         VertexGenAITransport(project=project, location=location),
-        ledger=FirestoreUsageLedger(database),
+        ledger=PostgresUsageLedger(database),
         price_resolver=price_resolver_from_environment(),
     )
     executor = BoundedFairExecutor(
@@ -253,13 +259,13 @@ def _v2_execution_services(
         gateway=gateway,
         executor=executor,
         database=database,
-        work=FirestoreWorkRepository(database),
+        work=PostgresWorkRepository(database),
         digestion_artifacts=GcsDigestionArtifactStore(
             storage_client,
             bucket_name=bucket,
             root_prefix="comunicamundo-v4-rebuild",
         ),
-        digestion_runs=FirestoreExecutionRunRepository(database),
+        digestion_runs=PostgresExecutionRunRepository(database),
         storage_client=storage_client,
         bucket=bucket,
         worker_id=f"{execution_name}:{task_index}",
@@ -269,6 +275,7 @@ def _v2_execution_services(
 def _digestion_orchestrator(*, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int):
     from .digestion_orchestrator import DigestionOrchestrator
     from .digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
+    from .postgres import PostgresKnowledgeRepository
     from .source_digestion import SourceDigestionPlanner
 
     services = _v2_execution_services(
@@ -288,6 +295,7 @@ def _digestion_orchestrator(*, tokens_per_minute: int, max_concurrency: int, per
         artifacts=services.digestion_artifacts,
         runs=services.digestion_runs,
         work=services.work,
+        knowledge=PostgresKnowledgeRepository(services.database),
         worker_id=services.worker_id,
     )
 
@@ -296,11 +304,9 @@ def _editorial_v2_orchestrator(
     *, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int
 ):
     from .editorial_v2_orchestrator import EditorialV2Orchestrator
-    from .editorial_v2_persistence import (
-        FirestoreEditorialV2RunRepository,
-        GcsEditorialV2ArtifactStore,
-    )
+    from .editorial_v2_persistence import GcsEditorialV2ArtifactStore
     from .editorial_v2_runtime import EditorialV2CallFactory, EditorialV2RuntimeConfig
+    from .postgres import PostgresEditorialV2RunRepository
 
     services = _v2_execution_services(
         tokens_per_minute=tokens_per_minute,
@@ -322,7 +328,7 @@ def _editorial_v2_orchestrator(
             bucket_name=services.bucket,
             root_prefix="comunicamundo-v4-rebuild",
         ),
-        editorial_runs=FirestoreEditorialV2RunRepository(services.database),
+        editorial_runs=PostgresEditorialV2RunRepository(services.database),
         work=services.work,
         executor=services.executor,
         worker_id=services.worker_id,
@@ -332,17 +338,12 @@ def _editorial_v2_orchestrator(
 def _production_v2_orchestrator(
     *, tokens_per_minute: int, max_concurrency: int, per_project_concurrency: int
 ):
-    from .editorial_v2_persistence import (
-        FirestoreEditorialV2RunRepository,
-        GcsEditorialV2ArtifactStore,
-    )
+    from .editorial_v2_persistence import GcsEditorialV2ArtifactStore
     from .production_evidence import ProductionEvidenceBuilder
     from .production_v2_orchestrator import ProductionV2Orchestrator
-    from .production_v2_persistence import (
-        FirestoreProductionV2RunRepository,
-        GcsProductionV2ArtifactStore,
-    )
+    from .production_v2_persistence import GcsProductionV2ArtifactStore
     from .production_v2_runtime import ProductionV2CallFactory, ProductionV2RuntimeConfig
+    from .postgres import PostgresEditorialV2RunRepository, PostgresProductionV2RunRepository
 
     services = _v2_execution_services(
         tokens_per_minute=tokens_per_minute,
@@ -366,13 +367,13 @@ def _production_v2_orchestrator(
             bucket_name=services.bucket,
             root_prefix="comunicamundo-v4-rebuild",
         ),
-        editorial_runs=FirestoreEditorialV2RunRepository(services.database),
+        editorial_runs=PostgresEditorialV2RunRepository(services.database),
         production_artifacts=GcsProductionV2ArtifactStore(
             services.storage_client,
             bucket_name=services.bucket,
             root_prefix="comunicamundo-v4-rebuild",
         ),
-        production_runs=FirestoreProductionV2RunRepository(services.database),
+        production_runs=PostgresProductionV2RunRepository(services.database),
         work=services.work,
         worker_id=services.worker_id,
     )
@@ -466,24 +467,43 @@ async def run_produce_v2_command(
 
 async def run_report_v2_command(project_id: UUID):
     from .usage_reporting import (
-        FirestoreUsageReader,
         GcsUsageReportStore,
         build_and_persist_usage_report,
     )
+    from .postgres import PostgresDatabase, PostgresUsageReader
 
     google_project = _required("GOOGLE_CLOUD_PROJECT")
     bucket = _required("HEFESTO_GCS_BUCKET")
-    database = firestore.Client(project=google_project)
+    database = PostgresDatabase.from_runtime_environment(max_size=2)
     storage_client = storage.Client(project=google_project)
     return await build_and_persist_usage_report(
         project_id,
-        reader=FirestoreUsageReader(database),
+        reader=PostgresUsageReader(database),
         store=GcsUsageReportStore(
             storage_client,
             bucket_name=bucket,
             root_prefix="comunicamundo-v4-rebuild",
         ),
     )
+
+
+async def run_migrate_postgres_command() -> dict[str, Any]:
+    from .postgres import apply_migrations, check_direct_connection
+
+    direct_url = _required("HEFESTO_POSTGRES_DIRECT_URL")
+    applied = await apply_migrations(direct_url)
+    check = await check_direct_connection(direct_url)
+    return {"status": "ready", "applied_migrations": applied, **check}
+
+
+async def run_check_postgres_command() -> dict[str, Any]:
+    from .postgres import PostgresDatabase
+
+    database = PostgresDatabase.from_runtime_environment(max_size=1)
+    try:
+        return {"status": "ready", **(await database.check())}
+    finally:
+        await database.close()
 
 
 def _application():
@@ -500,6 +520,12 @@ def _application():
 
 
 async def _run(args: argparse.Namespace) -> None:
+    if args.command == "migrate-postgres":
+        print(json.dumps(await run_migrate_postgres_command(), sort_keys=True))
+        return
+    if args.command == "check-postgres":
+        print(json.dumps(await run_check_postgres_command(), sort_keys=True))
+        return
     if args.command == "plan":
         result = run_plan_command(args.request)
         print(result.model_dump_json())
@@ -610,6 +636,14 @@ async def _run(args: argparse.Namespace) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ComunicAmundo V4 Hefesto clean rebuild")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser(
+        "migrate-postgres",
+        help="apply versioned migrations using the direct PostgreSQL connection",
+    )
+    commands.add_parser(
+        "check-postgres",
+        help="verify the pooled runtime connection without exposing credentials",
+    )
     plan = commands.add_parser("plan", help="validate the request, prepare source chunks, and persist a resumable PlanningRun")
     plan.add_argument("--request", required=True)
     digest_v2 = commands.add_parser(

@@ -30,6 +30,7 @@ from .production_v2_prompts import (
     edit_prompt,
     research_prompt,
 )
+from .llm_gateway import bind_json_output_contract
 from .source_digestion import estimate_tokens
 
 
@@ -138,6 +139,7 @@ class ProductionV2CallFactory:
         approved_project_sha256: str,
     ) -> PreparedProductionCall[SubjectResearchBundleProposal]:
         prompt = research_prompt(project=project, evidence=evidence)
+        prompt = bind_json_output_contract(prompt, SubjectResearchBundleProposal)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project.project_id,
@@ -160,6 +162,7 @@ class ProductionV2CallFactory:
         evidence: ProductionEvidenceBundle,
     ) -> PreparedProductionCall[NarrativePlan]:
         prompt = architecture_prompt(project=project, research=research, evidence=evidence)
+        prompt = bind_json_output_contract(prompt, NarrativePlan)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project.project_id,
@@ -192,6 +195,7 @@ class ProductionV2CallFactory:
             research=research,
             evidence=evidence,
         )
+        prompt = bind_json_output_contract(prompt, ArticleDraftV2)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project.project_id,
@@ -220,6 +224,7 @@ class ProductionV2CallFactory:
             research=research,
             evidence=evidence,
         )
+        prompt = bind_json_output_contract(prompt, EditorialReview)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project.project_id,
@@ -250,6 +255,7 @@ class ProductionV2CallFactory:
             research=research,
             evidence=evidence,
         )
+        prompt = bind_json_output_contract(prompt, ArticleDraftV2)
         return self._call(
             execution_run_id=execution_run_id,
             project_id=project.project_id,
