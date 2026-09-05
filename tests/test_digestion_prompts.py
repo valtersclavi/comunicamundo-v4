@@ -40,6 +40,7 @@ def test_prompts_make_epistemic_and_balance_rules_explicit() -> None:
     assert "never return excerpts" in direct.lower()
     assert "[section 1; paragraph 1]" in direct.lower()
     assert "[sentence " in direct.lower()
+    assert "[sentence 1] [section 1; paragraph 1]" in direct.lower()
     assert plan.sections[0].section_id not in direct
     assert plan.sections[0].paragraphs[0].paragraph_id not in direct
     assert "preserve every substantively distinct" in direct.lower()
