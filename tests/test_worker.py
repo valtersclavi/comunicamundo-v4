@@ -49,6 +49,11 @@ def test_worker_exposes_both_approval_boundaries() -> None:
     )
     assert complete.command == "run-v2"
     assert complete.auto_approve_without_tips is True
+    proof = parser.parse_args(
+        ["run-proof-v2", "--variant", "A", "--tokens-per-minute", "1000000"]
+    )
+    assert proof.command == "run-proof-v2"
+    assert proof.variant == "A"
     resumed_v2 = parser.parse_args(
         ["resume-digest-v2", "--execution-run-id", axis_id, "--tokens-per-minute", "1000000"]
     )
