@@ -37,14 +37,6 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Grant minimum log-read role to the deployer
-        run: |
-          set -euo pipefail
-          gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-            --member="serviceAccount:${DEPLOYER_SA}" \
-            --role="roles/logging.viewer" \
-            --condition=None \
-            --quiet
       - name: Read one failed execution without rerunning it
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
