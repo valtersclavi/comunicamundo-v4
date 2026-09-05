@@ -20,10 +20,10 @@ EvidenceKey = Annotated[str, Field(pattern=r"^E_[0-9a-f]{16}$")]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v14"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v12"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v12"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v10"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v15"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v13"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v13"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v11"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -393,6 +393,44 @@ class SectionDigestProposal(StrictModel):
     limitations: list[CompactText] = Field(default_factory=list)
     uncertainties: list[CompactText] = Field(default_factory=list)
     distinctive_contributions: list[CompactText] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _restore_misplaced_finding_objects(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        findings = payload.get("findings", [])
+        if isinstance(findings, dict):
+            findings = [findings]
+        if not isinstance(findings, list):
+            return value
+        restored = list(findings)
+        seen = {
+            json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+            for item in restored
+        }
+        for field_name in (
+            "methods",
+            "limitations",
+            "uncertainties",
+            "distinctive_contributions",
+        ):
+            items = payload.get(field_name)
+            if not isinstance(items, list):
+                continue
+            text_items = []
+            for item in items:
+                if isinstance(item, dict) and {"finding", "anchors"} <= set(item):
+                    identity = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+                    if identity not in seen:
+                        seen.add(identity)
+                        restored.append(item)
+                else:
+                    text_items.append(item)
+            payload[field_name] = text_items
+        payload["findings"] = restored
+        return payload
 
 
 class SectionDigest(StrictModel):
