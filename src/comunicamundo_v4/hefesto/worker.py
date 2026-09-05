@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import base64
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
@@ -476,15 +477,18 @@ async def run_report_v2_command(project_id: UUID):
     bucket = _required("HEFESTO_GCS_BUCKET")
     database = PostgresDatabase.from_runtime_environment(max_size=2)
     storage_client = storage.Client(project=google_project)
-    return await build_and_persist_usage_report(
-        project_id,
-        reader=PostgresUsageReader(database),
-        store=GcsUsageReportStore(
-            storage_client,
-            bucket_name=bucket,
-            root_prefix="comunicamundo-v4-rebuild",
-        ),
-    )
+    try:
+        return await build_and_persist_usage_report(
+            project_id,
+            reader=PostgresUsageReader(database),
+            store=GcsUsageReportStore(
+                storage_client,
+                bucket_name=bucket,
+                root_prefix="comunicamundo-v4-rebuild",
+            ),
+        )
+    finally:
+        await database.close()
 
 
 async def run_migrate_postgres_command() -> dict[str, Any]:
@@ -506,6 +510,186 @@ async def run_check_postgres_command() -> dict[str, Any]:
         await database.close()
 
 
+async def run_complete_v2_command(
+    location: str,
+    *,
+    tokens_per_minute: int,
+    max_concurrency: int,
+    per_project_concurrency: int,
+) -> dict[str, Any]:
+    """Run the approved A/B path in one Cloud Run execution and render the article."""
+
+    from .postgres import PostgresDatabase, PostgresStageRecorder
+    from .renderer import persist_complete_run_receipt, render_and_persist_article
+
+    google_project = _required("GOOGLE_CLOUD_PROJECT")
+    bucket = _required("HEFESTO_GCS_BUCKET")
+    request = load_planning_request(location, project=google_project)
+    metrics_database = PostgresDatabase.from_runtime_environment(max_size=2)
+    recorder = PostgresStageRecorder(metrics_database)
+    stages: list[dict[str, Any]] = []
+    execution_run_id: UUID | None = None
+
+    async def measured(stage: str, operation):
+        nonlocal execution_run_id
+        started = datetime.now(UTC)
+        try:
+            value = await operation()
+        except Exception as error:
+            finished = datetime.now(UTC)
+            if execution_run_id is not None:
+                await recorder.record(
+                    execution_run_id=execution_run_id,
+                    project_id=request.project_id,
+                    stage=stage,
+                    status="failed",
+                    started_at=started,
+                    finished_at=finished,
+                    details={"error_class": type(error).__name__, "error_message": str(error)[:4000]},
+                )
+            raise
+        finished = datetime.now(UTC)
+        duration_ms = max(0, int((finished - started).total_seconds() * 1000))
+        stages.append({"stage": stage, "duration_ms": duration_ms})
+        if execution_run_id is not None:
+            await recorder.record(
+                execution_run_id=execution_run_id,
+                project_id=request.project_id,
+                stage=stage,
+                status="succeeded",
+                started_at=started,
+                finished_at=finished,
+                details={},
+            )
+        return value
+
+    try:
+        digestion_started = datetime.now(UTC)
+        digestion = await run_digest_v2_command(
+            location,
+            tokens_per_minute=tokens_per_minute,
+            max_concurrency=max_concurrency,
+            per_project_concurrency=per_project_concurrency,
+        )
+        digestion_finished = datetime.now(UTC)
+        execution_run_id = digestion.execution_run.execution_run_id
+        digestion_ms = max(0, int((digestion_finished - digestion_started).total_seconds() * 1000))
+        stages.append({"stage": "digestion", "duration_ms": digestion_ms})
+        await recorder.record(
+            execution_run_id=execution_run_id,
+            project_id=request.project_id,
+            stage="digestion",
+            status="succeeded",
+            started_at=digestion_started,
+            finished_at=digestion_finished,
+            details={
+                "source_count": len(digestion.digestion_plan.sources),
+                "model_calls": digestion.execution_run.completed_model_calls,
+            },
+        )
+        await measured(
+            "narrative_axis",
+            lambda: run_propose_axis_v2_command(
+                execution_run_id,
+                tokens_per_minute=tokens_per_minute,
+                max_concurrency=max_concurrency,
+                per_project_concurrency=per_project_concurrency,
+            ),
+        )
+        await measured(
+            "editorial_project",
+            lambda: run_approve_axis_v2_command(
+                execution_run_id,
+                tokens_per_minute=tokens_per_minute,
+                max_concurrency=max_concurrency,
+                per_project_concurrency=per_project_concurrency,
+            ),
+        )
+        await measured(
+            "project_approval",
+            lambda: run_approve_project_v2_without_tips_command(
+                execution_run_id,
+                tokens_per_minute=tokens_per_minute,
+                max_concurrency=max_concurrency,
+                per_project_concurrency=per_project_concurrency,
+            ),
+        )
+        production = await measured(
+            "production",
+            lambda: run_produce_v2_command(
+                execution_run_id,
+                tokens_per_minute=tokens_per_minute,
+                max_concurrency=max_concurrency,
+                per_project_concurrency=per_project_concurrency,
+            ),
+        )
+        storage_client = storage.Client(project=google_project)
+        rendered, manifest = await measured(
+            "renderer",
+            lambda: render_and_persist_article(
+                database=metrics_database,
+                storage_client=storage_client,
+                bucket_name=bucket,
+                root_prefix="comunicamundo-v4-rebuild",
+                execution_run_id=execution_run_id,
+                article=production.production_record.final_article,
+                language=request.brief.output_language,
+            ),
+        )
+        usage = await measured("usage_report", lambda: run_report_v2_command(request.project_id))
+        dossier_findings = sum(len(item.findings) for item in digestion.source_dossiers)
+        evidence_anchors = sum(
+            len(finding.anchors)
+            for dossier in digestion.source_dossiers
+            for finding in dossier.findings
+        )
+        result = {
+            "status": "complete",
+            "project_id": str(request.project_id),
+            "execution_run_id": str(execution_run_id),
+            "digestion": {
+                "source_count": len(digestion.digestion_plan.sources),
+                "section_count": sum(len(item.sections) for item in digestion.digestion_plan.sources),
+                "sentence_count": sum(
+                    len(paragraph.sentences)
+                    for source in digestion.digestion_plan.sources
+                    for section in source.sections
+                    for paragraph in section.paragraphs
+                ),
+                "planned_model_calls": sum(
+                    item.planned_model_calls for item in digestion.digestion_plan.sources
+                ),
+                "dossier_findings": dossier_findings,
+                "evidence_anchors": evidence_anchors,
+                "cross_source_agreements": len(digestion.evidence_matrix.agreements),
+                "cross_source_divergences": len(digestion.evidence_matrix.divergences),
+                "coverage_gaps": sum(
+                    len(item.coverage_gaps) for item in digestion.source_dossiers
+                ),
+            },
+            "article": production.production_record.final_article.model_dump(mode="json"),
+            "production": {
+                "research_subjects": len(production.production_record.research_bundle.subjects),
+                "revision_rounds": production.production_record.final_article.revision_rounds,
+            },
+            "rendered": rendered.model_dump(mode="json"),
+            "renderer_manifest": manifest.model_dump(mode="json"),
+            "usage": usage.model_dump(mode="json"),
+            "stages": stages,
+        }
+        receipt = persist_complete_run_receipt(
+            storage_client,
+            bucket_name=bucket,
+            root_prefix="comunicamundo-v4-rebuild",
+            project_id=request.project_id,
+            execution_run_id=execution_run_id,
+            payload=result,
+        )
+        return {**result, "receipt": receipt.model_dump(mode="json")}
+    finally:
+        await metrics_database.close()
+
+
 def _application():
     from .application import HefestoApplication
     from .runtime import VertexRuntimeSettings, build_vertex_runtime
@@ -525,6 +709,15 @@ async def _run(args: argparse.Namespace) -> None:
         return
     if args.command == "check-postgres":
         print(json.dumps(await run_check_postgres_command(), sort_keys=True))
+        return
+    if args.command == "run-v2":
+        result = await run_complete_v2_command(
+            args.request,
+            tokens_per_minute=args.tokens_per_minute,
+            max_concurrency=args.max_concurrency,
+            per_project_concurrency=args.per_project_concurrency,
+        )
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return
     if args.command == "plan":
         result = run_plan_command(args.request)
@@ -640,6 +833,18 @@ def _parser() -> argparse.ArgumentParser:
         "migrate-postgres",
         help="apply versioned migrations using the direct PostgreSQL connection",
     )
+    run_v2 = commands.add_parser(
+        "run-v2",
+        help="digest, approve test gates, produce, render, and report in one execution",
+    )
+    run_v2.add_argument("--request", required=True)
+    run_v2.add_argument(
+        "--auto-approve-without-tips",
+        action="store_true",
+        required=True,
+        help="explicitly approve the Axis and Project while accepting zero Dicas",
+    )
+    _add_v2_capacity_arguments(run_v2)
     commands.add_parser(
         "check-postgres",
         help="verify the pooled runtime connection without exposing credentials",

@@ -5,79 +5,100 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 concurrency:
-  group: hefesto-v4-social-media-multisource-ab
+  group: hefesto-v4-relational-proof
   cancel-in-progress: false
 
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
   JOB_NAME: hefesto-v4-rebuild
-  PROOF_SERVICE: hefesto-v4-social-media-ab
   BUCKET: comunicamundo-v4-hefesto-30524898837
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+  # Admission budget, not a content limit. Calls retain their contract-specific budgets.
+  ADMISSION_TPM: "2000000"
+  MAX_CONCURRENCY: "8"
+  PROJECT_CONCURRENCY: "6"
 
 jobs:
-  run-ab-variant:
-    if: ${{ contains(github.event.head_commit.message, '[social-media-multisource-a]') || contains(github.event.head_commit.message, '[social-media-multisource-b]') }}
+  run-proof:
+    if: >-
+      contains(github.event.head_commit.message, '[postgres-canary]') ||
+      contains(github.event.head_commit.message, '[social-media-multisource-a]') ||
+      contains(github.event.head_commit.message, '[social-media-multisource-b]')
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
     steps:
-      - name: Select isolated variant
+      - name: Select proof
         env:
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          if [[ "${COMMIT_MESSAGE}" == *"[social-media-multisource-a]"* ]]; then
-            variant="A"
-            fourth_kind="highlights"
-            fourth_url="https://nap.nationalacademies.org/resource/27396/Highlights_for_Social_Media_and_Adolescent_Health.pdf"
-            result_path=".github/proof-results/social-media-multisource-A-highlights-2026-08-29.json"
-          elif [[ "${COMMIT_MESSAGE}" == *"[social-media-multisource-b]"* ]]; then
-            variant="B"
-            fourth_kind="full-report"
-            fourth_url="https://www.ncbi.nlm.nih.gov/books/n/nap27396/pdf/"
-            result_path=".github/proof-results/social-media-multisource-B-full-report-2026-08-29.json"
+          if [[ "${COMMIT_MESSAGE}" == *"[postgres-canary]"* ]]; then
+            echo "PROOF=postgres-canary" >> "${GITHUB_ENV}"
+            echo "VARIANT=canary" >> "${GITHUB_ENV}"
+          elif [[ "${COMMIT_MESSAGE}" == *"[social-media-multisource-a]"* ]]; then
+            echo "PROOF=social-media-multisource" >> "${GITHUB_ENV}"
+            echo "VARIANT=A" >> "${GITHUB_ENV}"
           else
-            exit 1
+            echo "PROOF=social-media-multisource" >> "${GITHUB_ENV}"
+            echo "VARIANT=B" >> "${GITHUB_ENV}"
           fi
-          echo "VARIANT=${variant}" >> "${GITHUB_ENV}"
-          echo "FOURTH_KIND=${fourth_kind}" >> "${GITHUB_ENV}"
-          echo "FOURTH_URL=${fourth_url}" >> "${GITHUB_ENV}"
-          echo "RESULT_PATH=${result_path}" >> "${GITHUB_ENV}"
 
-      - name: Download all four sources freshly
+      - name: Prepare original sources
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq poppler-utils
+          mkdir -p /tmp/hefesto-proof/sources
+          if [[ "${PROOF}" == "postgres-canary" ]]; then
+            python - <<'PY'
+          from pathlib import Path
 
-          mkdir -p /tmp/social-media-sources
-          declare -a urls=(
-            "https://www.repository.cam.ac.uk/bitstreams/cce5f271-e777-41cc-8347-1334a197750f/download"
-            "https://www.repository.cam.ac.uk/bitstreams/b3cb127e-41ec-4275-b103-914447cb90b4/download"
-            "https://www.repository.cam.ac.uk/bitstreams/d4d58e50-b1d0-4ae8-b8c7-3853c0357002/download"
-            "${FOURTH_URL}"
-          )
-          for i in 1 2 3 4; do
-            url="${urls[$((i-1))]}"
-            file="/tmp/social-media-sources/source-${i}.pdf"
-            curl -fL --retry 4 --retry-all-errors --connect-timeout 30 --max-time 600 \
-              -A 'Mozilla/5.0 Hefesto-V4-multisource-calibration' \
-              "${url}" -o "${file}"
-            test -s "${file}"
-            pdfinfo "${file}" >/tmp/social-media-sources/source-${i}.pdfinfo
-            pdftotext -enc UTF-8 "${file}" "/tmp/social-media-sources/source-${i}.txt"
-            test -s "/tmp/social-media-sources/source-${i}.txt"
-          done
+          text = """ADOLESCÊNCIA, VIDA DIGITAL E SAÚDE MENTAL
 
-      - name: Build fully fresh normalized request
+          Pesquisas observacionais encontram associações entre certos padrões de uso de redes sociais e sintomas de ansiedade ou depressão em adolescentes. Uma associação, isoladamente, não demonstra que a plataforma causou o desfecho: sofrimento prévio também pode alterar a forma de uso.
+
+          O efeito médio esconde diferenças importantes. Uso passivo, comparação social, exposição a hostilidade e privação de sono podem aumentar riscos, enquanto contato com pares e acesso a comunidades de apoio podem beneficiar alguns jovens.
+
+          Idade, gênero, vulnerabilidades anteriores, contexto familiar e desenho da plataforma modificam os resultados. Por isso, recomendações universais baseadas apenas em tempo de tela têm alcance limitado.
+
+          Estudos longitudinais ajudam a ordenar os acontecimentos no tempo, mas ainda enfrentam confundimento e medidas autorrelatadas. Experimentos naturais e dados mais granulares podem fortalecer inferências futuras.
+
+          Uma resposta responsável combina educação digital, diálogo familiar, proteção contra assédio e atenção clínica aos sinais de sofrimento. A evidência favorece cuidado proporcional ao risco, não alarmismo nem indiferença."""
+          Path('/tmp/hefesto-proof/sources/source-1.txt').write_text(text, encoding='utf-8')
+          PY
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq poppler-utils
+            if [[ "${VARIANT}" == "A" ]]; then
+              fourth_url="https://nap.nationalacademies.org/resource/27396/Highlights_for_Social_Media_and_Adolescent_Health.pdf"
+            else
+              fourth_url="https://www.ncbi.nlm.nih.gov/books/n/nap27396/pdf/"
+            fi
+            urls=(
+              "https://www.repository.cam.ac.uk/bitstreams/cce5f271-e777-41cc-8347-1334a197750f/download"
+              "https://www.repository.cam.ac.uk/bitstreams/b3cb127e-41ec-4275-b103-914447cb90b4/download"
+              "https://www.repository.cam.ac.uk/bitstreams/d4d58e50-b1d0-4ae8-b8c7-3853c0357002/download"
+              "${fourth_url}"
+            )
+            for index in 1 2 3 4; do
+              pdf="/tmp/hefesto-proof/sources/source-${index}.pdf"
+              curl -fL --retry 4 --retry-all-errors --connect-timeout 30 --max-time 900 \
+                -A 'Mozilla/5.0 Hefesto-V4-relational-proof' \
+                "${urls[$((index-1))]}" -o "${pdf}"
+              test -s "${pdf}"
+              pdfinfo "${pdf}" > "/tmp/hefesto-proof/sources/source-${index}.pdfinfo"
+              pdftotext -enc UTF-8 "${pdf}" "/tmp/hefesto-proof/sources/source-${index}.txt"
+              test -s "/tmp/hefesto-proof/sources/source-${index}.txt"
+            done
+          fi
+
+      - name: Build normalized request and source manifest
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -88,28 +109,28 @@ jobs:
           import uuid
           from pathlib import Path
 
-          base = Path('/tmp/social-media-sources')
-          titles = [
+          root = Path('/tmp/hefesto-proof')
+          project_id = str(uuid.uuid4())
+          is_canary = os.environ['PROOF'] == 'postgres-canary'
+          count = 1 if is_canary else 4
+          titles = ['Adolescência, vida digital e saúde mental — canário'] if is_canary else [
               'Social media use in adolescents with and without mental health conditions',
               'Mechanisms linking social media use to adolescent mental health vulnerability',
               'Windows of developmental sensitivity to social media',
               'Social Media and Adolescent Health — Highlights' if os.environ['VARIANT'] == 'A'
               else 'Social Media and Adolescent Health — Full Report',
           ]
-          urls = [
+          urls = ['generated://hefesto/postgres-canary'] if is_canary else [
               'https://www.repository.cam.ac.uk/bitstreams/cce5f271-e777-41cc-8347-1334a197750f/download',
               'https://www.repository.cam.ac.uk/bitstreams/b3cb127e-41ec-4275-b103-914447cb90b4/download',
               'https://www.repository.cam.ac.uk/bitstreams/d4d58e50-b1d0-4ae8-b8c7-3853c0357002/download',
-              os.environ['FOURTH_URL'],
+              'https://nap.nationalacademies.org/resource/27396/Highlights_for_Social_Media_and_Adolescent_Health.pdf'
+              if os.environ['VARIANT'] == 'A' else 'https://www.ncbi.nlm.nih.gov/books/n/nap27396/pdf/',
           ]
 
-          def sha256_bytes(data: bytes) -> str:
-              return hashlib.sha256(data).hexdigest()
-
           def normalize(raw: str) -> str:
-              raw = raw.replace('\r\n', '\n').replace('\r', '\n')
               pages = []
-              for page in raw.split('\f'):
+              for page in raw.replace('\r\n', '\n').replace('\r', '\n').split('\f'):
                   lines = [line.rstrip() for line in page.splitlines()]
                   while lines and not lines[0].strip():
                       lines.pop(0)
@@ -119,73 +140,64 @@ jobs:
                       pages.append('\n'.join(lines))
               return '\n\n'.join(pages).strip()
 
-          sources = []
-          manifest = []
-          for index in range(1, 5):
-              pdf_path = base / f'source-{index}.pdf'
-              txt_path = base / f'source-{index}.txt'
-              pdf_bytes = pdf_path.read_bytes()
-              text = normalize(txt_path.read_text(encoding='utf-8', errors='replace'))
-              assert len(text) > 1000, (index, len(text))
-              pdfinfo = (base / f'source-{index}.pdfinfo').read_text(encoding='utf-8', errors='replace')
-              match = re.search(r'^Pages:\s+(\d+)\s*$', pdfinfo, flags=re.MULTILINE)
-              assert match, f'page count missing for source {index}'
-              pages = int(match.group(1))
+          sources, manifest = [], []
+          for index in range(1, count + 1):
               source_id = str(uuid.uuid4())
+              original = root / 'sources' / f"source-{index}.{'txt' if is_canary else 'pdf'}"
+              text_path = root / 'sources' / f'source-{index}.txt'
+              original_bytes = original.read_bytes()
+              text = normalize(text_path.read_text(encoding='utf-8', errors='replace'))
+              assert len(text) > (500 if is_canary else 1000), (index, len(text))
+              pages = 1
+              if not is_canary:
+                  info = (root / 'sources' / f'source-{index}.pdfinfo').read_text(errors='replace')
+                  pages = int(re.search(r'^Pages:\s+(\d+)\s*$', info, re.MULTILINE).group(1))
+              extension = original.suffix.lstrip('.')
+              gcs_uri = (
+                  f"gs://{os.environ['BUCKET']}/comunicamundo-v4-rebuild/projects/{project_id}/"
+                  f"sources/{source_id}/original.{extension}"
+              )
               record = {
                   'source_id': source_id,
                   'text': text,
-                  'language': 'en',
+                  'language': 'pt-BR' if is_canary else 'en',
                   'title': titles[index - 1],
                   'metadata': {
                       'source_url': urls[index - 1],
-                      'freshly_downloaded': True,
-                      'test_variant': os.environ['VARIANT'],
-                      'binary_sha256': sha256_bytes(pdf_bytes),
-                      'normalized_text_sha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
+                      'original_gcs_uri': gcs_uri,
+                      'binary_sha256': hashlib.sha256(original_bytes).hexdigest(),
+                      'normalized_text_sha256': hashlib.sha256(text.encode()).hexdigest(),
                       'pages': pages,
-                      'bytes': len(pdf_bytes),
+                      'bytes': len(original_bytes),
                       'normalized_characters': len(text),
-                      'extraction': 'fresh pdftotext linear; page boundaries preserved; no semantic filtering',
+                      'test_variant': os.environ['VARIANT'],
+                      'extraction': 'original text' if is_canary else 'pdftotext UTF-8; page boundaries preserved; no semantic filtering',
                   },
               }
               sources.append(record)
               manifest.append({
-                  'ordinal': index,
-                  'source_id': source_id,
-                  'title': titles[index - 1],
-                  'url': urls[index - 1],
-                  'pages': pages,
-                  'bytes': len(pdf_bytes),
-                  'binary_sha256': record['metadata']['binary_sha256'],
-                  'normalized_text_sha256': record['metadata']['normalized_text_sha256'],
-                  'normalized_characters': len(text),
+                  'ordinal': index, 'source_id': source_id, 'title': titles[index - 1],
+                  'url': urls[index - 1], 'original_local_path': str(original), **record['metadata'],
               })
 
-          project_id = str(uuid.uuid4())
           request = {
               'project_id': project_id,
               'brief': {
                   'theme': 'O impacto das redes sociais na saúde mental dos adolescentes',
-                  'approach': 'Produza um blog post sobre o impacto das redes sociais na saúde mental dos adolescentes, usando as fontes como matéria-prima editorial.',
-                  'duration_minutes': 10,
+                  'approach': 'Produza um artigo claro e rigoroso usando as fontes como matéria-prima editorial, distinguindo associação, causalidade, riscos, benefícios e limites.',
+                  'duration_minutes': 5 if is_canary else 10,
                   'output_language': 'pt-BR',
                   'audience': 'Leitores não especialistas interessados em adolescência, saúde mental e vida digital',
                   'product': 'article',
               },
               'sources': sources,
           }
-          Path('/tmp/social-media-request.json').write_text(json.dumps(request, ensure_ascii=False), encoding='utf-8')
-          Path('/tmp/social-media-source-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-          print(json.dumps({
-              'variant': os.environ['VARIANT'],
-              'project_id': project_id,
-              'source_ids': [item['source_id'] for item in sources],
-              'pages': [item['metadata']['pages'] for item in sources],
-              'characters': [item['metadata']['normalized_characters'] for item in sources],
-          }, ensure_ascii=False))
+          (root / 'request.json').write_text(json.dumps(request, ensure_ascii=False), encoding='utf-8')
+          (root / 'source-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+              output.write(f"NEW_PROJECT_ID={project_id}\n")
+          print(json.dumps({'proof': os.environ['PROOF'], 'variant': os.environ['VARIANT'], 'project_id': project_id}))
           PY
-          echo "NEW_PROJECT_ID=$(jq -r '.project_id' /tmp/social-media-request.json)" >> "${GITHUB_ENV}"
 
       - uses: google-github-actions/auth@v3
         with:
@@ -195,471 +207,126 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v3
 
-      - name: Persist fresh request and deploy isolated proof service
+      - name: Preserve originals and request in GCS
         run: |
           set -euo pipefail
-          request_object="requests/social-media-multisource-${VARIANT}-${NEW_PROJECT_ID}.json"
-          gcloud storage cp /tmp/social-media-request.json "gs://${BUCKET}/${request_object}" >/dev/null
-          request_uri="gs://${BUCKET}/${request_object}"
-
-          pinned_image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
-          test -n "${pinned_image}"
-          deployed_sa="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.serviceAccountName)')"
-          test "${deployed_sa}" = "${RUNTIME_SA}"
-          proof_token="$(openssl rand -hex 32)"
-
-          cat > /tmp/proof_service.py <<'PY'
-          import asyncio
-          import base64
-          import contextvars
-          import hmac
-          import json
-          import os
-          import threading
-          from collections import defaultdict
-          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-          from uuid import UUID
-
-          from google.cloud import storage
-          from google.genai.models import AsyncModels, Models
-
-          CURRENT_STAGE = contextvars.ContextVar('hefesto_cost_stage', default='unclassified')
-          USAGE = []
-          USAGE_LOCK = threading.Lock()
-
-          PRICING = {
-              'currency': 'USD',
-              'basis': 'Vertex AI Standard pricing checked 2026-08-29',
-              'source': 'https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing',
-              'gemini-2.5-pro': {
-                  'input_per_million_le_200k': 1.25,
-                  'input_per_million_gt_200k': 2.50,
-                  'cached_input_per_million_le_200k': 0.125,
-                  'cached_input_per_million_gt_200k': 0.25,
-                  'output_response_plus_reasoning_per_million_le_200k': 10.00,
-                  'output_response_plus_reasoning_per_million_gt_200k': 15.00,
-              },
-              'gemini-2.5-flash': {
-                  'input_per_million': 0.30,
-                  'cached_input_per_million': 0.03,
-                  'output_response_plus_reasoning_per_million': 2.50,
-              },
-              'gemini-embedding-001': {
-                  'input_per_million_tokens': 0.15,
-                  'output': 0.0,
-              },
-          }
-
-          def _dump_model(value):
-              if value is None:
-                  return {}
-              if hasattr(value, 'model_dump'):
-                  return value.model_dump(mode='json', exclude_none=True)
-              if isinstance(value, dict):
-                  return dict(value)
-              return {}
-
-          def _usage_from_generate(response):
-              return _dump_model(getattr(response, 'usage_metadata', None))
-
-          def _embedding_tokens(response):
-              total = 0
-              for embedding in (getattr(response, 'embeddings', None) or []):
-                  stats = getattr(embedding, 'statistics', None)
-                  token_count = getattr(stats, 'token_count', None) if stats is not None else None
-                  if token_count is not None:
-                      total += int(token_count)
-              metadata = _dump_model(getattr(response, 'metadata', None))
-              return total or None, metadata
-
-          def _record(kind, model, usage, **extra):
-              item = {'sequence': None, 'stage': CURRENT_STAGE.get(), 'kind': kind, 'model': str(model), 'usage': usage, **extra}
-              with USAGE_LOCK:
-                  item['sequence'] = len(USAGE) + 1
-                  USAGE.append(item)
-
-          _orig_generate = Models.generate_content
-          _orig_agenerate = AsyncModels.generate_content
-          _orig_embed = Models.embed_content
-          _orig_aembed = AsyncModels.embed_content
-
-          def _metered_generate(self, *args, **kwargs):
-              response = _orig_generate(self, *args, **kwargs)
-              model = kwargs.get('model', args[0] if args else 'unknown')
-              _record('generate_content', model, _usage_from_generate(response))
-              return response
-
-          async def _metered_agenerate(self, *args, **kwargs):
-              response = await _orig_agenerate(self, *args, **kwargs)
-              model = kwargs.get('model', args[0] if args else 'unknown')
-              _record('generate_content', model, _usage_from_generate(response))
-              return response
-
-          def _metered_embed(self, *args, **kwargs):
-              response = _orig_embed(self, *args, **kwargs)
-              model = kwargs.get('model', args[0] if args else 'unknown')
-              tokens, metadata = _embedding_tokens(response)
-              _record('embedding', model, {'input_tokens': tokens}, metadata=metadata)
-              return response
-
-          async def _metered_aembed(self, *args, **kwargs):
-              response = await _orig_aembed(self, *args, **kwargs)
-              model = kwargs.get('model', args[0] if args else 'unknown')
-              tokens, metadata = _embedding_tokens(response)
-              _record('embedding', model, {'input_tokens': tokens}, metadata=metadata)
-              return response
-
-          Models.generate_content = _metered_generate
-          AsyncModels.generate_content = _metered_agenerate
-          Models.embed_content = _metered_embed
-          AsyncModels.embed_content = _metered_aembed
-
-          from comunicamundo_v4.hefesto.contracts import EditorialProjectStatus, NarrativeAxisStatus, PlanningRunState, SourceLineageState
-          from comunicamundo_v4.hefesto.worker import (
-              _application,
-              _planning_persistence,
-              load_planning_request,
-              run_approve_axis_command,
-              run_extract_graph_command,
-              run_index_graph_command,
-              run_plan_command,
-              run_propose_axis_command,
-          )
-
-          TOKEN = os.environ['PROOF_TOKEN']
-          REQUEST_URI = os.environ['PROOF_REQUEST_URI']
-          VARIANT = os.environ['PROOF_VARIANT']
-          EXPECTED_PROJECT_ID = UUID(os.environ['PROOF_PROJECT_ID'])
-          SOURCE_MANIFEST = json.loads(base64.b64decode(os.environ['PROOF_SOURCE_MANIFEST_B64']).decode('utf-8'))
-
-          def _int(usage, *names):
-              for name in names:
-                  value = usage.get(name)
-                  if value is not None:
-                      return int(value)
-              return 0
-
-          def _price_call(item):
-              model = item['model']
-              usage = item.get('usage') or {}
-              if item['kind'] == 'embedding':
-                  tokens = usage.get('input_tokens')
-                  if tokens is None:
-                      return None
-                  return float(tokens) / 1_000_000 * 0.15
-
-              prompt = _int(usage, 'prompt_token_count', 'promptTokenCount')
-              cached = _int(usage, 'cached_content_token_count', 'cachedContentTokenCount')
-              candidates = _int(usage, 'candidates_token_count', 'candidatesTokenCount', 'response_token_count', 'responseTokenCount')
-              thoughts = _int(usage, 'thoughts_token_count', 'thoughtsTokenCount')
-              regular_prompt = max(prompt - cached, 0)
-              output = candidates + thoughts
-
-              if 'gemini-2.5-pro' in model:
-                  large = prompt > 200_000
-                  input_rate = 2.50 if large else 1.25
-                  cached_rate = 0.25 if large else 0.125
-                  output_rate = 15.00 if large else 10.00
-              elif 'gemini-2.5-flash' in model:
-                  input_rate = 0.30
-                  cached_rate = 0.03
-                  output_rate = 2.50
-              else:
-                  return None
-              return (regular_prompt * input_rate + cached * cached_rate + output * output_rate) / 1_000_000
-
-          def _cost_report():
-              factory = lambda: {'calls': 0, 'prompt_tokens': 0, 'response_tokens': 0, 'thought_tokens': 0, 'embedding_input_tokens': 0, 'usd': 0.0, 'unpriced_calls': 0}
-              by_stage = defaultdict(factory)
-              by_model = defaultdict(factory)
-              priced_total = 0.0
-              for item in USAGE:
-                  usage = item.get('usage') or {}
-                  prompt = _int(usage, 'prompt_token_count', 'promptTokenCount')
-                  response = _int(usage, 'candidates_token_count', 'candidatesTokenCount', 'response_token_count', 'responseTokenCount')
-                  thoughts = _int(usage, 'thoughts_token_count', 'thoughtsTokenCount')
-                  embed = usage.get('input_tokens') or 0
-                  cost = _price_call(item)
-                  for bucket in (by_stage[item['stage']], by_model[item['model']]):
-                      bucket['calls'] += 1
-                      bucket['prompt_tokens'] += prompt
-                      bucket['response_tokens'] += response
-                      bucket['thought_tokens'] += thoughts
-                      bucket['embedding_input_tokens'] += int(embed)
-                      if cost is None:
-                          bucket['unpriced_calls'] += 1
-                      else:
-                          bucket['usd'] += cost
-                  if cost is not None:
-                      priced_total += cost
-              for groups in (by_stage, by_model):
-                  for value in groups.values():
-                      value['usd'] = round(value['usd'], 8)
-              return {
-                  'pricing': PRICING,
-                  'provider_usage_metadata': True,
-                  'generation_reasoning_tokens_included': True,
-                  'total_usd': round(priced_total, 8),
-                  'by_stage': dict(by_stage),
-                  'by_model': dict(by_model),
-                  'calls': list(USAGE),
-              }
-
-          def _read_gs_text(uri: str) -> str:
-              assert uri.startswith('gs://')
-              bucket_name, blob_name = uri[5:].split('/', 1)
-              return storage.Client().bucket(bucket_name).blob(blob_name).download_as_bytes().decode('utf-8')
-
-          def run_proof():
-              persistence = _planning_persistence()
-              stage = 'validate'
-              try:
-                  request = load_planning_request(REQUEST_URI, project=os.environ['GOOGLE_CLOUD_PROJECT'])
-                  assert request.project_id == EXPECTED_PROJECT_ID
-                  assert len(request.sources) == 4
-                  assert len({source.source_id for source in request.sources}) == 4
-                  assert all(source.metadata.get('freshly_downloaded') is True for source in request.sources)
-                  assert all(source.metadata.get('test_variant') == VARIANT for source in request.sources)
-                  assert request.brief.theme == 'O impacto das redes sociais na saúde mental dos adolescentes'
-                  assert request.brief.duration_minutes == 10
-                  assert request.brief.output_language == 'pt-BR'
-                  assert request.brief.product == 'article'
-
-                  stage = 'plan'
-                  CURRENT_STAGE.set(stage)
-                  run = run_plan_command(REQUEST_URI)
-                  assert run.project_id == EXPECTED_PROJECT_ID
-                  assert run.state is PlanningRunState.SOURCE_CHUNKS_READY
-
-                  stage = 'graph_extraction'
-                  CURRENT_STAGE.set(stage)
-                  lineage = run_extract_graph_command(run.source_lineage_id)
-                  assert lineage.state is SourceLineageState.GRAPH_EXTRACTIONS_READY
-                  assert lineage.extracted_count == lineage.chunk_count
-                  assert lineage.failed_count == 0
-
-                  stage = 'graph_indexing'
-                  CURRENT_STAGE.set(stage)
-                  lineage = run_index_graph_command(run.source_lineage_id)
-                  assert lineage.state is SourceLineageState.GRAPH_READY
-                  assert lineage.graph_artifact_id is not None
-                  assert lineage.graph_manifest_uri
-
-                  stage = 'understanding_axis'
-                  CURRENT_STAGE.set(stage)
-                  axis_result = run_propose_axis_command(run.planning_run_id)
-                  assert axis_result.planning_run.state is PlanningRunState.AXIS_PROPOSED
-                  assert axis_result.narrative_axis.status is NarrativeAxisStatus.PROPOSED
-                  assert axis_result.human_approval_required is True
-                  assert axis_result.editorial_project_created is False
-
-                  stage = 'editorial_project'
-                  CURRENT_STAGE.set(stage)
-                  project_result = run_approve_axis_command(run.planning_run_id, axis_result.narrative_axis.narrative_axis_id)
-                  assert project_result.narrative_axis.status is NarrativeAxisStatus.APPROVED
-                  assert project_result.editorial_project.status is EditorialProjectStatus.PROPOSED
-                  assert project_result.human_approval_required is True
-                  assert project_result.article_created is False
-                  proposed_project = project_result.editorial_project
-                  proposed_tips = list(proposed_project.llm_subjects)
-                  proposed_enrichment = list(proposed_project.enrichment_opportunities)
-
-                  stage = 'approve_project'
-                  CURRENT_STAGE.set(stage)
-                  app = _application()
-                  approved = asyncio.run(app.approve_project(proposed_project.editorial_project_id))
-                  assert approved.editorial_project.status is EditorialProjectStatus.APPROVED
-                  assert approved.editorial_project.editorial_project_id == proposed_project.editorial_project_id
-                  assert approved.editorial_project.llm_subjects == proposed_tips
-                  assert approved.editorial_project.enrichment_opportunities == proposed_enrichment
-
-                  stage = 'production'
-                  CURRENT_STAGE.set(stage)
-                  published = asyncio.run(app.produce(proposed_project.editorial_project_id))
-                  body = _read_gs_text(published.body_uri)
-                  assert body.strip()
-                  assert published.word_count > 0
-
-                  stage = 'persisted_state'
-                  CURRENT_STAGE.set(stage)
-                  run_after = persistence.get_run(run.planning_run_id)
-                  lineage_after = persistence.get_source_lineage(run.source_lineage_id)
-                  project_after = persistence.get_project(proposed_project.editorial_project_id)
-                  assert run_after is not None
-                  assert lineage_after is not None
-                  assert project_after is not None
-                  assert project_after.editorial_project.status is EditorialProjectStatus.APPROVED
-                  assert run_after.artifacts.graph_artifact_id == lineage_after.graph_artifact_id
-
-                  return {
-                      'SOCIAL_MEDIA_MULTISOURCE_AB': 'SUCCESS',
-                      'variant': VARIANT,
-                      'fourth_source_kind': 'highlights' if VARIANT == 'A' else 'full-report',
-                      'fresh_from_digest': True,
-                      'reuse_between_variants': False,
-                      'feedback_submitted': False,
-                      'axis_approved_directly': True,
-                      'tips_generated': proposed_tips,
-                      'tips_accepted': [],
-                      'enrichment_generated': proposed_enrichment,
-                      'enrichment_accepted': [],
-                      'project_approved_directly': True,
-                      'source_manifest': SOURCE_MANIFEST,
-                      'brief': request.brief.model_dump(mode='json'),
-                      'project_id': str(request.project_id),
-                      'planning_run_id': str(run.planning_run_id),
-                      'source_lineage_id': str(run.source_lineage_id),
-                      'chunk_count': lineage_after.chunk_count,
-                      'graph_artifact_id': str(lineage_after.graph_artifact_id),
-                      'persisted': {
-                          'request_uri': REQUEST_URI,
-                          'chunk_manifest_uri': lineage_after.chunk_manifest_uri,
-                          'graph_extractions_manifest_uri': lineage_after.graph_extractions_manifest_uri,
-                          'graph_manifest_uri': lineage_after.graph_manifest_uri,
-                          'graph_artifact_id': str(lineage_after.graph_artifact_id),
-                          'understanding_uri': run_after.artifacts.understanding_uri,
-                          'narrative_axis_uri': run_after.artifacts.narrative_axis_uri,
-                          'editorial_project_uri': run_after.artifacts.editorial_project_uri,
-                          'article_body_uri': published.body_uri,
-                      },
-                      'objects': {
-                          'planning_run': run_after.model_dump(mode='json'),
-                          'source_lineage': lineage_after.model_dump(mode='json'),
-                          'editorial_understanding': axis_result.editorial_understanding.model_dump(mode='json'),
-                          'narrative_axis': project_result.narrative_axis.model_dump(mode='json'),
-                          'editorial_project_proposed': proposed_project.model_dump(mode='json'),
-                          'editorial_project_approved': project_after.editorial_project.model_dump(mode='json'),
-                          'article': {
-                              'article_id': str(published.article_id),
-                              'title': published.title,
-                              'body_uri': published.body_uri,
-                              'word_count': published.word_count,
-                              'quality_score': published.quality_score,
-                              'revision_rounds': published.revision_rounds,
-                              'body_markdown': body,
-                          },
-                      },
-                      'cost': _cost_report(),
-                  }
-              except Exception as exc:
-                  return {
-                      'SOCIAL_MEDIA_MULTISOURCE_AB': 'FAILURE',
-                      'variant': VARIANT,
-                      'failed_stage': stage,
-                      'error': type(exc).__name__,
-                      'message': str(exc),
-                      'cost_so_far': _cost_report(),
-                  }
-
-          class Handler(BaseHTTPRequestHandler):
-              def send_json(self, status, payload):
-                  body = json.dumps(payload, ensure_ascii=False, indent=2).encode('utf-8')
-                  self.send_response(status)
-                  self.send_header('Content-Type', 'application/json; charset=utf-8')
-                  self.send_header('Content-Length', str(len(body)))
-                  self.end_headers()
-                  self.wfile.write(body)
-
-              def _authorized(self):
-                  return hmac.compare_digest(self.headers.get('X-Proof-Token', ''), TOKEN)
-
-              def do_GET(self):
-                  if not self._authorized():
-                      self.send_json(403, {'error': 'forbidden'})
-                      return
-                  if self.path == '/health':
-                      self.send_json(200, {'status': 'ok', 'model_invocation': 'none'})
-                      return
-                  if self.path == '/proof':
-                      result = run_proof()
-                      self.send_json(200 if result.get('SOCIAL_MEDIA_MULTISOURCE_AB') == 'SUCCESS' else 500, result)
-                      return
-                  self.send_json(404, {'error': 'not_found'})
-
-              def log_message(self, format, *args):
-                  return
-
-          ThreadingHTTPServer(('0.0.0.0', int(os.environ.get('PORT', '8080'))), Handler).serve_forever()
-          PY
-
-          proof_b64="$(base64 -w0 /tmp/proof_service.py)"
-          source_manifest_b64="$(base64 -w0 /tmp/social-media-source-manifest.json)"
-
-          gcloud run services delete "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet >/dev/null 2>&1 || true
-          gcloud run deploy "${PROOF_SERVICE}" \
-            --project="${PROJECT_ID}" --region="${REGION}" --image="${pinned_image}" \
-            --service-account="${RUNTIME_SA}" \
-            --command=python \
-            --args=-c,"import base64;import os;exec(base64.b64decode(os.environ['PROOF_SCRIPT_B64']))" \
-            --cpu=4 --memory=8Gi --concurrency=1 --max-instances=1 --min-instances=0 --timeout=3600 \
-            --allow-unauthenticated \
-            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},PROOF_VARIANT=${VARIANT},PROOF_PROJECT_ID=${NEW_PROJECT_ID},PROOF_REQUEST_URI=${request_uri},PROOF_SCRIPT_B64=${proof_b64},PROOF_SOURCE_MANIFEST_B64=${source_manifest_b64},PROOF_TOKEN=${proof_token}" \
-            --quiet
-
-          proof_url="$(gcloud run services describe "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(status.url)')"
-          test -n "${proof_url}"
-          echo "PINNED_IMAGE=${pinned_image}" >> "${GITHUB_ENV}"
-          echo "PROOF_URL=${proof_url}" >> "${GITHUB_ENV}"
-          echo "PROOF_TOKEN=${proof_token}" >> "${GITHUB_ENV}"
+          while IFS=$'\t' read -r local_path gcs_uri; do
+            gcloud storage cp "${local_path}" "${gcs_uri}" --if-generation-match=0 >/dev/null
+          done < <(jq -r '.[] | [.original_local_path, .original_gcs_uri] | @tsv' /tmp/hefesto-proof/source-manifest.json)
+          request_uri="gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/request.json"
+          gcloud storage cp /tmp/hefesto-proof/request.json "${request_uri}" --if-generation-match=0 >/dev/null
+          gcloud storage cp /tmp/hefesto-proof/source-manifest.json \
+            "gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/source-manifest.json" \
+            --if-generation-match=0 >/dev/null
           echo "REQUEST_URI=${request_uri}" >> "${GITHUB_ENV}"
 
-      - name: Execute fully fresh variant end to end
+      - name: Verify canonical Job boundary
         run: |
           set -euo pipefail
-          health="$(curl -fsS -H "X-Proof-Token: ${PROOF_TOKEN}" "${PROOF_URL}/health")"
-          test "$(printf '%s' "${health}" | jq -r '.model_invocation')" = "none"
+          deployed_sa="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.serviceAccountName)')"
+          deployed_image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test "${deployed_sa}" = "${RUNTIME_SA}"
+          test -n "${deployed_image}"
+          echo "DEPLOYED_IMAGE=${deployed_image}" >> "${GITHUB_ENV}"
 
-          http_code="$(curl -sS --max-time 3590 -o /tmp/social-media-ab-result.json -w '%{http_code}' -H "X-Proof-Token: ${PROOF_TOKEN}" "${PROOF_URL}/proof")"
-          cat /tmp/social-media-ab-result.json
-          test "${http_code}" = "200"
-          test "$(jq -r '.SOCIAL_MEDIA_MULTISOURCE_AB' /tmp/social-media-ab-result.json)" = "SUCCESS"
-          test "$(jq -r '.variant' /tmp/social-media-ab-result.json)" = "${VARIANT}"
-          test "$(jq -r '.fresh_from_digest' /tmp/social-media-ab-result.json)" = "true"
-          test "$(jq -r '.reuse_between_variants' /tmp/social-media-ab-result.json)" = "false"
-          test "$(jq -r '.feedback_submitted' /tmp/social-media-ab-result.json)" = "false"
-          test "$(jq -r '.axis_approved_directly' /tmp/social-media-ab-result.json)" = "true"
-          test "$(jq -r '.project_approved_directly' /tmp/social-media-ab-result.json)" = "true"
-          test "$(jq -r '.tips_accepted | length' /tmp/social-media-ab-result.json)" = "0"
-          test "$(jq -r '.enrichment_accepted | length' /tmp/social-media-ab-result.json)" = "0"
-          test "$(jq -r '.objects.article.word_count > 0' /tmp/social-media-ab-result.json)" = "true"
-          test "$(jq -r '.cost.total_usd >= 0' /tmp/social-media-ab-result.json)" = "true"
-
-      - name: Persist complete A/B result
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Run complete V2 pipeline on existing Job
         run: |
           set -euo pipefail
-          if [ ! -f /tmp/social-media-ab-result.json ]; then
-            printf '%s\n' "{\"SOCIAL_MEDIA_MULTISOURCE_AB\":\"FAILURE\",\"variant\":\"${VARIANT:-unknown}\",\"message\":\"workflow failed before proof response\"}" > /tmp/social-media-ab-result.json
-          fi
-          encoded="$(base64 -w0 /tmp/social-media-ab-result.json)"
-          sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${RESULT_PATH}" --jq '.sha' 2>/dev/null || true)"
-          if [ -n "${sha}" ]; then
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${RESULT_PATH}" -f message="Persist social-media multisource ${VARIANT} result [no-deploy]" -f content="${encoded}" -f sha="${sha}" >/dev/null
-          else
-            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${RESULT_PATH}" -f message="Persist social-media multisource ${VARIANT} result [no-deploy]" -f content="${encoded}" >/dev/null
-          fi
+          execution="$(gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --args="run-v2,--request=${REQUEST_URI},--auto-approve-without-tips,--tokens-per-minute=${ADMISSION_TPM},--max-concurrency=${MAX_CONCURRENCY},--per-project-concurrency=${PROJECT_CONCURRENCY}" \
+            --format='value(metadata.name)')"
+          test -n "${execution}"
+          echo "EXECUTION=${execution}" >> "${GITHUB_ENV}"
+          for attempt in $(seq 1 510); do
+            gcloud run jobs executions describe "${execution}" --project="${PROJECT_ID}" --region="${REGION}" --format=json > /tmp/hefesto-proof/execution.json
+            complete="$(jq -r '.status.conditions[]? | select(.type == "Completed") | .status' /tmp/hefesto-proof/execution.json | tail -1)"
+            if [[ "${complete}" == "True" ]]; then break; fi
+            if [[ "${complete}" == "False" ]]; then jq . /tmp/hefesto-proof/execution.json; exit 1; fi
+            sleep 20
+          done
+          test "${complete:-}" = "True"
 
-      - name: Result summary
+      - name: Collect and validate immutable receipt
+        run: |
+          set -euo pipefail
+          receipt_uri="$(gcloud storage ls "gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/executions/*/complete-run.json")"
+          test "$(printf '%s\n' "${receipt_uri}" | grep -c .)" -eq 1
+          gcloud storage cp "${receipt_uri}" /tmp/hefesto-proof/result.json >/dev/null
+          jq -e '(.status == "complete") and (.project_id == env.NEW_PROJECT_ID) and
+            (.digestion.source_count >= 1) and (.digestion.sentence_count >= 1) and
+            (.digestion.evidence_anchors >= 1) and (.article.word_count >= 1) and
+            (.rendered.html.uri | startswith("gs://")) and
+            (.usage.report.usage_complete == true) and (.usage.report.pricing_complete == true)' \
+            /tmp/hefesto-proof/result.json >/dev/null
+          jq --slurpfile manifest /tmp/hefesto-proof/source-manifest.json \
+            --arg proof "${PROOF}" --arg variant "${VARIANT}" --arg execution "${EXECUTION}" \
+            '. + {proof: {name: $proof, variant: $variant, cloud_run_execution: $execution, source_manifest: $manifest[0]}}' \
+            /tmp/hefesto-proof/result.json > /tmp/hefesto-proof/proof-result.json
+          proof_root="gs://${BUCKET}/comunicamundo-v4-rebuild/proofs/${PROOF}/${VARIANT}"
+          gcloud storage cp /tmp/hefesto-proof/proof-result.json "${proof_root}/${NEW_PROJECT_ID}.json" --if-generation-match=0 >/dev/null
+          gcloud storage cp /tmp/hefesto-proof/proof-result.json "${proof_root}/latest.json" >/dev/null
+
+      - name: Compare A and B
+        if: env.VARIANT == 'B'
+        run: |
+          set -euo pipefail
+          comparison_root="gs://${BUCKET}/comunicamundo-v4-rebuild/proofs/social-media-multisource"
+          gcloud storage cp "${comparison_root}/A/latest.json" /tmp/hefesto-proof/a.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          a = json.loads(Path('/tmp/hefesto-proof/a.json').read_text())
+          b = json.loads(Path('/tmp/hefesto-proof/proof-result.json').read_text())
+          def metrics(item):
+              report, digest = item['usage']['report'], item['digestion']
+              return {
+                  'project_id': item['project_id'], 'execution_run_id': item['execution_run_id'],
+                  'quality_score': item['article']['quality_score'], 'word_count': item['article']['word_count'],
+                  'revision_rounds': item['article']['revision_rounds'], 'sources': digest['source_count'],
+                  'sections': digest['section_count'], 'sentences': digest['sentence_count'],
+                  'dossier_findings': digest['dossier_findings'], 'evidence_anchors': digest['evidence_anchors'],
+                  'agreements': digest['cross_source_agreements'], 'divergences': digest['cross_source_divergences'],
+                  'coverage_gaps': digest['coverage_gaps'], 'research_subjects': item['production']['research_subjects'],
+                  'pipeline_duration_ms': sum(stage['duration_ms'] for stage in item['stages']),
+                  'model_calls': report['call_count'], 'attempts': report['attempt_count'],
+                  'total_tokens': report['total_tokens'], 'prompt_tokens': report['prompt_tokens'],
+                  'output_tokens': report['output_tokens'], 'reasoning_tokens': report['reasoning_tokens'],
+                  'rated_cost_usd': report['rated_cost_usd'], 'usage_complete': report['usage_complete'],
+                  'pricing_complete': report['pricing_complete'],
+                  'article_markdown_uri': item['rendered']['markdown']['uri'],
+                  'article_html_uri': item['rendered']['html']['uri'],
+              }
+          am, bm = metrics(a), metrics(b)
+          numeric = ['quality_score', 'word_count', 'revision_rounds', 'sections', 'sentences',
+                     'dossier_findings', 'evidence_anchors', 'agreements', 'divergences', 'coverage_gaps',
+                     'research_subjects', 'pipeline_duration_ms', 'model_calls', 'attempts', 'total_tokens',
+                     'prompt_tokens', 'output_tokens', 'reasoning_tokens', 'rated_cost_usd']
+          comparison = {
+              'comparison_version': 'hefesto-v2-ab-v1', 'shared_sources': 3,
+              'controlled_difference': 'A uses the National Academies highlights; B uses the full report.',
+              'A': am, 'B': bm,
+              'delta_B_minus_A': {key: float(bm[key]) - float(am[key]) for key in numeric},
+          }
+          Path('/tmp/hefesto-proof/comparison.json').write_text(json.dumps(comparison, ensure_ascii=False, indent=2), encoding='utf-8')
+          print(json.dumps(comparison, ensure_ascii=False, indent=2))
+          PY
+          destination="${comparison_root}/comparison/${NEW_PROJECT_ID}.json"
+          gcloud storage cp /tmp/hefesto-proof/comparison.json "${destination}" --if-generation-match=0 >/dev/null
+          gcloud storage cp /tmp/hefesto-proof/comparison.json "${comparison_root}/comparison/latest.json" >/dev/null
+          echo "COMPARISON_URI=${destination}" >> "${GITHUB_ENV}"
+
+      - name: Proof summary
         if: always()
         run: |
           {
-            echo "# Social media multisource A/B — ${VARIANT:-unknown}"
-            echo "- 4th source: \`${FOURTH_KIND:-unknown}\`"
-            echo "- Fresh project: \`${NEW_PROJECT_ID:-not-created}\`"
-            echo "- Request: \`${REQUEST_URI:-not-persisted}\`"
-            echo "- Pinned image: \`${PINNED_IMAGE:-unknown}\`"
-            if [ -f /tmp/social-media-ab-result.json ]; then
-              echo "- Status: \`$(jq -r '.SOCIAL_MEDIA_MULTISOURCE_AB' /tmp/social-media-ab-result.json)\`"
-              echo "- Chunks: \`$(jq -r '.chunk_count // \"n/a\"' /tmp/social-media-ab-result.json)\`"
-              echo "- Cost USD: \`$(jq -r '.cost.total_usd // .cost_so_far.total_usd // \"n/a\"' /tmp/social-media-ab-result.json)\`"
-              echo "- Article score: \`$(jq -r '.objects.article.quality_score // \"n/a\"' /tmp/social-media-ab-result.json)\`"
-              echo "- Article words: \`$(jq -r '.objects.article.word_count // \"n/a\"' /tmp/social-media-ab-result.json)\`"
-            fi
+            echo "# Hefesto V2 relational proof"
+            echo "- Proof: \`${PROOF:-not-selected}\`"
+            echo "- Variant: \`${VARIANT:-not-selected}\`"
+            echo "- Project: \`${NEW_PROJECT_ID:-not-created}\`"
+            echo "- Existing Job: \`${JOB_NAME}\`"
+            echo "- Execution: \`${EXECUTION:-not-started}\`"
+            echo "- Image: \`${DEPLOYED_IMAGE:-not-read}\`"
+            echo "- Comparison: \`${COMPARISON_URI:-not-applicable}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
-
-      - name: Cleanup temporary service
-        if: always()
-        run: |
-          gcloud run services delete "${PROOF_SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --quiet || true
