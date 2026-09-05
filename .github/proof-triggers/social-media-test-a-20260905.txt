@@ -1,0 +1,1 @@
+Run Test A from fresh source acquisition through PostgreSQL digestion, editorial production, and final renderer.
