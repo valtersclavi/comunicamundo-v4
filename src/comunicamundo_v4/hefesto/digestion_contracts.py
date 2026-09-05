@@ -19,10 +19,10 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v10"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v8"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v8"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v6"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v11"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v9"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v9"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v7"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
