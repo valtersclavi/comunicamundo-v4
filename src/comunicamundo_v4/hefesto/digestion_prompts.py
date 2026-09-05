@@ -19,6 +19,9 @@ causal_status value.
 Use longitudinal_association for claims based on temporal or longitudinal association; temporal_association is not a
 transport value. The accepted causal_status values are no_causal_claim, correlational, longitudinal_association,
 quasi_experimental, causal, mixed, and unclear.
+The evidence_strength field is a separate assessment of support. Its only values are strong, moderate, limited, and
+indeterminate. Never put a causal_status value in evidence_strength; use indeterminate when the source does not support
+a defensible strength assessment.
 Every substantive finding must cite the supplied human-sized coordinates: section_ordinal, paragraph_ordinal,
 first_sentence_ordinal, and last_sentence_ordinal. Ordinals are one-based. The first and last sentence must be in the
 same paragraph and identify a consecutive range in ascending source order (first_sentence_ordinal must be less than
