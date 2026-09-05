@@ -151,6 +151,23 @@ def test_causal_vocabulary_in_strength_is_epistemically_indeterminate(
     assert EvidenceStrength(transport_value) is EvidenceStrength.INDETERMINATE
 
 
+def test_single_anchor_object_is_canonicalized_to_transport_list() -> None:
+    proposal = SourceFindingProposal.model_validate(
+        {
+            "finding": "Achado sustentado.",
+            "causal_status": "correlational",
+            "evidence_strength": "moderate",
+            "anchors": {
+                "first_evidence_key": "E_0123456789abcdef",
+                "last_evidence_key": "E_0123456789abcdef",
+            },
+        }
+    )
+
+    assert len(proposal.anchors) == 1
+    assert proposal.anchors[0].first_evidence_key == "E_0123456789abcdef"
+
+
 @pytest.mark.asyncio
 async def test_direct_dossier_fails_closed_on_invented_evidence_key() -> None:
     source = _source("Evidência observada.")
