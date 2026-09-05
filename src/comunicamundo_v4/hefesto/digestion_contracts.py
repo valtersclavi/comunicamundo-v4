@@ -19,10 +19,10 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v9"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v7"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v7"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v5"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v10"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v8"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v8"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v6"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -72,6 +72,18 @@ class EvidenceStrength(StrEnum):
     MODERATE = "moderate"
     LIMITED = "limited"
     INDETERMINATE = "indeterminate"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "EvidenceStrength | None":
+        # If the model crosses the orthogonal causal-status vocabulary into
+        # this field, the source supplied no usable strength rating. Persist
+        # that epistemic absence explicitly instead of inventing a rating or
+        # discarding the supported finding.
+        if isinstance(value, str) and value.strip().lower() in {
+            status.value for status in CausalStatus
+        }:
+            return cls.INDETERMINATE
+        return None
 
 
 class SourceSentence(StrictModel):
