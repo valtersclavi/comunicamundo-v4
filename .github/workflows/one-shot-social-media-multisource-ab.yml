@@ -211,14 +211,28 @@ jobs:
       - name: Preserve originals and request in GCS
         run: |
           set -euo pipefail
+          access_token="$(gcloud auth print-access-token)"
+          upload_object() {
+            local source_path="$1"
+            local gcs_uri="$2"
+            local object_name="${gcs_uri#gs://${BUCKET}/}"
+            local encoded_name
+            encoded_name="$(jq -rn --arg value "${object_name}" '$value | @uri')"
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer ${access_token}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@${source_path}" \
+              "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${encoded_name}" \
+              >/dev/null
+          }
           while IFS=$'\t' read -r local_path gcs_uri; do
-            gcloud storage cp "${local_path}" "${gcs_uri}" >/dev/null
+            upload_object "${local_path}" "${gcs_uri}"
           done < <(jq -r '.[] | [.original_local_path, .original_gcs_uri] | @tsv' /tmp/hefesto-proof/source-manifest.json)
           request_uri="gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/request.json"
-          gcloud storage cp /tmp/hefesto-proof/request.json "${request_uri}" >/dev/null
-          gcloud storage cp /tmp/hefesto-proof/source-manifest.json \
-            "gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/source-manifest.json" \
-            >/dev/null
+          upload_object /tmp/hefesto-proof/request.json "${request_uri}"
+          upload_object /tmp/hefesto-proof/source-manifest.json \
+            "gs://${BUCKET}/comunicamundo-v4-rebuild/projects/${NEW_PROJECT_ID}/source-manifest.json"
           echo "REQUEST_URI=${request_uri}" >> "${GITHUB_ENV}"
 
       - name: Verify canonical Job boundary
@@ -342,7 +356,14 @@ jobs:
           print(json.dumps(comparison, ensure_ascii=False, indent=2))
           PY
           destination="gs://${BUCKET}/comunicamundo-v4-rebuild/proofs/social-media-multisource/comparison/${NEW_PROJECT_ID}.json"
-          gcloud storage cp /tmp/hefesto-proof/comparison.json "${destination}" >/dev/null
+          access_token="$(gcloud auth print-access-token)"
+          object_name="${destination#gs://${BUCKET}/}"
+          encoded_name="$(jq -rn --arg value "${object_name}" '$value | @uri')"
+          curl --fail --silent --show-error -X POST \
+            -H "Authorization: Bearer ${access_token}" -H "Content-Type: application/json" \
+            --data-binary @/tmp/hefesto-proof/comparison.json \
+            "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${encoded_name}" \
+            >/dev/null
           echo "HEFESTO_AB_COMPARISON_B64=$(base64 -w0 /tmp/hefesto-proof/comparison.json)"
           echo "COMPARISON_URI=${destination}" >> "${GITHUB_ENV}"
 
