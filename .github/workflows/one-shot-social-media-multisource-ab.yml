@@ -117,17 +117,20 @@ jobs:
           filter="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\" AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION}\""
           for attempt in $(seq 1 30); do
             gcloud logging read "${filter}" --project="${PROJECT_ID}" --freshness=3h \
-              --limit=200 --order=asc --format='value(textPayload)' > /tmp/container.log
+              --limit=200 --order=asc --format=json > /tmp/container-log.json
             if python - <<'PY'
           import json
           import os
           from pathlib import Path
 
-          for line in Path('/tmp/container.log').read_text(errors='replace').splitlines():
-              try:
-                  value = json.loads(line)
-              except json.JSONDecodeError:
-                  continue
+          entries = json.loads(Path('/tmp/container-log.json').read_text(errors='replace'))
+          for entry in entries:
+              value = entry.get('jsonPayload')
+              if not isinstance(value, dict):
+                  try:
+                      value = json.loads(entry.get('textPayload', ''))
+                  except (json.JSONDecodeError, TypeError):
+                      continue
               if value.get('status') == 'complete' and value.get('proof', {}).get('variant') == os.environ['VARIANT']:
                   Path('/tmp/proof-result.json').write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
                   raise SystemExit(0)
