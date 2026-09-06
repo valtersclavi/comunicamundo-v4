@@ -20,10 +20,10 @@ EvidenceKey = Annotated[str, Field(pattern=r"^E_[0-9a-f]{16}$")]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v18"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v16"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v16"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v13"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v19"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v17"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v17"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v14"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -352,6 +352,7 @@ class EvidenceKeyReference(StrictModel):
 
 
 class SourceFinding(StrictModel):
+    category: CompactText = "finding"
     finding: str = Field(min_length=1)
     causal_status: CausalStatus
     evidence_strength: EvidenceStrength
@@ -360,6 +361,7 @@ class SourceFinding(StrictModel):
 
 
 class SourceFindingProposal(StrictModel):
+    category: CompactText = "finding"
     finding: str = Field(min_length=1)
     causal_status: CausalStatus
     evidence_strength: EvidenceStrength
@@ -399,58 +401,18 @@ class DigestionItemKind(StrEnum):
     TEMPORAL_SCOPE = "temporal_scope"
 
 
-class TransportItemKind(StrEnum):
-    """Small closed grammar; category_detail keeps the intellectual taxonomy open."""
-
-    FINDING = "finding"
-    CONTENT = "content"
-    LIMITATION = "limitation"
-    UNCERTAINTY = "uncertainty"
-
-
 class DigestionItemProposal(StrictModel):
     """Atomic model output. Repeated finding items represent separate anchors."""
 
     # Keep transport deliberately grammar-light. Domain enums, evidence-key
     # patterns, and per-kind requirements are enforced after parsing in code.
-    kind: TransportItemKind
+    kind: CompactText
     text: CompactText
     causal_status: str
     evidence_strength: str
     first_evidence_key: str
     last_evidence_key: str
     qualifications: list[str]
-    category_detail: str = ""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _canonicalize_detailed_kind(cls, value: object) -> object:
-        """Accept code-owned detailed kinds while exposing only four model kinds."""
-
-        if not isinstance(value, dict):
-            return value
-        raw = value.get("kind")
-        detailed_kinds = {
-            DigestionItemKind.METHOD.value,
-            DigestionItemKind.METHODOLOGICAL_FACT.value,
-            DigestionItemKind.SOURCE_KIND.value,
-            DigestionItemKind.DESIGN.value,
-            DigestionItemKind.POPULATION_OR_SCOPE.value,
-            DigestionItemKind.MEASURES_OR_MATERIAL.value,
-            DigestionItemKind.TEMPORAL_SCOPE.value,
-            DigestionItemKind.LIMITATION.value,
-            DigestionItemKind.UNCERTAINTY.value,
-            DigestionItemKind.BOUNDARY_CONDITION.value,
-            DigestionItemKind.PRACTICAL_IMPLICATION.value,
-            DigestionItemKind.DISTINCTIVE_CONTRIBUTION.value,
-            DigestionItemKind.COVERAGE_GAP.value,
-            DigestionItemKind.RECOMMENDATION.value,
-            DigestionItemKind.OTHER.value,
-        }
-        raw_value = raw.value if isinstance(raw, StrEnum) else raw
-        if raw_value in detailed_kinds:
-            return {**value, "kind": TransportItemKind.CONTENT, "category_detail": value.get("category_detail") or raw_value}
-        return value
 
 
 class CategorizedText(StrictModel):

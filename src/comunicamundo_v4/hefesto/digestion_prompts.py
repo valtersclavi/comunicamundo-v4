@@ -27,8 +27,8 @@ last_evidence_key exactly from the labels, plus causal_status and evidence_stren
 sentence. Both endpoints must belong to the same paragraph. When a finding needs evidence from different paragraphs,
 repeat the complete finding item once per paragraph with the appropriate key pair. Every item uses the same seven
 fields. Non-finding items use empty strings for evidence and epistemic fields and an empty qualifications array. Use
-category_detail to specify the precise subtype whenever kind is content. The kind field must use one of the four
-values allowed by the JSON contract. Never
+Choose kind freely so it accurately names the source material; do not force an item into a predefined taxonomy.
+Hefesto preserves every category and performs grouping later in code. Never
 create parallel category arrays or nested anchor arrays.
 Include enough consecutive sentences to preserve qualifications. Never invent or calculate a key and never return
 an excerpt: Hefesto resolves immutable sentence rows and reconstructs the exact source text after validating the keys.
@@ -65,9 +65,8 @@ def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, o
     return f"""
 Create a bounded digest of this one section. Record only findings actually supported in the section. A references or
 administrative section may legitimately have no findings. Put every output atom in the single items array. Use kinds
-the four transport kinds. Use content with category_detail method, methodological_fact, distinctive_contribution, or
-recommendation. For a legitimate category not covered by those named subtypes, keep kind content and preserve its
-precise label in category_detail. Recommendations remain
+clear, precise kinds that match the material, such as method, methodological_fact, distinctive_contribution, or
+recommendation. You may create another accurate kind when needed. Recommendations remain
 recommendations and must never be recast as empirical findings. For each finding item, copy
 first_evidence_key and last_evidence_key exactly from the labels below. Use the same key twice for one sentence. A
 range may contain several consecutive sentences but must stay within one paragraph. Do not return excerpts, hashes,
@@ -88,10 +87,9 @@ Build one source dossier from the complete source below. Preserve every substant
 methodological fact, limitation, and uncertainty; consolidate only genuinely redundant wording. Describe the source's
 actual method or institutional role in the same single items array, using one item for each of source_kind, design,
 population_or_scope, measures_or_material, and temporal_scope. Treat recommendations as recommendations, not empirical
-effects. Use content items with category_detail source_kind, design, population_or_scope, measures_or_material,
-temporal_scope, methodological_fact, recommendation, boundary_condition, practical_implication,
-distinctive_contribution, or coverage_gap. For any legitimate category outside those named subtypes, keep kind content
-and preserve its precise label in category_detail. Every finding item must copy
+effects. Use precise kinds such as source_kind, design, population_or_scope, measures_or_material, temporal_scope,
+methodological_fact, recommendation, boundary_condition, practical_implication, distinctive_contribution, or
+coverage_gap. You may create another accurate kind when the material requires it. Every evidence-bearing item must copy
 first_evidence_key and last_evidence_key exactly from the labels below. Use the same key for both fields when one
 sentence suffices. Repeat a finding item when another paragraph is needed. Never return excerpts or locators; never return hashes,
 numeric coordinates, parallel category arrays, or nested anchors; Hefesto reconstructs the relational evidence.

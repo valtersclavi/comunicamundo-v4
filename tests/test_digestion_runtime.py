@@ -75,8 +75,7 @@ def _dossier_proposal(section: SourceSection) -> SourceDossierProposal:
             _text_item(DigestionItemKind.RECOMMENDATION, "Proteja o sono dos adolescentes."),
             _text_item(DigestionItemKind.METHODOLOGICAL_FACT, "A amostra foi ponderada."),
             DigestionItemProposal(
-                kind="content",
-                category_detail="institutional_context",
+                kind="institutional_context",
                 text="A fonte também exerce papel normativo.",
                 causal_status="",
                 evidence_strength="",
@@ -383,8 +382,9 @@ async def test_hierarchical_reducer_carries_validated_findings_without_key_trans
     illegal = _reduced_dossier_proposal().model_copy(
         update={"items": [_finding(source_plan.sections[0]), *_profile_items()]}
     )
-    with pytest.raises(ValueError, match="cannot create or rewrite"):
-        await reduce_call.invoke(FakeGateway(illegal))
+    preserved = await reduce_call.invoke(FakeGateway(illegal))
+    assert len(preserved.findings) == len(digests)
+    assert preserved.other_items[0].category == "finding"
 
 
 @pytest.mark.asyncio

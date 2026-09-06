@@ -30,7 +30,6 @@ from .digestion_contracts import (
     SourceDossierProposal,
     SourceFinding,
     SourceFindingProposal,
-    TransportItemKind,
     EvidenceKeyReference,
     canonical_sha256,
 )
@@ -505,19 +504,25 @@ def _partition_items(
     other_items: list[CategorizedText] = []
     finding_groups: dict[tuple[object, ...], SourceFindingProposal] = {}
     for item in items:
-        if item.kind is not TransportItemKind.FINDING:
-            kind = _domain_item_kind(item, section=section)
-            if kind is None:
-                detail = item.category_detail.strip() or item.kind.value
-                other_items.append(CategorizedText(category=detail, text=item.text))
-                continue
-            if kind not in allowed:
-                other_items.append(CategorizedText(category=kind.value, text=item.text))
-                continue
-            grouped[kind].append(item.text)
+        evidence_values = (
+            item.causal_status,
+            item.evidence_strength,
+            item.first_evidence_key,
+            item.last_evidence_key,
+        )
+        if not all(evidence_values):
+            try:
+                kind = DigestionItemKind(item.kind)
+            except ValueError:
+                kind = None
+            if kind is None or kind not in allowed or kind is DigestionItemKind.FINDING:
+                other_items.append(CategorizedText(category=item.kind, text=item.text))
+            else:
+                grouped[kind].append(item.text)
             continue
         if not allow_findings:
-            raise ValueError("a dossier reducer cannot create or rewrite evidence-bearing findings")
+            other_items.append(CategorizedText(category=item.kind, text=item.text))
+            continue
         if (
             not item.causal_status
             or not item.evidence_strength
@@ -525,9 +530,16 @@ def _partition_items(
             or not item.last_evidence_key
         ):
             raise ValueError("every finding item requires status, strength, and two evidence keys")
-        causal_status = CausalStatus(item.causal_status)
-        evidence_strength = EvidenceStrength(item.evidence_strength)
+        try:
+            causal_status = CausalStatus(item.causal_status)
+        except ValueError:
+            causal_status = CausalStatus.UNCLEAR
+        try:
+            evidence_strength = EvidenceStrength(item.evidence_strength)
+        except ValueError:
+            evidence_strength = EvidenceStrength.INDETERMINATE
         identity = (
+            item.kind,
             item.text,
             causal_status,
             evidence_strength,
@@ -540,6 +552,7 @@ def _partition_items(
         existing = finding_groups.get(identity)
         if existing is None:
             finding_groups[identity] = SourceFindingProposal(
+                category=item.kind,
                 finding=item.text,
                 causal_status=causal_status,
                 evidence_strength=evidence_strength,
@@ -551,32 +564,13 @@ def _partition_items(
     return list(finding_groups.values()), grouped, other_items
 
 
-def _domain_item_kind(item: DigestionItemProposal, *, section: bool) -> DigestionItemKind | None:
-    if item.kind is TransportItemKind.LIMITATION:
-        return DigestionItemKind.LIMITATION
-    if item.kind is TransportItemKind.UNCERTAINTY:
-        return DigestionItemKind.UNCERTAINTY
-    detail = item.category_detail.strip()
-    if item.kind is TransportItemKind.CONTENT and not detail:
-        return None
-    try:
-        candidate = DigestionItemKind(detail)
-    except ValueError:
-        return None
-    if candidate is DigestionItemKind.OTHER:
-        return None
-    if item.kind is TransportItemKind.CONTENT:
-        return candidate
-    return None
-
-
 def _profile_value(
     grouped: dict[DigestionItemKind, list[str]],
     kind: DigestionItemKind,
 ) -> str:
     values = list(dict.fromkeys(grouped[kind]))
     if not values:
-        raise ValueError(f"dossier requires one {kind.value} item")
+        return "not separately specified; see categorized source content"
     return "; ".join(values)
 
 
