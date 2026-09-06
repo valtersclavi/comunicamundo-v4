@@ -24,12 +24,11 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     ArtifactPointer,
     CausalStatus,
     DominanceAssessment,
-    EvidenceKeyReference,
+    DigestionItemKind,
+    DigestionItemProposal,
     EvidenceMatrixProposal,
     EvidenceStrength,
-    MethodProfile,
     SourceDossierProposal,
-    SourceFindingProposal,
 )
 from comunicamundo_v4.hefesto.digestion_orchestrator import DigestionOrchestrator
 from comunicamundo_v4.hefesto.digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
@@ -223,27 +222,31 @@ class ResponsiveGateway:
             evidence_value = evidence_match.group(1)
             proposal = SourceDossierProposal(
                 executive_synthesis="A fonte descreve uma associação heterogênea.",
-                method_profile=MethodProfile(
-                    source_kind="estudo",
-                    design="observacional",
-                    population_or_scope="adolescentes",
-                    measures_or_material="questionários",
-                    temporal_scope="um período",
-                ),
-                findings=[
-                    SourceFindingProposal(
-                        finding="A associação varia entre adolescentes.",
+                items=[
+                    DigestionItemProposal(
+                        kind=DigestionItemKind.FINDING,
+                        text="A associação varia entre adolescentes.",
                         causal_status=CausalStatus.CORRELATIONAL,
                         evidence_strength=EvidenceStrength.MODERATE,
-                        anchors=[
-                            EvidenceKeyReference(
-                                first_evidence_key=evidence_value,
-                                last_evidence_key=evidence_value,
-                            )
-                        ],
-                    )
+                        first_evidence_key=evidence_value,
+                        last_evidence_key=evidence_value,
+                        qualifications=[],
+                    ),
+                    *[
+                        DigestionItemProposal(
+                            kind=kind, text=text, causal_status="", evidence_strength="",
+                            first_evidence_key="", last_evidence_key="", qualifications=[],
+                        )
+                        for kind, text in (
+                            ("source_kind", "estudo"),
+                            ("design", "observacional"),
+                            ("population_or_scope", "adolescentes"),
+                            ("measures_or_material", "questionários"),
+                            ("temporal_scope", "um período"),
+                            ("limitation", "O desenho não demonstra causalidade."),
+                        )
+                    ],
                 ],
-                limitations=["O desenho não demonstra causalidade."],
             )
         elif response_schema is EvidenceMatrixProposal:
             proposal = EvidenceMatrixProposal(
