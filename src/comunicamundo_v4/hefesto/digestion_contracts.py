@@ -20,10 +20,10 @@ EvidenceKey = Annotated[str, Field(pattern=r"^E_[0-9a-f]{16}$")]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v17"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v15"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v15"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v12"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v18"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v16"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v16"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v13"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -390,6 +390,8 @@ class DigestionItemKind(StrEnum):
     DISTINCTIVE_CONTRIBUTION = "distinctive_contribution"
     COVERAGE_GAP = "coverage_gap"
     RECOMMENDATION = "recommendation"
+    METHODOLOGICAL_FACT = "methodological_fact"
+    OTHER = "other"
     SOURCE_KIND = "source_kind"
     DESIGN = "design"
     POPULATION_OR_SCOPE = "population_or_scope"
@@ -397,18 +399,63 @@ class DigestionItemKind(StrEnum):
     TEMPORAL_SCOPE = "temporal_scope"
 
 
+class TransportItemKind(StrEnum):
+    """Small closed grammar; category_detail keeps the intellectual taxonomy open."""
+
+    FINDING = "finding"
+    CONTENT = "content"
+    LIMITATION = "limitation"
+    UNCERTAINTY = "uncertainty"
+
+
 class DigestionItemProposal(StrictModel):
     """Atomic model output. Repeated finding items represent separate anchors."""
 
     # Keep transport deliberately grammar-light. Domain enums, evidence-key
     # patterns, and per-kind requirements are enforced after parsing in code.
-    kind: str
+    kind: TransportItemKind
     text: CompactText
     causal_status: str
     evidence_strength: str
     first_evidence_key: str
     last_evidence_key: str
     qualifications: list[str]
+    category_detail: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _canonicalize_detailed_kind(cls, value: object) -> object:
+        """Accept code-owned detailed kinds while exposing only four model kinds."""
+
+        if not isinstance(value, dict):
+            return value
+        raw = value.get("kind")
+        detailed_kinds = {
+            DigestionItemKind.METHOD.value,
+            DigestionItemKind.METHODOLOGICAL_FACT.value,
+            DigestionItemKind.SOURCE_KIND.value,
+            DigestionItemKind.DESIGN.value,
+            DigestionItemKind.POPULATION_OR_SCOPE.value,
+            DigestionItemKind.MEASURES_OR_MATERIAL.value,
+            DigestionItemKind.TEMPORAL_SCOPE.value,
+            DigestionItemKind.LIMITATION.value,
+            DigestionItemKind.UNCERTAINTY.value,
+            DigestionItemKind.BOUNDARY_CONDITION.value,
+            DigestionItemKind.PRACTICAL_IMPLICATION.value,
+            DigestionItemKind.DISTINCTIVE_CONTRIBUTION.value,
+            DigestionItemKind.COVERAGE_GAP.value,
+            DigestionItemKind.RECOMMENDATION.value,
+            DigestionItemKind.OTHER.value,
+        }
+        raw_value = raw.value if isinstance(raw, StrEnum) else raw
+        if raw_value in detailed_kinds:
+            return {**value, "kind": TransportItemKind.CONTENT, "category_detail": value.get("category_detail") or raw_value}
+        return value
+
+
+class CategorizedText(StrictModel):
+    category: CompactText
+    text: CompactText
 
 
 class MethodProfile(StrictModel):
@@ -432,6 +479,8 @@ class SectionDigest(StrictModel):
     uncertainties: list[CompactText] = Field(default_factory=list)
     distinctive_contributions: list[CompactText] = Field(default_factory=list)
     recommendations: list[CompactText] = Field(default_factory=list)
+    methodological_facts: list[CompactText] = Field(default_factory=list)
+    other_items: list[CategorizedText] = Field(default_factory=list)
     schema_version: int = 1
     source_id: UUID
     section_id: Sha256
@@ -475,6 +524,8 @@ class SourceDossier(StrictModel):
     distinctive_contributions: list[CompactText] = Field(default_factory=list)
     coverage_gaps: list[CompactText] = Field(default_factory=list)
     recommendations: list[CompactText] = Field(default_factory=list)
+    methodological_facts: list[CompactText] = Field(default_factory=list)
+    other_items: list[CategorizedText] = Field(default_factory=list)
     schema_version: int = 1
     dossier_id: UUID = Field(default_factory=uuid4)
     execution_run_id: UUID
