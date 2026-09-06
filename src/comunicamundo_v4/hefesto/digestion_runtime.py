@@ -78,7 +78,6 @@ class DigestionRuntimeConfig:
     location: str = "global"
     temperature: float = 0.1
     context_window_tokens: int = 1_048_576
-    max_input_tokens: int = 250_000
     section_max_output_tokens: int = 65_536
     section_capacity_output_tokens: int = 12_000
     section_thinking_tokens: int = 1_000
@@ -95,8 +94,8 @@ class DigestionRuntimeConfig:
             raise ValueError("digestion runtime requires a model and location")
         if not 0 <= self.temperature <= 2:
             raise ValueError("temperature must fit the provider contract")
-        if self.max_input_tokens <= 0 or self.context_window_tokens <= 0:
-            raise ValueError("input and context budgets must be positive")
+        if self.context_window_tokens <= 0:
+            raise ValueError("context budget must be positive")
         for output, capacity, thinking in (
             (self.section_max_output_tokens, self.section_capacity_output_tokens, self.section_thinking_tokens),
             (self.dossier_max_output_tokens, self.dossier_capacity_output_tokens, self.dossier_thinking_tokens),
@@ -104,7 +103,7 @@ class DigestionRuntimeConfig:
         ):
             if output <= 0 or capacity <= 0 or capacity > output or thinking < 0 or thinking > output:
                 raise ValueError("each task requires a coherent output and thinking budget")
-            if self.max_input_tokens + output > self.context_window_tokens:
+            if output >= self.context_window_tokens:
                 raise ValueError("task budget exceeds the model context window")
         if not 1 <= self.max_attempts <= 8:
             raise ValueError("attempt budget must be between one and eight")
@@ -440,7 +439,7 @@ class DigestionCallFactory:
         estimated_input = estimate_tokens(prompt) + estimate_tokens(DIGESTION_SYSTEM_INSTRUCTION)
         budget = TokenBudget(
             estimated_input_tokens=estimated_input,
-            max_input_tokens=self.config.max_input_tokens,
+            max_input_tokens=self.config.context_window_tokens - max_output_tokens,
             max_output_tokens=max_output_tokens,
             capacity_output_tokens=capacity_output_tokens,
             thinking_budget_tokens=thinking_tokens,

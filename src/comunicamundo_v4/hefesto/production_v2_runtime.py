@@ -58,7 +58,6 @@ class ProductionV2RuntimeConfig:
     location: str = "global"
     temperature: float = 0.2
     context_window_tokens: int = 1_048_576
-    max_input_tokens: int = 160_000
     research_max_output_tokens: int = 8_000
     research_thinking_tokens: int = 2_000
     architecture_max_output_tokens: int = 4_000
@@ -76,8 +75,8 @@ class ProductionV2RuntimeConfig:
             raise ValueError("production runtime requires model and location")
         if not 0 <= self.temperature <= 2:
             raise ValueError("temperature must fit the provider contract")
-        if self.max_input_tokens <= 0 or self.context_window_tokens <= 0:
-            raise ValueError("production input and context budgets must be positive")
+        if self.context_window_tokens <= 0:
+            raise ValueError("production context budget must be positive")
         for output, thinking in (
             (self.research_max_output_tokens, self.research_thinking_tokens),
             (self.architecture_max_output_tokens, self.architecture_thinking_tokens),
@@ -87,7 +86,7 @@ class ProductionV2RuntimeConfig:
         ):
             if output <= 0 or thinking < 0 or thinking > output:
                 raise ValueError("production task requires a coherent output budget")
-            if self.max_input_tokens + output > self.context_window_tokens:
+            if output >= self.context_window_tokens:
                 raise ValueError("production task budget exceeds the context window")
         if not 1 <= self.max_attempts <= 8:
             raise ValueError("attempt budget must be between one and eight")
@@ -291,7 +290,7 @@ class ProductionV2CallFactory:
         estimated_input = estimate_tokens(prompt) + estimate_tokens(PRODUCTION_V2_SYSTEM_INSTRUCTION)
         budget = TokenBudget(
             estimated_input_tokens=estimated_input,
-            max_input_tokens=self.config.max_input_tokens,
+            max_input_tokens=self.config.context_window_tokens - max_output_tokens,
             max_output_tokens=max_output_tokens,
             thinking_budget_tokens=thinking_tokens,
             context_window_tokens=self.config.context_window_tokens,

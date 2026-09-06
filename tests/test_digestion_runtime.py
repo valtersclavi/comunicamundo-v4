@@ -521,10 +521,16 @@ async def test_matrix_call_preserves_source_order_and_produces_auditable_balance
     assert matrix_call.intent.budget.capacity_output_tokens == 16_000
 
 
-def test_runtime_rejects_a_prompt_that_exceeds_its_declared_input_budget() -> None:
+def test_runtime_uses_the_model_context_as_its_only_input_ceiling() -> None:
     source = _source("Evidência observada. " * 1_000)
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
-    factory = DigestionCallFactory(DigestionRuntimeConfig(max_input_tokens=100))
+    config = DigestionRuntimeConfig()
+    factory = DigestionCallFactory(config)
 
-    with pytest.raises(ValueError, match="estimated input"):
-        factory.direct_dossier(plan=plan, source=source, source_plan=plan.sources[0], brief=_brief())
+    call = factory.direct_dossier(
+        plan=plan, source=source, source_plan=plan.sources[0], brief=_brief()
+    )
+
+    assert call.intent.budget.max_input_tokens == (
+        config.context_window_tokens - config.dossier_max_output_tokens
+    )
