@@ -280,6 +280,48 @@ async def test_direct_dossier_fails_closed_on_out_of_range_local_coordinate() ->
 
 
 @pytest.mark.asyncio
+async def test_evidenced_noncausal_category_gets_explicit_neutral_epistemics() -> None:
+    source = _source("A amostra foi ponderada.")
+    plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
+    section = plan.sources[0].sections[0]
+    proposal = _dossier_proposal(section)
+    evidenced_method = DigestionItemProposal(
+        kind="methodological_fact",
+        text="A amostra foi ponderada.",
+        causal_status="",
+        evidence_strength="",
+        paragraph_ordinal=1,
+        first_sentence_ordinal=1,
+        last_sentence_ordinal=1,
+        qualifications=[],
+    )
+    proposal = proposal.model_copy(update={"items": [evidenced_method, *proposal.items[1:]]})
+
+    dossier = await DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
+        plan=plan, source=source, source_plan=plan.sources[0], brief=_brief()
+    ).invoke(FakeGateway(proposal))
+
+    assert dossier.findings[0].category == "methodological_fact"
+    assert dossier.findings[0].causal_status is None
+    assert dossier.findings[0].evidence_strength is None
+
+
+@pytest.mark.asyncio
+async def test_partial_evidence_coordinates_still_fail_closed() -> None:
+    source = _source("A amostra foi ponderada.")
+    plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
+    section = plan.sources[0].sections[0]
+    proposal = _dossier_proposal(section)
+    partial = proposal.items[0].model_copy(update={"last_sentence_ordinal": 0})
+    proposal = proposal.model_copy(update={"items": [partial, *proposal.items[1:]]})
+
+    with pytest.raises(ValueError, match="both sentence endpoints"):
+        await DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
+            plan=plan, source=source, source_plan=plan.sources[0], brief=_brief()
+        ).invoke(FakeGateway(proposal))
+
+
+@pytest.mark.asyncio
 async def test_local_positions_resolve_an_exact_consecutive_sentence_range() -> None:
     source = _source("Primeira frase. Segunda frase.\n\nTerceira frase.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
