@@ -1,0 +1,1 @@
+Canonical Test A retry after preserving recommendations as first-class content.
