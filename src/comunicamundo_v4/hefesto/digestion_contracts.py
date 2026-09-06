@@ -19,7 +19,7 @@ Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v23"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v24"
 SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v19"
 SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v19"
 EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v14"
@@ -412,6 +412,12 @@ class DigestionItemProposal(StrictModel):
 class CategorizedText(StrictModel):
     category: CompactText
     text: CompactText
+    causal_status: str | None = None
+    evidence_strength: str | None = None
+    paragraph_ordinal: int = Field(default=0, ge=0)
+    first_sentence_ordinal: int = Field(default=0, ge=0)
+    last_sentence_ordinal: int = Field(default=0, ge=0)
+    qualifications: list[str] = Field(default_factory=list)
 
 
 class MethodProfile(StrictModel):

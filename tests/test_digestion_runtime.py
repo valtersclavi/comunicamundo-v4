@@ -144,7 +144,16 @@ async def test_direct_dossier_is_an_immutable_budgeted_gateway_call() -> None:
     assert dossier.recommendations == ["Proteja o sono dos adolescentes."]
     assert dossier.methodological_facts == ["A amostra foi ponderada."]
     assert [item.model_dump() for item in dossier.other_items] == [
-        {"category": "institutional_context", "text": "A fonte também exerce papel normativo."}
+        {
+            "category": "institutional_context",
+            "text": "A fonte também exerce papel normativo.",
+            "causal_status": None,
+            "evidence_strength": None,
+            "paragraph_ordinal": 0,
+            "first_sentence_ordinal": 0,
+            "last_sentence_ordinal": 0,
+            "qualifications": [],
+        }
     ]
 
 
@@ -339,7 +348,7 @@ async def test_evidenced_noncausal_category_gets_explicit_neutral_epistemics() -
 
 
 @pytest.mark.asyncio
-async def test_partial_evidence_coordinates_still_fail_closed() -> None:
+async def test_partial_evidence_coordinates_preserve_the_complete_model_item() -> None:
     source = _source("A amostra foi ponderada.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     section = plan.sources[0].sections[0]
@@ -347,10 +356,17 @@ async def test_partial_evidence_coordinates_still_fail_closed() -> None:
     partial = proposal.items[0].model_copy(update={"last_sentence_ordinal": 0})
     proposal = proposal.model_copy(update={"items": [partial, *proposal.items[1:]]})
 
-    with pytest.raises(ValueError, match="both sentence endpoints"):
-        await DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
-            plan=plan, source=source, source_plan=plan.sources[0], brief=_brief()
-        ).invoke(FakeGateway(proposal))
+    dossier = await DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
+        plan=plan, source=source, source_plan=plan.sources[0], brief=_brief()
+    ).invoke(FakeGateway(proposal))
+
+    preserved = dossier.other_items[0]
+    assert preserved.category == "finding"
+    assert preserved.text == "Foi observada uma associação."
+    assert preserved.causal_status == "correlational"
+    assert preserved.paragraph_ordinal == 1
+    assert preserved.first_sentence_ordinal == 1
+    assert preserved.last_sentence_ordinal == 0
 
 
 @pytest.mark.asyncio
