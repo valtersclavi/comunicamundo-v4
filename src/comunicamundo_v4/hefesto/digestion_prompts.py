@@ -6,7 +6,7 @@ from typing import Sequence
 
 from .contracts import EditorialBrief, NormalizedSource
 from .digestion_contracts import SectionDigest, SourceDossier, SourceSection
-from .source_digestion import evidence_key, source_balance_metrics
+from .source_digestion import source_balance_metrics
 
 
 DIGESTION_SYSTEM_INSTRUCTION = """
@@ -22,29 +22,29 @@ quasi_experimental, causal, mixed, and unclear.
 The evidence_strength field is a separate assessment of support. Its only values are strong, moderate, limited, and
 indeterminate. Never put a causal_status value in evidence_strength; use indeterminate when the source does not support
 a defensible strength assessment.
-Return one flat items array. Each item has a kind and text. A finding item also copies first_evidence_key and
-last_evidence_key exactly from the labels, plus causal_status and evidence_strength. Use the same key twice for one
-sentence. Both endpoints must belong to the same paragraph. When a finding needs evidence from different paragraphs,
-repeat the complete finding item once per paragraph with the appropriate key pair. Every item uses the same seven
-fields. Non-finding items use empty strings for evidence and epistemic fields and an empty qualifications array. Use
+Return one flat items array. Each item has a kind and text. An evidence-bearing item selects paragraph_ordinal,
+first_sentence_ordinal, and last_sentence_ordinal from the displayed local coordinates, plus causal_status and
+evidence_strength. Use the same sentence ordinal twice for one sentence. Both endpoints must remain in the same paragraph
+selected by paragraph_ordinal. When an item needs evidence from different paragraphs, repeat the complete item once per paragraph. Every
+item uses the same eight fields. Non-evidence items use zero for all three coordinates, empty strings for epistemic
+fields, and an empty qualifications array.
 Choose kind freely so it accurately names the source material; do not force an item into a predefined taxonomy.
 Hefesto preserves every category and performs grouping later in code. Never
 create parallel category arrays or nested anchor arrays.
-Include enough consecutive sentences to preserve qualifications. Never invent or calculate a key and never return
-an excerpt: Hefesto resolves immutable sentence rows and reconstructs the exact source text after validating the keys.
+Include enough consecutive sentences to preserve qualifications. Never return an ID, hash, key, locator, or excerpt:
+Hefesto resolves local positions to immutable PostgreSQL sentence rows and reconstructs the exact source text.
 Return only the requested structured object in the requested language.
 """.strip()
 
 
 def _coordinate_text(section: SourceSection) -> str:
-    """Render model-facing text with opaque sentence handles and human context."""
+    """Render one-based local positions; immutable identities remain code-owned."""
 
     blocks: list[str] = []
     for paragraph in section.paragraphs:
         lines = [f"[SECTION {section.ordinal + 1}; PARAGRAPH {paragraph.ordinal + 1}]"]
         lines.extend(
-            f"[EVIDENCE_KEY {evidence_key(sentence.sentence_id)}] "
-            f"[SECTION {section.ordinal + 1}; PARAGRAPH {paragraph.ordinal + 1}; "
+            f"[PARAGRAPH {paragraph.ordinal + 1}; "
             f"SENTENCE {sentence.ordinal + 1}] "
             f"{sentence.text.strip()}"
             for sentence in paragraph.sentences
@@ -66,11 +66,12 @@ def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, o
 Create a bounded digest of this one section. Record only findings actually supported in the section. A references or
 administrative section may legitimately have no findings. Put every output atom in the single items array. Use kinds
 clear, precise kinds that match the material, such as method, methodological_fact, distinctive_contribution, or
-recommendation. You may create another accurate kind when needed. Recommendations remain
-recommendations and must never be recast as empirical findings. For each finding item, copy
-first_evidence_key and last_evidence_key exactly from the labels below. Use the same key twice for one sentence. A
-range may contain several consecutive sentences but must stay within one paragraph. Do not return excerpts, hashes,
-numeric coordinates, or nested anchors. Do not infer a whole-source method or conclusion from this
+recommendation. You may create another accurate kind when needed. Recommendations remain recommendations and must
+never be recast as empirical findings. For each evidence-bearing item, select paragraph_ordinal,
+first_sentence_ordinal, and last_sentence_ordinal from the labels below. Use the same sentence ordinal twice for one
+sentence. A range may contain several consecutive sentences but must stay within one paragraph. Use zero coordinates
+for non-evidence items. Do not return excerpts, IDs, hashes, keys, locators, or nested anchors. Do not infer a
+whole-source method or conclusion from this
 partial section. Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
 OUTPUT LANGUAGE: {output_language}
@@ -89,10 +90,11 @@ actual method or institutional role in the same single items array, using one it
 population_or_scope, measures_or_material, and temporal_scope. Treat recommendations as recommendations, not empirical
 effects. Use precise kinds such as source_kind, design, population_or_scope, measures_or_material, temporal_scope,
 methodological_fact, recommendation, boundary_condition, practical_implication, distinctive_contribution, or
-coverage_gap. You may create another accurate kind when the material requires it. Every evidence-bearing item must copy
-first_evidence_key and last_evidence_key exactly from the labels below. Use the same key for both fields when one
-sentence suffices. Repeat a finding item when another paragraph is needed. Never return excerpts or locators; never return hashes,
-numeric coordinates, parallel category arrays, or nested anchors; Hefesto reconstructs the relational evidence.
+coverage_gap. You may create another accurate kind when the material requires it. Every evidence-bearing item must
+select paragraph_ordinal, first_sentence_ordinal, and last_sentence_ordinal from the labels below. Use the same
+sentence ordinal twice when one sentence suffices. Repeat an item when another paragraph is needed. Use zero
+coordinates for non-evidence items. Never return excerpts or locators, IDs, hashes, keys, parallel category arrays, or
+nested anchors; Hefesto resolves the local positions to relational evidence.
 Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
 EDITORIAL BRIEF:
@@ -140,9 +142,10 @@ Reduce the section digests into one source dossier. A long source does not recei
 because it has more pages or sections. Synthesize rather than concatenate, and preserve methodological facts,
 methodological facts, limitations, uncertainty, recommendations, boundary conditions, implications, distinctive
 contributions, coverage gaps, and legitimate other categorized material. Fill the
-five method-profile items and put those other atoms in the same single items array. Do not return finding items or any
-evidence keys: Hefesto carries every validated finding and its relational evidence into the dossier without model
-transcription. Never return excerpts, locators, hashes, numeric coordinates, parallel category arrays, or nested data.
+five method-profile items and put those other atoms in the same single items array. Do not return evidence-bearing
+items: Hefesto carries every validated finding and its relational evidence into the dossier without model
+transcription. Use zero for every coordinate. Never return excerpts, locators, IDs, hashes, keys, parallel category
+arrays, or nested data.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}

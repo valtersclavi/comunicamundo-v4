@@ -7,8 +7,7 @@ from hashlib import sha256
 from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
-from google.api_core.exceptions import Aborted, AlreadyExists, PreconditionFailed
-from google.cloud.firestore_v1._helpers import LastUpdateOption
+from google.api_core.exceptions import AlreadyExists, PreconditionFailed
 from pydantic import BaseModel
 
 from .contracts import EditorialProjectProposal, NarrativeAxisEvidenceReview, NarrativeAxisProposal
@@ -18,11 +17,9 @@ from .editorial_v2_contracts import (
     EditorialV2ExecutionRun,
     NarrativeAxisRecordV2,
 )
-from .execution_persistence import _firestore_payload
 from .hefesto_tips import HefestoTipTimingResult
 
 
-EDITORIAL_V2_RUNS_COLLECTION = "hefesto_editorial_v2_runs"
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
@@ -211,57 +208,3 @@ class EditorialV2RunRepository(Protocol):
     async def transition(self, execution_run_id: UUID, change: RunTransition) -> EditorialV2ExecutionRun: ...
 
 
-class FirestoreEditorialV2RunRepository:
-    def __init__(self, firestore: Any, *, collection: str = EDITORIAL_V2_RUNS_COLLECTION) -> None:
-        self._firestore = firestore
-        self._collection = collection
-
-    async def create(self, run: EditorialV2ExecutionRun) -> EditorialV2ExecutionRun:
-        return await asyncio.to_thread(self._create_sync, run)
-
-    async def get(self, execution_run_id: UUID) -> EditorialV2ExecutionRun | None:
-        return await asyncio.to_thread(self._get_sync, execution_run_id)
-
-    async def transition(self, execution_run_id: UUID, change: RunTransition) -> EditorialV2ExecutionRun:
-        return await asyncio.to_thread(self._transition_sync, execution_run_id, change)
-
-    def _reference(self, execution_run_id: UUID):
-        return self._firestore.collection(self._collection).document(str(execution_run_id))
-
-    def _create_sync(self, run: EditorialV2ExecutionRun) -> EditorialV2ExecutionRun:
-        reference = self._reference(run.execution_run_id)
-        try:
-            reference.create(_firestore_payload(run.model_dump(mode="python")))
-        except AlreadyExists:
-            existing = self._snapshot(reference.get())
-            if existing != run:
-                raise ValueError(f"conflicting editorial execution run {run.execution_run_id}")
-        return run
-
-    def _get_sync(self, execution_run_id: UUID) -> EditorialV2ExecutionRun | None:
-        return self._snapshot(self._reference(execution_run_id).get())
-
-    def _transition_sync(self, execution_run_id: UUID, change: RunTransition) -> EditorialV2ExecutionRun:
-        reference = self._reference(execution_run_id)
-        snapshot = reference.get()
-        current = self._snapshot(snapshot)
-        if current is None:
-            raise KeyError(f"unknown editorial execution run {execution_run_id}")
-        updated = change(current)
-        if updated.execution_run_id != current.execution_run_id or updated.project_id != current.project_id:
-            raise ValueError("editorial execution run identity is immutable")
-        try:
-            reference.update(
-                _firestore_payload(updated.model_dump(mode="python")),
-                option=LastUpdateOption(snapshot.update_time),
-            )
-        except (Aborted, PreconditionFailed) as error:
-            raise RuntimeError(f"concurrent editorial update for {execution_run_id}") from error
-        return updated
-
-    @staticmethod
-    def _snapshot(snapshot) -> EditorialV2ExecutionRun | None:
-        if not snapshot.exists:
-            return None
-        data = snapshot.to_dict()
-        return None if data is None else EditorialV2ExecutionRun.model_validate(data)

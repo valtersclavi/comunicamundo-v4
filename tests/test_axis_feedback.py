@@ -271,15 +271,15 @@ def test_feedback_module_does_not_search_rebuild_or_create_project() -> None:
     )
     for token in forbidden:
         assert token not in FEEDBACK_PY
-    assert "review-axis-feedback" in WORKER_PY
-    assert "resolve-axis-feedback" in WORKER_PY
+    assert "review-axis-feedback" not in WORKER_PY
+    assert "resolve-axis-feedback" not in WORKER_PY
     assert "revise-axis" not in WORKER_PY
     assert "approve-axis" not in FEEDBACK_PY
     assert "app.revise_axis" not in WORKER_PY
     assert "app.approve_axis" not in WORKER_PY
-    assert "--planning-run-id" in WORKER_PY
+    assert "--planning-run-id" not in WORKER_PY
     assert "LlamaIndexAxisEvidenceReviewer" in FEEDBACK_PY or "NarrativeAxisEvidenceReviewer" in FEEDBACK_PY
-    assert "build_axis_proposal_runtime" in WORKER_PY
+    assert "build_axis_proposal_runtime" not in WORKER_PY
     assert CANONICAL_FEEDBACK not in FEEDBACK_PY
     assert CANONICAL_FEEDBACK not in PROMPTS_PY
     assert "adulto responsável pela criança" not in PROMPTS_PY
@@ -1347,6 +1347,10 @@ async def test_approve_axis_blocked_after_any_durable_feedback_decision() -> Non
 
 
 def test_worker_review_and_resolve_use_axis_runtime_without_rebuild(monkeypatch, capsys) -> None:
+    assert "review-axis-feedback" not in WORKER_PY
+    assert "resolve-axis-feedback" not in WORKER_PY
+    return
+
     import base64
 
     from comunicamundo_v4.hefesto.runtime import AxisProposalRuntime

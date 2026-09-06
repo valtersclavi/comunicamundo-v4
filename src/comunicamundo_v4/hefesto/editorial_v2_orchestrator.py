@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID
 
-from .axis_proposal import apply_evidence_strength_review, validate_axis_statement
+from .axis_validation import apply_evidence_strength_review, validate_axis_statement
 from .contracts import (
     EditorialProject,
     EditorialProjectProposal,

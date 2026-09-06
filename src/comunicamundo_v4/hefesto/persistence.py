@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 from uuid import UUID, uuid4
 
-from google.cloud import firestore, storage
+from google.cloud import storage
 from pydantic import Field
 
 from .contracts import (
@@ -208,7 +208,7 @@ class GcsArtifactStore:
         )
 
 
-class FirestoreEditorialRepository:
+class LegacyDocumentEditorialRepository:
     def __init__(
         self,
         client: Any,
@@ -343,25 +343,9 @@ class FirestoreEditorialRepository:
 
 
 class GcpEditorialPersistence:
-    def __init__(self, *, artifacts: GcsArtifactStore, repository: FirestoreEditorialRepository) -> None:
+    def __init__(self, *, artifacts: GcsArtifactStore, repository: LegacyDocumentEditorialRepository) -> None:
         self.artifacts = artifacts
         self.repository = repository
-
-    @classmethod
-    def from_settings(cls, settings: GcpPersistenceSettings) -> "GcpEditorialPersistence":
-        return cls(
-            artifacts=GcsArtifactStore(storage.Client(project=settings.project), bucket_name=settings.bucket, root_prefix=settings.root_prefix),
-            repository=FirestoreEditorialRepository(
-                firestore.Client(project=settings.project),
-                axes_collection=settings.axes_collection,
-                projects_collection=settings.projects_collection,
-                articles_collection=settings.articles_collection,
-                planning_runs_collection=settings.planning_runs_collection,
-                planning_intents_collection=settings.planning_intents_collection,
-                source_lineages_collection=settings.source_lineages_collection,
-                source_lineage_keys_collection=settings.source_lineage_keys_collection,
-            ),
-        )
 
     def persist_new_axis(self, *, axis: NarrativeAxis, brief: EditorialBrief, graph_context: str, graph_directory: Path) -> StoredNarrativeAxis:
         artifact = self.artifacts.upload_graph(axis.project_id, graph_directory)

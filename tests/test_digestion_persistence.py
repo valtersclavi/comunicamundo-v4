@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -13,11 +12,7 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     DigestionExecutionRun,
     DigestionRunState,
 )
-from comunicamundo_v4.hefesto.digestion_persistence import (
-    ExecutionRunConflict,
-    FirestoreExecutionRunRepository,
-    GcsDigestionArtifactStore,
-)
+from comunicamundo_v4.hefesto.digestion_persistence import GcsDigestionArtifactStore
 from comunicamundo_v4.hefesto.source_digestion import SourceDigestionPlanner
 
 
@@ -153,31 +148,6 @@ async def test_gcs_artifact_rejects_conflicting_replay_at_the_same_path() -> Non
 
     with pytest.raises(ValueError, match="conflicting immutable"):
         await store.persist_plan(changed)
-
-
-@pytest.mark.asyncio
-async def test_execution_run_repository_is_idempotent_and_uses_compare_and_swap() -> None:
-    database = Firestore()
-    repository = FirestoreExecutionRunRepository(database)
-    plan = _plan()
-    pointer = ArtifactPointer(uri="gs://bucket/plan.json", sha256="0" * 64)
-    run = _run(plan, pointer)
-
-    await repository.create(run)
-    await repository.create(run)
-    updated = await repository.transition(
-        run.execution_run_id,
-        lambda current: current.model_copy(
-            update={"state": DigestionRunState.DIGESTING, "updated_at": datetime.now(UTC)}
-        ),
-    )
-
-    assert updated.state is DigestionRunState.DIGESTING
-    assert await repository.get(run.execution_run_id) == updated
-
-    database.conflict = True
-    with pytest.raises(ExecutionRunConflict):
-        await repository.transition(run.execution_run_id, lambda current: current)
 
 
 def test_ready_run_requires_all_dossiers_matrix_understanding_and_calls() -> None:

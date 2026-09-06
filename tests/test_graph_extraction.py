@@ -26,10 +26,10 @@ from comunicamundo_v4.hefesto.graph_extraction import (
     LlamaIndexChunkGraphExtractor,
     graph_extraction_to_llama,
 )
-from comunicamundo_v4.hefesto.persistence import FirestoreEditorialRepository, GcsArtifactStore, GcpEditorialPersistence, GcpPersistenceSettings
+from comunicamundo_v4.hefesto.persistence import LegacyDocumentEditorialRepository, GcsArtifactStore, GcpEditorialPersistence, GcpPersistenceSettings
 from comunicamundo_v4.hefesto.planning import PlanningOrchestrator
 from comunicamundo_v4.hefesto.runtime import GraphExtractionRuntime, VertexRuntimeSettings, build_graph_extraction_runtime
-from fakes import FakeFirestore, FakeStorageClient, MemoryPlanningPersistence
+from fakes import FakeDocumentStore, FakeStorageClient, MemoryPlanningPersistence
 
 GRAPH_EXTRACTION_PY = Path("src/comunicamundo_v4/hefesto/graph_extraction.py").read_text()
 FAKE_MODEL = "fake-graph-llm"
@@ -54,11 +54,11 @@ def _request(*texts: str, project_id=None, brief: EditorialBrief | None = None, 
 
 def _gcp_persistence() -> tuple[GcpEditorialPersistence, FakeStorageClient]:
     storage = FakeStorageClient()
-    firestore = FakeFirestore()
+    firestore = FakeDocumentStore()
     settings = GcpPersistenceSettings(project="test-project", bucket="test-bucket")
     persistence = GcpEditorialPersistence(
         artifacts=GcsArtifactStore(storage, bucket_name=settings.bucket, root_prefix=settings.root_prefix),
-        repository=FirestoreEditorialRepository(
+        repository=LegacyDocumentEditorialRepository(
             firestore,
             axes_collection=settings.axes_collection,
             projects_collection=settings.projects_collection,
@@ -406,3 +406,4 @@ def test_graph_extraction_runtime_rejects_missing_budgets() -> None:
         build_graph_extraction_runtime(VertexRuntimeSettings(project="test-project", context_window=0))
     with pytest.raises(ValueError):
         build_graph_extraction_runtime(VertexRuntimeSettings(project="test-project", graph_max_tokens=0))
+

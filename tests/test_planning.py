@@ -17,7 +17,7 @@ from comunicamundo_v4.hefesto.contracts import (
     SourceLineageState,
 )
 from comunicamundo_v4.hefesto.persistence import (
-    FirestoreEditorialRepository,
+    LegacyDocumentEditorialRepository,
     GcsArtifactStore,
     GcpEditorialPersistence,
     GcpPersistenceSettings,
@@ -31,7 +31,7 @@ from comunicamundo_v4.hefesto.planning import (
     prepare_source_chunks,
     split_source_text,
 )
-from fakes import FakeFirestore, FakeStorageClient, MemoryPlanningPersistence
+from fakes import FakeDocumentStore, FakeStorageClient, MemoryPlanningPersistence
 
 PLANNING_PY = Path("src/comunicamundo_v4/hefesto/planning.py").read_text()
 PERSISTENCE_PY = Path("src/comunicamundo_v4/hefesto/persistence.py").read_text()
@@ -55,13 +55,13 @@ def _request(*texts: str, project_id=None, brief: EditorialBrief | None = None, 
     )
 
 
-def _gcp_persistence() -> tuple[GcpEditorialPersistence, FakeStorageClient, FakeFirestore]:
+def _gcp_persistence() -> tuple[GcpEditorialPersistence, FakeStorageClient, FakeDocumentStore]:
     storage = FakeStorageClient()
-    firestore = FakeFirestore()
+    firestore = FakeDocumentStore()
     settings = GcpPersistenceSettings(project="test-project", bucket="test-bucket")
     persistence = GcpEditorialPersistence(
         artifacts=GcsArtifactStore(storage, bucket_name=settings.bucket, root_prefix=settings.root_prefix),
-        repository=FirestoreEditorialRepository(
+        repository=LegacyDocumentEditorialRepository(
             firestore,
             axes_collection=settings.axes_collection,
             projects_collection=settings.projects_collection,
@@ -326,3 +326,4 @@ def test_entrega_1_does_not_create_editorial_project_or_axis() -> None:
     assert run.artifacts.graph_extractions_uri is None
     assert isinstance(run, PlanningRun)
     assert isinstance(SourceLineage(project_id=run.project_id, source_fingerprint=run.source_fingerprint), SourceLineage)
+

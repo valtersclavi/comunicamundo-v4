@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from hashlib import sha256
-import re
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -216,10 +215,6 @@ class ResponsiveGateway:
         self.calls.append(intent.task_type)
         self.prompts.append((intent.task_type, prompt, system_instruction))
         if response_schema is SourceDossierProposal:
-            evidence_match = re.search(
-                r"\[EVIDENCE_KEY (E_[0-9a-f]{16})\]", prompt
-            ) or re.search(r'"first_evidence_key": "(E_[0-9a-f]{16})"', prompt)
-            evidence_value = evidence_match.group(1)
             proposal = SourceDossierProposal(
                 executive_synthesis="A fonte descreve uma associação heterogênea.",
                 items=[
@@ -228,14 +223,16 @@ class ResponsiveGateway:
                         text="A associação varia entre adolescentes.",
                         causal_status=CausalStatus.CORRELATIONAL,
                         evidence_strength=EvidenceStrength.MODERATE,
-                        first_evidence_key=evidence_value,
-                        last_evidence_key=evidence_value,
+                        paragraph_ordinal=1,
+                        first_sentence_ordinal=1,
+                        last_sentence_ordinal=1,
                         qualifications=[],
                     ),
                     *[
                         DigestionItemProposal(
                             kind=kind, text=text, causal_status="", evidence_strength="",
-                            first_evidence_key="", last_evidence_key="", qualifications=[],
+                            paragraph_ordinal=0, first_sentence_ordinal=0,
+                            last_sentence_ordinal=0, qualifications=[],
                         )
                         for kind, text in (
                             ("source_kind", "estudo"),

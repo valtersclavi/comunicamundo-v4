@@ -10,13 +10,11 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from google.api_core.exceptions import AlreadyExists, PreconditionFailed
-from google.cloud.firestore_v1.base_query import FieldFilter
 from pydantic import Field
 
 from .contracts import StrictModel
 from .digestion_contracts import ArtifactPointer
 from .execution_contracts import LLMAttemptRecord, LLMCallStatus
-from .execution_persistence import LLM_CALLS_COLLECTION
 
 
 class UsageStageSummary(StrictModel):
@@ -74,6 +72,10 @@ class ProjectUsageReport(StrictModel):
 class UsageReportResult(StrictModel):
     report: ProjectUsageReport
     artifact: ArtifactPointer
+
+
+class UsageReader(Protocol):
+    async def list_for_project(self, project_id: UUID) -> list[LLMAttemptRecord]: ...
 
 
 def aggregate_project_usage(
@@ -172,26 +174,6 @@ def _duration_ms(start: datetime | None, finish: datetime | None) -> int:
     return max(0, int((finish - start).total_seconds() * 1000))
 
 
-class FirestoreUsageReader:
-    def __init__(self, firestore: Any, *, collection: str = LLM_CALLS_COLLECTION) -> None:
-        self._firestore = firestore
-        self._collection = collection
-
-    async def list_for_project(self, project_id: UUID) -> list[LLMAttemptRecord]:
-        return await asyncio.to_thread(self._list_sync, project_id)
-
-    def _list_sync(self, project_id: UUID) -> list[LLMAttemptRecord]:
-        query = self._firestore.collection(self._collection).where(
-            filter=FieldFilter("project_id", "==", str(project_id))
-        )
-        records = []
-        for snapshot in query.stream():
-            data = snapshot.to_dict()
-            if data is not None:
-                records.append(LLMAttemptRecord.model_validate(data))
-        return records
-
-
 class GcsUsageReportStore:
     def __init__(self, storage_client: Any, *, bucket_name: str, root_prefix: str) -> None:
         self._bucket = storage_client.bucket(bucket_name)
@@ -219,7 +201,7 @@ class GcsUsageReportStore:
 async def build_and_persist_usage_report(
     project_id: UUID,
     *,
-    reader: FirestoreUsageReader,
+    reader: UsageReader,
     store: GcsUsageReportStore,
 ) -> UsageReportResult:
     report = aggregate_project_usage(project_id, await reader.list_for_project(project_id))

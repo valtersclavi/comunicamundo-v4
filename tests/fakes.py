@@ -61,7 +61,7 @@ class FakeCollection:
         return FakeDocument(self._store, self._name, doc_id)
 
 
-class FakeFirestore:
+class FakeDocumentStore:
     def __init__(self) -> None:
         self._store: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -339,3 +339,4 @@ class MemoryPlanningPersistence:
         manifest = self.objects[uri]
         assert isinstance(manifest, GraphReadyManifest)
         return manifest.model_copy()
+

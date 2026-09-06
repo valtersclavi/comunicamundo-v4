@@ -12,7 +12,6 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     DigestionItemProposal,
     DigestionMode,
     DominanceAssessment,
-    EvidenceKeyReference,
     EvidenceReference,
     EvidenceMatrixProposal,
     EvidenceStrength,
@@ -25,7 +24,7 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
 from comunicamundo_v4.hefesto.digestion_prompts import DIGESTION_SYSTEM_INSTRUCTION
 from comunicamundo_v4.hefesto.digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
 from comunicamundo_v4.hefesto.execution_contracts import text_sha256
-from comunicamundo_v4.hefesto.source_digestion import SourceDigestionPlanner, evidence_key
+from comunicamundo_v4.hefesto.source_digestion import SourceDigestionPlanner
 
 
 class FakeGateway:
@@ -59,8 +58,9 @@ def _finding(section: SourceSection) -> DigestionItemProposal:
         text="Foi observada uma associação.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
-        first_evidence_key=evidence_key(sentence.sentence_id),
-        last_evidence_key=evidence_key(sentence.sentence_id),
+        paragraph_ordinal=paragraph.ordinal + 1,
+        first_sentence_ordinal=sentence.ordinal + 1,
+        last_sentence_ordinal=sentence.ordinal + 1,
         qualifications=[],
     )
 
@@ -79,8 +79,9 @@ def _dossier_proposal(section: SourceSection) -> SourceDossierProposal:
                 text="A fonte também exerce papel normativo.",
                 causal_status="",
                 evidence_strength="",
-                first_evidence_key="",
-                last_evidence_key="",
+                paragraph_ordinal=0,
+                first_sentence_ordinal=0,
+                last_sentence_ordinal=0,
                 qualifications=[],
             ),
         ],
@@ -93,8 +94,9 @@ def _text_item(kind: DigestionItemKind, text: str) -> DigestionItemProposal:
         text=text,
         causal_status="",
         evidence_strength="",
-        first_evidence_key="",
-        last_evidence_key="",
+        paragraph_ordinal=0,
+        first_sentence_ordinal=0,
+        last_sentence_ordinal=0,
         qualifications=[],
     )
 
@@ -223,14 +225,16 @@ def test_single_anchor_object_is_canonicalized_to_transport_list() -> None:
             "causal_status": "correlational",
             "evidence_strength": "moderate",
             "anchors": {
-                "first_evidence_key": "E_0123456789abcdef",
-                "last_evidence_key": "E_0123456789abcdef",
+                "section_ordinal": 1,
+                "paragraph_ordinal": 1,
+                "first_sentence_ordinal": 1,
+                "last_sentence_ordinal": 1,
             },
         }
     )
 
     assert len(proposal.anchors) == 1
-    assert proposal.anchors[0].first_evidence_key == "E_0123456789abcdef"
+    assert proposal.anchors[0].first_sentence_ordinal == 1
 
 
 def test_atomic_transport_has_one_uniform_flat_item_shape() -> None:
@@ -242,8 +246,9 @@ def test_atomic_transport_has_one_uniform_flat_item_shape() -> None:
                 "text": "Achado sustentado.",
                 "causal_status": "correlational",
                 "evidence_strength": "moderate",
-                "first_evidence_key": "E_0123456789abcdef",
-                "last_evidence_key": "E_0123456789abcdef",
+                "paragraph_ordinal": 1,
+                "first_sentence_ordinal": 1,
+                "last_sentence_ordinal": 1,
                 "qualifications": [],
             }],
         }
@@ -254,7 +259,7 @@ def test_atomic_transport_has_one_uniform_flat_item_shape() -> None:
 
 
 @pytest.mark.asyncio
-async def test_direct_dossier_fails_closed_on_invented_evidence_key() -> None:
+async def test_direct_dossier_fails_closed_on_out_of_range_local_coordinate() -> None:
     source = _source("Evidência observada.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     factory = DigestionCallFactory(DigestionRuntimeConfig())
@@ -265,17 +270,17 @@ async def test_direct_dossier_fails_closed_on_invented_evidence_key() -> None:
     proposal = proposal.model_copy(
         update={
             "items": [
-                proposal.items[0].model_copy(update={"last_evidence_key": "E_ffffffffffffffff"}),
+                proposal.items[0].model_copy(update={"last_sentence_ordinal": 999}),
                 *proposal.items[1:],
             ]
         }
     )
-    with pytest.raises(ValueError, match="unknown key"):
+    with pytest.raises(ValueError, match="outside its paragraph"):
         await call.invoke(FakeGateway(proposal))
 
 
 @pytest.mark.asyncio
-async def test_opaque_keys_resolve_an_exact_consecutive_sentence_range() -> None:
+async def test_local_positions_resolve_an_exact_consecutive_sentence_range() -> None:
     source = _source("Primeira frase. Segunda frase.\n\nTerceira frase.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     section = plan.sources[0].sections[0]
@@ -285,8 +290,9 @@ async def test_opaque_keys_resolve_an_exact_consecutive_sentence_range() -> None
     proposal = proposal.model_copy(
         update={
             "items": [proposal.items[0].model_copy(update={
-                "first_evidence_key": evidence_key(first.sentence_id),
-                "last_evidence_key": evidence_key(second.sentence_id),
+                "paragraph_ordinal": paragraph.ordinal + 1,
+                "first_sentence_ordinal": first.ordinal + 1,
+                "last_sentence_ordinal": second.ordinal + 1,
             }), *proposal.items[1:]]
         }
     )
@@ -305,7 +311,7 @@ async def test_opaque_keys_resolve_an_exact_consecutive_sentence_range() -> None
 
 
 @pytest.mark.asyncio
-async def test_cross_paragraph_key_pair_becomes_two_single_sentence_anchors() -> None:
+async def test_repeated_local_positions_preserve_two_paragraph_anchors() -> None:
     source = _source("Primeira frase.\n\nSegunda frase.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     section = plan.sources[0].sections[0]
@@ -314,10 +320,19 @@ async def test_cross_paragraph_key_pair_becomes_two_single_sentence_anchors() ->
     proposal = _dossier_proposal(section)
     proposal = proposal.model_copy(
         update={
-            "items": [proposal.items[0].model_copy(update={
-                "first_evidence_key": evidence_key(first.sentence_id),
-                "last_evidence_key": evidence_key(second.sentence_id),
-            }), *proposal.items[1:]]
+            "items": [
+                proposal.items[0].model_copy(update={
+                    "paragraph_ordinal": 1,
+                    "first_sentence_ordinal": first.ordinal + 1,
+                    "last_sentence_ordinal": first.ordinal + 1,
+                }),
+                proposal.items[0].model_copy(update={
+                    "paragraph_ordinal": 2,
+                    "first_sentence_ordinal": second.ordinal + 1,
+                    "last_sentence_ordinal": second.ordinal + 1,
+                }),
+                *proposal.items[1:],
+            ]
         }
     )
     call = DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(

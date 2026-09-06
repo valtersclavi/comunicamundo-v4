@@ -7,13 +7,11 @@ from hashlib import sha256
 from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
-from google.api_core.exceptions import Aborted, AlreadyExists, PreconditionFailed
-from google.cloud.firestore_v1._helpers import LastUpdateOption
+from google.api_core.exceptions import AlreadyExists, PreconditionFailed
 from pydantic import BaseModel
 
 from .contracts import EditorialReview, FinalArticle, NarrativePlan
 from .digestion_contracts import ArtifactPointer
-from .execution_persistence import _firestore_payload
 from .production_v2_contracts import (
     ArticleDraftV2,
     ProductionEvidenceBundle,
@@ -23,7 +21,6 @@ from .production_v2_contracts import (
 )
 
 
-PRODUCTION_V2_RUNS_COLLECTION = "hefesto_production_v2_runs"
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
@@ -134,61 +131,3 @@ class ProductionV2RunRepository(Protocol):
     async def transition(self, run_id: UUID, change: RunTransition) -> ProductionExecutionRunV2: ...
 
 
-class FirestoreProductionV2RunRepository:
-    def __init__(self, firestore: Any, *, collection: str = PRODUCTION_V2_RUNS_COLLECTION) -> None:
-        self._firestore = firestore
-        self._collection = collection
-
-    async def create(self, run):
-        return await asyncio.to_thread(self._create_sync, run)
-
-    async def get(self, run_id):
-        return await asyncio.to_thread(self._get_sync, run_id)
-
-    async def transition(self, run_id, change):
-        return await asyncio.to_thread(self._transition_sync, run_id, change)
-
-    def _reference(self, run_id):
-        return self._firestore.collection(self._collection).document(str(run_id))
-
-    def _create_sync(self, run):
-        reference = self._reference(run.execution_run_id)
-        try:
-            reference.create(_firestore_payload(run.model_dump(mode="python")))
-        except AlreadyExists:
-            existing = self._snapshot(reference.get())
-            if existing != run:
-                raise ValueError(f"conflicting production run {run.execution_run_id}")
-        return run
-
-    def _get_sync(self, run_id):
-        return self._snapshot(self._reference(run_id).get())
-
-    def _transition_sync(self, run_id, change):
-        reference = self._reference(run_id)
-        snapshot = reference.get()
-        current = self._snapshot(snapshot)
-        if current is None:
-            raise KeyError(f"unknown production run {run_id}")
-        updated = change(current)
-        if (
-            updated.execution_run_id != current.execution_run_id
-            or updated.project_id != current.project_id
-            or updated.editorial_project_id != current.editorial_project_id
-        ):
-            raise ValueError("production run identity is immutable")
-        try:
-            reference.update(
-                _firestore_payload(updated.model_dump(mode="python")),
-                option=LastUpdateOption(snapshot.update_time),
-            )
-        except (Aborted, PreconditionFailed) as error:
-            raise RuntimeError(f"concurrent production update for {run_id}") from error
-        return updated
-
-    @staticmethod
-    def _snapshot(snapshot):
-        if not snapshot.exists:
-            return None
-        data = snapshot.to_dict()
-        return None if data is None else ProductionExecutionRunV2.model_validate(data)

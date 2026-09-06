@@ -8,8 +8,7 @@ from hashlib import sha256
 from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
-from google.api_core.exceptions import Aborted, AlreadyExists, PreconditionFailed
-from google.cloud.firestore_v1._helpers import LastUpdateOption
+from google.api_core.exceptions import AlreadyExists, PreconditionFailed
 from pydantic import BaseModel
 
 from .contracts import PlanningRequest
@@ -22,7 +21,6 @@ from .digestion_contracts import (
     SectionDigest,
     SourceDossier,
 )
-from .execution_persistence import EXECUTION_RUNS_COLLECTION, _firestore_payload
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -104,10 +102,6 @@ class GcsDigestionArtifactStore:
         return schema.model_validate_json(data)
 
 
-class ExecutionRunConflict(RuntimeError):
-    pass
-
-
 RunTransition = Callable[[DigestionExecutionRun], DigestionExecutionRun]
 
 
@@ -117,58 +111,3 @@ class ExecutionRunRepository(Protocol):
     async def transition(self, execution_run_id: UUID, change: RunTransition) -> DigestionExecutionRun: ...
 
 
-class FirestoreExecutionRunRepository:
-    def __init__(self, firestore: Any, *, collection: str = EXECUTION_RUNS_COLLECTION) -> None:
-        self._firestore = firestore
-        self._collection = collection
-
-    async def create(self, run: DigestionExecutionRun) -> DigestionExecutionRun:
-        return await asyncio.to_thread(self._create_sync, run)
-
-    async def get(self, execution_run_id: UUID) -> DigestionExecutionRun | None:
-        return await asyncio.to_thread(self._get_sync, execution_run_id)
-
-    async def transition(self, execution_run_id: UUID, change: RunTransition) -> DigestionExecutionRun:
-        return await asyncio.to_thread(self._transition_sync, execution_run_id, change)
-
-    def _reference(self, execution_run_id: UUID):
-        return self._firestore.collection(self._collection).document(str(execution_run_id))
-
-    def _create_sync(self, run: DigestionExecutionRun) -> DigestionExecutionRun:
-        reference = self._reference(run.execution_run_id)
-        payload = _firestore_payload(run.model_dump(mode="python"))
-        try:
-            reference.create(payload)
-        except AlreadyExists:
-            existing = self._snapshot(reference.get())
-            if existing != run:
-                raise ValueError(f"conflicting execution run {run.execution_run_id}")
-        return run
-
-    def _get_sync(self, execution_run_id: UUID) -> DigestionExecutionRun | None:
-        return self._snapshot(self._reference(execution_run_id).get())
-
-    def _transition_sync(self, execution_run_id: UUID, change: RunTransition) -> DigestionExecutionRun:
-        reference = self._reference(execution_run_id)
-        snapshot = reference.get()
-        current = self._snapshot(snapshot)
-        if current is None:
-            raise KeyError(f"unknown execution run {execution_run_id}")
-        updated = change(current)
-        if updated.execution_run_id != current.execution_run_id or updated.project_id != current.project_id:
-            raise ValueError("execution run identity is immutable")
-        try:
-            reference.update(
-                _firestore_payload(updated.model_dump(mode="python")),
-                option=LastUpdateOption(snapshot.update_time),
-            )
-        except (Aborted, PreconditionFailed) as error:
-            raise ExecutionRunConflict(f"concurrent update for execution run {execution_run_id}") from error
-        return updated
-
-    @staticmethod
-    def _snapshot(snapshot) -> DigestionExecutionRun | None:
-        if not snapshot.exists:
-            return None
-        data = snapshot.to_dict()
-        return None if data is None else DigestionExecutionRun.model_validate(data)
