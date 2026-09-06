@@ -57,7 +57,6 @@ class EditorialV2RuntimeConfig:
     location: str = "global"
     temperature: float = 0.2
     context_window_tokens: int = 1_048_576
-    max_input_tokens: int = 120_000
     axis_max_output_tokens: int = 65_536
     axis_capacity_output_tokens: int = 2_000
     axis_thinking_tokens: int = 500
@@ -77,8 +76,8 @@ class EditorialV2RuntimeConfig:
             raise ValueError("editorial runtime requires a model and location")
         if not 0 <= self.temperature <= 2:
             raise ValueError("temperature must fit the provider contract")
-        if self.max_input_tokens <= 0 or self.context_window_tokens <= 0:
-            raise ValueError("input and context budgets must be positive")
+        if self.context_window_tokens <= 0:
+            raise ValueError("context budget must be positive")
         for output, capacity, thinking in (
             (self.axis_max_output_tokens, self.axis_capacity_output_tokens, self.axis_thinking_tokens),
             (self.review_max_output_tokens, self.review_capacity_output_tokens, self.review_thinking_tokens),
@@ -87,7 +86,7 @@ class EditorialV2RuntimeConfig:
         ):
             if output <= 0 or capacity <= 0 or capacity > output or thinking < 0 or thinking > output:
                 raise ValueError("each editorial task requires a coherent output budget")
-            if self.max_input_tokens + output > self.context_window_tokens:
+            if output >= self.context_window_tokens:
                 raise ValueError("editorial task budget exceeds the model context window")
         if not 1 <= self.max_attempts <= 8:
             raise ValueError("attempt budget must be between one and eight")
@@ -269,7 +268,7 @@ class EditorialV2CallFactory:
         estimated_input = estimate_tokens(prompt) + estimate_tokens(EDITORIAL_V2_SYSTEM_INSTRUCTION)
         budget = TokenBudget(
             estimated_input_tokens=estimated_input,
-            max_input_tokens=self.config.max_input_tokens,
+            max_input_tokens=self.config.context_window_tokens - max_output_tokens,
             max_output_tokens=max_output_tokens,
             capacity_output_tokens=capacity_output_tokens,
             thinking_budget_tokens=thinking_tokens,
