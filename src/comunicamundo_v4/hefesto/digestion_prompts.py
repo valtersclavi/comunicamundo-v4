@@ -134,6 +134,9 @@ def reduced_source_dossier_prompt(
                 "evidence_strength": finding.evidence_strength,
                 "qualifications": finding.qualifications,
                 "evidence": [anchor.excerpt for anchor in finding.anchors],
+                "unresolved_references": [
+                    reference.model_dump(mode="json") for reference in finding.unresolved_references
+                ],
             }
             for finding in item.findings
         ]
