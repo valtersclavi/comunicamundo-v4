@@ -8,13 +8,15 @@ import pytest
 from comunicamundo_v4.hefesto.contracts import EditorialBrief, NormalizedSource
 from comunicamundo_v4.hefesto.digestion_contracts import (
     CausalStatus,
+    DigestionItemKind,
+    DigestionItemProposal,
     DigestionMode,
     DominanceAssessment,
     EvidenceKeyReference,
     EvidenceReference,
     EvidenceMatrixProposal,
     EvidenceStrength,
-    MethodProfile,
+    ReducedSourceDossierProposal,
     SectionDigestProposal,
     SourceDossierProposal,
     SourceFindingProposal,
@@ -49,34 +51,60 @@ def _source(text: str) -> NormalizedSource:
     return NormalizedSource(source_id=uuid4(), text=text, language="pt-BR", title="Estudo")
 
 
-def _finding(section: SourceSection) -> SourceFindingProposal:
+def _finding(section: SourceSection) -> DigestionItemProposal:
     paragraph = section.paragraphs[0]
     sentence = paragraph.sentences[0]
-    return SourceFindingProposal(
-        finding="Foi observada uma associação.",
+    return DigestionItemProposal(
+        kind=DigestionItemKind.FINDING,
+        text="Foi observada uma associação.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
-        anchors=[
-            EvidenceKeyReference(
-                first_evidence_key=evidence_key(sentence.sentence_id),
-                last_evidence_key=evidence_key(sentence.sentence_id),
-            )
-        ],
+        first_evidence_key=evidence_key(sentence.sentence_id),
+        last_evidence_key=evidence_key(sentence.sentence_id),
+        qualifications=[],
     )
 
 
 def _dossier_proposal(section: SourceSection) -> SourceDossierProposal:
     return SourceDossierProposal(
         executive_synthesis="Síntese delimitada da fonte.",
-        method_profile=MethodProfile(
-            source_kind="estudo",
-            design="observacional",
-            population_or_scope="adolescentes",
-            measures_or_material="questionários",
-            temporal_scope="um período",
-        ),
-        findings=[_finding(section)],
-        limitations=["O desenho não identifica causalidade."],
+        items=[
+            _finding(section),
+            *_profile_items(),
+            _text_item(DigestionItemKind.LIMITATION, "O desenho não identifica causalidade."),
+        ],
+    )
+
+
+def _text_item(kind: DigestionItemKind, text: str) -> DigestionItemProposal:
+    return DigestionItemProposal(
+        kind=kind,
+        text=text,
+        causal_status="",
+        evidence_strength="",
+        first_evidence_key="",
+        last_evidence_key="",
+        qualifications=[],
+    )
+
+
+def _profile_items() -> list[DigestionItemProposal]:
+    return [
+        _text_item(DigestionItemKind.SOURCE_KIND, "estudo"),
+        _text_item(DigestionItemKind.DESIGN, "observacional"),
+        _text_item(DigestionItemKind.POPULATION_OR_SCOPE, "adolescentes"),
+        _text_item(DigestionItemKind.MEASURES_OR_MATERIAL, "questionários"),
+        _text_item(DigestionItemKind.TEMPORAL_SCOPE, "um período"),
+    ]
+
+
+def _reduced_dossier_proposal() -> ReducedSourceDossierProposal:
+    return ReducedSourceDossierProposal(
+        executive_synthesis="Síntese delimitada da fonte.",
+        items=[
+            *_profile_items(),
+            _text_item(DigestionItemKind.LIMITATION, "O desenho não identifica causalidade."),
+        ],
     )
 
 
@@ -105,18 +133,16 @@ async def test_direct_dossier_is_an_immutable_budgeted_gateway_call() -> None:
 def test_intermediate_digest_has_no_editorial_quantity_or_prose_caps() -> None:
     source = _source("Evidência observada.")
     section = SourceDigestionPlanner().plan_source(source, source_ordinal=0).sections[0]
-    proposal = SectionDigestProposal(
-        synopsis="S" * 10_000,
-        findings=[_finding(section) for _ in range(30)],
-        methods=[f"Método distinto {index}: " + ("detalhe " * 100) for index in range(25)],
-        limitations=[f"Limitação {index}" for index in range(20)],
-        uncertainties=[f"Incerteza {index}" for index in range(20)],
-        distinctive_contributions=[f"Contribuição {index}" for index in range(20)],
-    )
+    items = [
+        *[_finding(section) for _ in range(30)],
+        *[_text_item(DigestionItemKind.METHOD, f"Método distinto {index}: " + ("detalhe " * 100)) for index in range(25)],
+        *[_text_item(DigestionItemKind.LIMITATION, f"Limitação {index}") for index in range(20)],
+        *[_text_item(DigestionItemKind.UNCERTAINTY, f"Incerteza {index}") for index in range(20)],
+        *[_text_item(DigestionItemKind.DISTINCTIVE_CONTRIBUTION, f"Contribuição {index}") for index in range(20)],
+    ]
+    proposal = SectionDigestProposal(synopsis="S" * 10_000, items=items)
 
-    assert len(proposal.methods) == 25
-    assert len(proposal.uncertainties) == 20
-    assert len(proposal.findings) == 30
+    assert len(proposal.items) == 115
 
 
 @pytest.mark.parametrize(
@@ -168,29 +194,24 @@ def test_single_anchor_object_is_canonicalized_to_transport_list() -> None:
     assert proposal.anchors[0].first_evidence_key == "E_0123456789abcdef"
 
 
-def test_finding_objects_misplaced_in_text_lists_are_restored_and_deduplicated() -> None:
-    finding = {
-        "finding": "Achado sustentado.",
-        "causal_status": "correlational",
-        "evidence_strength": "moderate",
-        "anchors": {
-            "first_evidence_key": "E_0123456789abcdef",
-            "last_evidence_key": "E_0123456789abcdef",
-        },
-    }
+def test_atomic_transport_has_one_uniform_flat_item_shape() -> None:
     proposal = SectionDigestProposal.model_validate(
         {
             "synopsis": "Síntese.",
-            "findings": [finding],
-            "methods": ["Estudo observacional.", finding],
-            "limitations": [finding],
+            "items": [{
+                "kind": "finding",
+                "text": "Achado sustentado.",
+                "causal_status": "correlational",
+                "evidence_strength": "moderate",
+                "first_evidence_key": "E_0123456789abcdef",
+                "last_evidence_key": "E_0123456789abcdef",
+                "qualifications": [],
+            }],
         }
     )
 
-    assert len(proposal.findings) == 1
-    assert proposal.findings[0].finding == "Achado sustentado."
-    assert proposal.methods == ["Estudo observacional."]
-    assert proposal.limitations == []
+    assert len(proposal.items) == 1
+    assert proposal.items[0].text == "Achado sustentado."
 
 
 @pytest.mark.asyncio
@@ -202,13 +223,11 @@ async def test_direct_dossier_fails_closed_on_invented_evidence_key() -> None:
 
     section = plan.sources[0].sections[0]
     proposal = _dossier_proposal(section)
-    invented = proposal.findings[0].anchors[0].model_copy(
-        update={"last_evidence_key": "E_ffffffffffffffff"}
-    )
     proposal = proposal.model_copy(
         update={
-            "findings": [
-                proposal.findings[0].model_copy(update={"anchors": [invented]})
+            "items": [
+                proposal.items[0].model_copy(update={"last_evidence_key": "E_ffffffffffffffff"}),
+                *proposal.items[1:],
             ]
         }
     )
@@ -224,15 +243,12 @@ async def test_opaque_keys_resolve_an_exact_consecutive_sentence_range() -> None
     paragraph = section.paragraphs[0]
     first, second = paragraph.sentences
     proposal = _dossier_proposal(section)
-    ranged = EvidenceKeyReference(
-        first_evidence_key=evidence_key(first.sentence_id),
-        last_evidence_key=evidence_key(second.sentence_id),
-    )
     proposal = proposal.model_copy(
         update={
-            "findings": [
-                proposal.findings[0].model_copy(update={"anchors": [ranged]})
-            ]
+            "items": [proposal.items[0].model_copy(update={
+                "first_evidence_key": evidence_key(first.sentence_id),
+                "last_evidence_key": evidence_key(second.sentence_id),
+            }), *proposal.items[1:]]
         }
     )
     call = DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
@@ -257,15 +273,12 @@ async def test_cross_paragraph_key_pair_becomes_two_single_sentence_anchors() ->
     first = section.paragraphs[0].sentences[0]
     second = section.paragraphs[1].sentences[0]
     proposal = _dossier_proposal(section)
-    crossed = EvidenceKeyReference(
-        first_evidence_key=evidence_key(first.sentence_id),
-        last_evidence_key=evidence_key(second.sentence_id),
-    )
     proposal = proposal.model_copy(
         update={
-            "findings": [
-                proposal.findings[0].model_copy(update={"anchors": [crossed]})
-            ]
+            "items": [proposal.items[0].model_copy(update={
+                "first_evidence_key": evidence_key(first.sentence_id),
+                "last_evidence_key": evidence_key(second.sentence_id),
+            }), *proposal.items[1:]]
         }
     )
     call = DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
@@ -287,7 +300,7 @@ async def test_cross_paragraph_key_pair_becomes_two_single_sentence_anchors() ->
 
 
 @pytest.mark.asyncio
-async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> None:
+async def test_hierarchical_reducer_carries_validated_findings_without_key_transcription() -> None:
     text = ("Evidência observada.\n\n" * 30).strip()
     source = _source(text)
     planner = SourceDigestionPlanner(
@@ -302,7 +315,7 @@ async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> N
     for section in source_plan.sections:
         proposal = SectionDigestProposal(
             synopsis="Resumo.",
-            findings=[_finding(section)],
+            items=[_finding(section)],
         )
         call = factory.section_digest(
             plan=plan,
@@ -318,26 +331,20 @@ async def test_hierarchical_reducer_can_only_reuse_section_digest_anchors() -> N
         section_digests=digests,
         brief=_brief(),
     )
-    first_section = source_plan.sections[0]
-
-    dossier = await reduce_call.invoke(FakeGateway(_dossier_proposal(first_section)))
+    dossier = await reduce_call.invoke(FakeGateway(_reduced_dossier_proposal()))
     assert dossier.digestion_mode is DigestionMode.HIERARCHICAL
+    assert len(dossier.findings) == len(digests)
+    assert {
+        anchor.section_id
+        for finding in dossier.findings
+        for anchor in finding.anchors
+    } == {digest.section_id for digest in digests}
 
-    unused_paragraph = first_section.paragraphs[1]
-    unused_sentence = unused_paragraph.sentences[0]
-    reference = EvidenceKeyReference(
-        first_evidence_key=evidence_key(unused_sentence.sentence_id),
-        last_evidence_key=evidence_key(unused_sentence.sentence_id),
+    illegal = _reduced_dossier_proposal().model_copy(
+        update={"items": [_finding(source_plan.sections[0]), *_profile_items()]}
     )
-    changed_reference = _dossier_proposal(first_section).model_copy(
-        update={
-            "findings": [
-                _finding(first_section).model_copy(update={"anchors": [reference]})
-            ]
-        }
-    )
-    with pytest.raises(ValueError, match="absent from its section digests"):
-        await reduce_call.invoke(FakeGateway(changed_reference))
+    with pytest.raises(ValueError, match="cannot create or rewrite"):
+        await reduce_call.invoke(FakeGateway(illegal))
 
 
 @pytest.mark.asyncio
