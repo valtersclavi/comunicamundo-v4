@@ -183,6 +183,7 @@ class DigestionCallFactory:
                 limitations=grouped[DigestionItemKind.LIMITATION],
                 uncertainties=grouped[DigestionItemKind.UNCERTAINTY],
                 distinctive_contributions=grouped[DigestionItemKind.DISTINCTIVE_CONTRIBUTION],
+                recommendations=grouped[DigestionItemKind.RECOMMENDATION],
                 source_id=source.source_id,
                 section_id=section.section_id,
                 section_sha256=section.content_sha256,
@@ -391,6 +392,7 @@ class DigestionCallFactory:
             practical_implications=grouped[DigestionItemKind.PRACTICAL_IMPLICATION],
             distinctive_contributions=grouped[DigestionItemKind.DISTINCTIVE_CONTRIBUTION],
             coverage_gaps=grouped[DigestionItemKind.COVERAGE_GAP],
+            recommendations=grouped[DigestionItemKind.RECOMMENDATION],
             execution_run_id=plan.execution_run_id,
             project_id=plan.project_id,
             source_id=source_plan.source_id,
@@ -467,6 +469,7 @@ def _partition_items(
             DigestionItemKind.LIMITATION,
             DigestionItemKind.UNCERTAINTY,
             DigestionItemKind.DISTINCTIVE_CONTRIBUTION,
+            DigestionItemKind.RECOMMENDATION,
         }
         if section
         else {
@@ -477,6 +480,7 @@ def _partition_items(
             DigestionItemKind.PRACTICAL_IMPLICATION,
             DigestionItemKind.DISTINCTIVE_CONTRIBUTION,
             DigestionItemKind.COVERAGE_GAP,
+            DigestionItemKind.RECOMMENDATION,
             DigestionItemKind.SOURCE_KIND,
             DigestionItemKind.DESIGN,
             DigestionItemKind.POPULATION_OR_SCOPE,
