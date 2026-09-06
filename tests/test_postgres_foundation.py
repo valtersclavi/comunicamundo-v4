@@ -24,10 +24,10 @@ def test_foundation_migration_has_relational_evidence_chain_and_pgvector() -> No
     assert "REFERENCES hefesto.source_sentences" in sql
 
 
-def test_large_dossier_schema_stays_out_of_provider_serving_grammar() -> None:
+def test_flat_dossier_schema_fits_provider_serving_grammar() -> None:
     schema = _provider_response_schema(SourceDossierProposal)
 
-    assert _schema_node_count(schema) > MAX_PROVIDER_SCHEMA_NODES
+    assert _schema_node_count(schema) <= MAX_PROVIDER_SCHEMA_NODES
 
 
 def test_full_output_contract_is_bound_to_model_prompt() -> None:
@@ -37,7 +37,7 @@ def test_full_output_contract_is_bound_to_model_prompt() -> None:
     schema = json.loads(rendered)
 
     assert schema == _provider_response_schema(SourceDossierProposal)
-    assert "findings" in schema["properties"]
+    assert set(schema["properties"]) == {"executive_synthesis", "items"}
 
 
 def test_migrations_directory_resolves_from_installed_source_tree() -> None:
