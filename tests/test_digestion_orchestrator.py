@@ -14,13 +14,13 @@ from comunicamundo_v4.hefesto.digestion_contracts import (
     DigestionExecutionRun,
     DigestionRunState,
     DominanceAssessment,
-    EvidenceKeyReference,
+    DigestionItemKind,
+    DigestionItemProposal,
     EvidenceMatrixProposal,
     EvidenceStrength,
-    MethodProfile,
+    ReducedSourceDossierProposal,
     SectionDigestProposal,
     SourceDossierProposal,
-    SourceFindingProposal,
 )
 from comunicamundo_v4.hefesto.digestion_orchestrator import DigestionExecutionError, DigestionOrchestrator
 from comunicamundo_v4.hefesto.digestion_runtime import DigestionCallFactory, DigestionRuntimeConfig
@@ -120,20 +120,17 @@ class ResponsiveGateway:
         if response_schema is SectionDigestProposal:
             proposal = SectionDigestProposal(
                 synopsis="Resumo da seção.",
-                findings=[_finding(evidence_match.group(1))],
+                items=[_finding(evidence_match.group(1))],
             )
         elif response_schema is SourceDossierProposal:
             proposal = SourceDossierProposal(
                 executive_synthesis="Síntese da fonte.",
-                method_profile=MethodProfile(
-                    source_kind="estudo",
-                    design="observacional",
-                    population_or_scope="adolescentes",
-                    measures_or_material="questionário",
-                    temporal_scope="um período",
-                ),
-                findings=[_finding(evidence_match.group(1))],
-                limitations=["Não identifica causalidade."],
+                items=[_finding(evidence_match.group(1)), *_profile_items(), _item("limitation", "Não identifica causalidade.")],
+            )
+        elif response_schema is ReducedSourceDossierProposal:
+            proposal = ReducedSourceDossierProposal(
+                executive_synthesis="Síntese da fonte.",
+                items=[*_profile_items(), _item("limitation", "Não identifica causalidade.")],
             )
         elif response_schema is EvidenceMatrixProposal:
             proposal = EvidenceMatrixProposal(
@@ -151,17 +148,32 @@ class ResponsiveGateway:
 
 
 def _finding(evidence_key):
-    return SourceFindingProposal(
-        finding="Foi observada uma associação.",
+    return DigestionItemProposal(
+        kind=DigestionItemKind.FINDING,
+        text="Foi observada uma associação.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
-        anchors=[
-            EvidenceKeyReference(
-                first_evidence_key=evidence_key,
-                last_evidence_key=evidence_key,
-            )
-        ],
+        first_evidence_key=evidence_key,
+        last_evidence_key=evidence_key,
+        qualifications=[],
     )
+
+
+def _item(kind, text):
+    return DigestionItemProposal(
+        kind=kind, text=text, causal_status="", evidence_strength="",
+        first_evidence_key="", last_evidence_key="", qualifications=[],
+    )
+
+
+def _profile_items():
+    return [
+        _item("source_kind", "estudo"),
+        _item("design", "observacional"),
+        _item("population_or_scope", "adolescentes"),
+        _item("measures_or_material", "questionário"),
+        _item("temporal_scope", "um período"),
+    ]
 
 
 def _request():
