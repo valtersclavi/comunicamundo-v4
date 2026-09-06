@@ -586,6 +586,7 @@ def source_balance_metrics(dossiers: Sequence[SourceDossier]) -> list[SourceBala
         "practical_implications",
         "distinctive_contributions",
         "coverage_gaps",
+        "recommendations",
     }
     dossier_lengths = [
         len(item.model_dump_json(include=proposal_fields))
