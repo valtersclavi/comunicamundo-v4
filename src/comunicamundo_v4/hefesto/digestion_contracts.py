@@ -16,13 +16,12 @@ from .contracts import StrictModel
 
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 Sha256 = Annotated[str, Field(pattern=SHA256_PATTERN)]
-EvidenceKey = Annotated[str, Field(pattern=r"^E_[0-9a-f]{16}$")]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v19"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v17"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v17"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v20"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v18"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v18"
 EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v14"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
@@ -344,13 +343,6 @@ class EvidenceAnchor(EvidenceReference):
     excerpt: str = Field(min_length=1)
 
 
-class EvidenceKeyReference(StrictModel):
-    """Small model-facing handles resolved to immutable sentence rows by code."""
-
-    first_evidence_key: EvidenceKey
-    last_evidence_key: EvidenceKey
-
-
 class SourceFinding(StrictModel):
     category: CompactText = "finding"
     finding: str = Field(min_length=1)
@@ -365,7 +357,7 @@ class SourceFindingProposal(StrictModel):
     finding: str = Field(min_length=1)
     causal_status: CausalStatus
     evidence_strength: EvidenceStrength
-    anchors: list[EvidenceKeyReference] = Field(min_length=1)
+    anchors: list[EvidenceReference] = Field(min_length=1)
     qualifications: list[ShortText] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -410,8 +402,9 @@ class DigestionItemProposal(StrictModel):
     text: CompactText
     causal_status: str
     evidence_strength: str
-    first_evidence_key: str
-    last_evidence_key: str
+    paragraph_ordinal: int
+    first_sentence_ordinal: int
+    last_sentence_ordinal: int
     qualifications: list[str]
 
 

@@ -114,18 +114,22 @@ class ResponsiveGateway:
 
     async def generate(self, intent, *, prompt, system_instruction=None, response_schema=None):
         self.calls.append(intent.work_unit_id)
-        evidence_match = re.search(r"\[EVIDENCE_KEY (E_[0-9a-f]{16})\]", prompt) or re.search(
-            r'"first_evidence_key": "(E_[0-9a-f]{16})"', prompt
-        )
+        coordinate = re.search(r"\[PARAGRAPH (\d+); SENTENCE (\d+)\]", prompt)
         if response_schema is SectionDigestProposal:
+            assert coordinate is not None
             proposal = SectionDigestProposal(
                 synopsis="Resumo da seção.",
-                items=[_finding(evidence_match.group(1))],
+                items=[_finding(int(coordinate.group(1)), int(coordinate.group(2)))],
             )
         elif response_schema is SourceDossierProposal:
+            assert coordinate is not None
             proposal = SourceDossierProposal(
                 executive_synthesis="Síntese da fonte.",
-                items=[_finding(evidence_match.group(1)), *_profile_items(), _item("limitation", "Não identifica causalidade.")],
+                items=[
+                    _finding(int(coordinate.group(1)), int(coordinate.group(2))),
+                    *_profile_items(),
+                    _item("limitation", "Não identifica causalidade."),
+                ],
             )
         elif response_schema is ReducedSourceDossierProposal:
             proposal = ReducedSourceDossierProposal(
@@ -147,14 +151,15 @@ class ResponsiveGateway:
         return SimpleNamespace(parsed=proposal)
 
 
-def _finding(evidence_key):
+def _finding(paragraph_ordinal=1, sentence_ordinal=1):
     return DigestionItemProposal(
         kind=DigestionItemKind.FINDING,
         text="Foi observada uma associação.",
         causal_status=CausalStatus.CORRELATIONAL,
         evidence_strength=EvidenceStrength.MODERATE,
-        first_evidence_key=evidence_key,
-        last_evidence_key=evidence_key,
+        paragraph_ordinal=paragraph_ordinal,
+        first_sentence_ordinal=sentence_ordinal,
+        last_sentence_ordinal=sentence_ordinal,
         qualifications=[],
     )
 
@@ -162,7 +167,7 @@ def _finding(evidence_key):
 def _item(kind, text):
     return DigestionItemProposal(
         kind=kind, text=text, causal_status="", evidence_strength="",
-        first_evidence_key="", last_evidence_key="", qualifications=[],
+        paragraph_ordinal=0, first_sentence_ordinal=0, last_sentence_ordinal=0, qualifications=[],
     )
 
 

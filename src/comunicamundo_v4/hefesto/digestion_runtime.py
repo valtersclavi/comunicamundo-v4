@@ -30,7 +30,8 @@ from .digestion_contracts import (
     SourceDossierProposal,
     SourceFinding,
     SourceFindingProposal,
-    EvidenceKeyReference,
+    EvidenceReference,
+    SourceSection,
     canonical_sha256,
 )
 from .digestion_prompts import (
@@ -176,7 +177,9 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: SectionDigestProposal) -> SectionDigest:
-            findings, grouped, other_items = _partition_items(proposal.items, section=True)
+            findings, grouped, other_items = _partition_items(
+                proposal.items, section=True, source_section=section
+            )
             return SectionDigest(
                 synopsis=proposal.synopsis,
                 findings=materialize_findings(findings, [section]),
@@ -232,7 +235,12 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: SourceDossierProposal) -> SourceDossier:
-            findings, grouped, other_items = _partition_items(proposal.items, section=False, allow_findings=True)
+            findings, grouped, other_items = _partition_items(
+                proposal.items,
+                section=False,
+                allow_findings=True,
+                source_section=section,
+            )
             dossier = self._dossier(
                 plan,
                 source_plan,
@@ -299,7 +307,9 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: ReducedSourceDossierProposal) -> SourceDossier:
-            _, grouped, other_items = _partition_items(proposal.items, section=False, allow_findings=False)
+            _, grouped, other_items = _partition_items(
+                proposal.items, section=False, allow_findings=False
+            )
             dossier = self._dossier(
                 plan,
                 source_plan,
@@ -467,6 +477,7 @@ def _partition_items(
     *,
     section: bool,
     allow_findings: bool = True,
+    source_section: SourceSection | None = None,
 ) -> tuple[list[SourceFindingProposal], dict[DigestionItemKind, list[str]], list[CategorizedText]]:
     """Route a flat transport into domain fields and group repeated anchors."""
 
@@ -504,13 +515,18 @@ def _partition_items(
     other_items: list[CategorizedText] = []
     finding_groups: dict[tuple[object, ...], SourceFindingProposal] = {}
     for item in items:
-        evidence_values = (
-            item.causal_status,
-            item.evidence_strength,
-            item.first_evidence_key,
-            item.last_evidence_key,
+        evidence_presence = (
+            bool(item.causal_status),
+            bool(item.evidence_strength),
+            item.paragraph_ordinal > 0,
+            item.first_sentence_ordinal > 0,
+            item.last_sentence_ordinal > 0,
         )
-        if not all(evidence_values):
+        if any(evidence_presence) and not all(evidence_presence):
+            raise ValueError(
+                "evidence-bearing items require both epistemic fields and all three local coordinates"
+            )
+        if not any(evidence_presence):
             try:
                 kind = DigestionItemKind(item.kind)
             except ValueError:
@@ -523,13 +539,8 @@ def _partition_items(
         if not allow_findings:
             other_items.append(CategorizedText(category=item.kind, text=item.text))
             continue
-        if (
-            not item.causal_status
-            or not item.evidence_strength
-            or not item.first_evidence_key
-            or not item.last_evidence_key
-        ):
-            raise ValueError("every finding item requires status, strength, and two evidence keys")
+        if source_section is None:
+            raise ValueError("evidence-bearing items require one code-owned source section")
         try:
             causal_status = CausalStatus(item.causal_status)
         except ValueError:
@@ -545,9 +556,11 @@ def _partition_items(
             evidence_strength,
             tuple(item.qualifications),
         )
-        anchor = EvidenceKeyReference(
-            first_evidence_key=item.first_evidence_key,
-            last_evidence_key=item.last_evidence_key,
+        anchor = EvidenceReference(
+            section_ordinal=source_section.ordinal + 1,
+            paragraph_ordinal=item.paragraph_ordinal,
+            first_sentence_ordinal=item.first_sentence_ordinal,
+            last_sentence_ordinal=item.last_sentence_ordinal,
         )
         existing = finding_groups.get(identity)
         if existing is None:

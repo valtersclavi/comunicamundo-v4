@@ -25,10 +25,10 @@ from comunicamundo_v4.hefesto.contracts import (
 from comunicamundo_v4.hefesto.graph import ProjectGraph
 from comunicamundo_v4.hefesto.graph_assembly import GraphAssemblyOrchestrator, extraction_manifest_identity_hash
 from comunicamundo_v4.hefesto.graph_extraction import GraphExtractionOrchestrator
-from comunicamundo_v4.hefesto.persistence import FirestoreEditorialRepository, GcsArtifactStore, GcpEditorialPersistence, GcpPersistenceSettings
+from comunicamundo_v4.hefesto.persistence import LegacyDocumentEditorialRepository, GcsArtifactStore, GcpEditorialPersistence, GcpPersistenceSettings
 from comunicamundo_v4.hefesto.planning import PlanningOrchestrator
 from comunicamundo_v4.hefesto.runtime import GraphIndexingRuntime
-from fakes import FakeFirestore, FakeStorageClient, MemoryPlanningPersistence
+from fakes import FakeDocumentStore, FakeStorageClient, MemoryPlanningPersistence
 
 GRAPH_ASSEMBLY_PY = Path("src/comunicamundo_v4/hefesto/graph_assembly.py").read_text()
 GRAPH_PY = Path("src/comunicamundo_v4/hefesto/graph.py").read_text()
@@ -95,11 +95,11 @@ def _request(*texts: str, project_id=None, brief: EditorialBrief | None = None, 
 
 def _gcp_persistence() -> tuple[GcpEditorialPersistence, FakeStorageClient]:
     storage = FakeStorageClient()
-    firestore = FakeFirestore()
+    firestore = FakeDocumentStore()
     settings = GcpPersistenceSettings(project="test-project", bucket="test-bucket")
     persistence = GcpEditorialPersistence(
         artifacts=GcsArtifactStore(storage, bucket_name=settings.bucket, root_prefix=settings.root_prefix),
-        repository=FirestoreEditorialRepository(
+        repository=LegacyDocumentEditorialRepository(
             firestore,
             axes_collection=settings.axes_collection,
             projects_collection=settings.projects_collection,
@@ -365,3 +365,4 @@ def test_gcp_persists_graph_artifact_under_the_source_lineage() -> None:
     assert {node.name for node in graph.entity_nodes()} >= {"Entidade-0", "Entidade-1", "Entidade-2", "Fonte"}
     extraction_names = [name for name in names if "/graph-extractions/" in name]
     assert len([name for name in extraction_names if name.endswith(".json")]) == 4
+

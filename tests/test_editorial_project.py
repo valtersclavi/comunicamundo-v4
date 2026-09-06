@@ -26,14 +26,14 @@ from comunicamundo_v4.hefesto.editorial_project import (
     format_feedback_history,
 )
 from comunicamundo_v4.hefesto.persistence import (
-    FirestoreEditorialRepository,
+    LegacyDocumentEditorialRepository,
     GcsArtifactStore,
     GcpEditorialPersistence,
     GcpPersistenceSettings,
 )
 from comunicamundo_v4.hefesto.prompts import EDITORIAL_PROJECT_PROMPT
 from comunicamundo_v4.hefesto.runtime import EditorialProjectRuntime
-from fakes import FakeFirestore, FakeStorageClient, MemoryPlanningPersistence
+from fakes import FakeDocumentStore, FakeStorageClient, MemoryPlanningPersistence
 from test_axis_feedback import (
     COMPLEMENT_FEEDBACK,
     ENRICHMENT_FEEDBACK,
@@ -173,9 +173,9 @@ def test_module_is_atomic_and_does_not_search_or_rebuild() -> None:
     assert "source_limits" in text
     assert "treatment_scale" in lowered
     assert "not an outline" in lowered
-    assert "approve-axis" in WORKER_PY
-    assert "--planning-run-id" in WORKER_PY
-    assert "build_editorial_project_runtime" in WORKER_PY
+    assert "approve-axis-v2" in WORKER_PY
+    assert "--execution-run-id" in WORKER_PY
+    assert "build_editorial_project_runtime" not in WORKER_PY
     assert "revise-axis" not in WORKER_PY
     assert "app.approve_axis" not in WORKER_PY
     assert "app.revise_axis" not in WORKER_PY
@@ -519,11 +519,11 @@ def test_propose_axis_cannot_advance_a_project_proposed_run() -> None:
 
 def test_gcp_persists_approved_axis_and_proposed_project() -> None:
     storage = FakeStorageClient()
-    firestore = FakeFirestore()
+    firestore = FakeDocumentStore()
     settings = GcpPersistenceSettings(project="test-project", bucket="test-bucket")
     persistence = GcpEditorialPersistence(
         artifacts=GcsArtifactStore(storage, bucket_name=settings.bucket, root_prefix=settings.root_prefix),
-        repository=FirestoreEditorialRepository(
+        repository=LegacyDocumentEditorialRepository(
             firestore,
             axes_collection=settings.axes_collection,
             projects_collection=settings.projects_collection,

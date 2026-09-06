@@ -85,8 +85,14 @@ class DigestionOrchestrator:
             work_max_attempts=2,
         )
 
-    async def start(self, request: PlanningRequest) -> DigestionRunResult:
-        plan = self._planner.plan(project_id=request.project_id, sources=request.sources)
+    async def start(
+        self, request: PlanningRequest, *, execution_run_id: UUID | None = None
+    ) -> DigestionRunResult:
+        plan = self._planner.plan(
+            project_id=request.project_id,
+            sources=request.sources,
+            execution_run_id=execution_run_id,
+        )
         request_pointer = await self._artifacts.persist_request(plan, request)
         plan_pointer = await self._artifacts.persist_plan(plan)
         run = DigestionExecutionRun(

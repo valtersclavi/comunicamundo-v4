@@ -36,10 +36,10 @@ from comunicamundo_v4.hefesto.contracts import (
 )
 from comunicamundo_v4.hefesto.graph_assembly import GraphAssemblyOrchestrator
 from comunicamundo_v4.hefesto.graph_extraction import GraphExtractionOrchestrator
-from comunicamundo_v4.hefesto.persistence import FirestoreEditorialRepository, GcsArtifactStore, GcpEditorialPersistence, GcpPersistenceSettings
+from comunicamundo_v4.hefesto.persistence import LegacyDocumentEditorialRepository, GcsArtifactStore, GcpEditorialPersistence, GcpPersistenceSettings
 from comunicamundo_v4.hefesto.planning import PlanningOrchestrator
 from comunicamundo_v4.hefesto.runtime import AxisProposalRuntime, GraphIndexingRuntime
-from fakes import FakeFirestore, FakeStorageClient, MemoryPlanningPersistence
+from fakes import FakeDocumentStore, FakeStorageClient, MemoryPlanningPersistence
 
 AXIS_PY = Path("src/comunicamundo_v4/hefesto/axis_proposal.py").read_text()
 WORKER_PY = Path("src/comunicamundo_v4/hefesto/worker.py").read_text()
@@ -184,13 +184,13 @@ def _axis_runtime(embed: MockEmbedding | None = None) -> AxisProposalRuntime:
     )
 
 
-def _gcp_persistence() -> tuple[GcpEditorialPersistence, FakeStorageClient, FakeFirestore]:
+def _gcp_persistence() -> tuple[GcpEditorialPersistence, FakeStorageClient, FakeDocumentStore]:
     storage = FakeStorageClient()
-    firestore = FakeFirestore()
+    firestore = FakeDocumentStore()
     settings = GcpPersistenceSettings(project="test-project", bucket="test-bucket")
     persistence = GcpEditorialPersistence(
         artifacts=GcsArtifactStore(storage, bucket_name=settings.bucket, root_prefix=settings.root_prefix),
-        repository=FirestoreEditorialRepository(
+        repository=LegacyDocumentEditorialRepository(
             firestore,
             axes_collection=settings.axes_collection,
             projects_collection=settings.projects_collection,
@@ -238,12 +238,12 @@ def test_axis_module_does_not_reextract_or_create_editorial_project() -> None:
     )
     for token in forbidden:
         assert token not in AXIS_PY
-    assert "propose-axis" in WORKER_PY
-    assert "--planning-run-id" in WORKER_PY
-    assert "build_axis_proposal_runtime" in WORKER_PY
+    assert "propose-axis-v2" in WORKER_PY
+    assert "--execution-run-id" in WORKER_PY
+    assert "build_axis_proposal_runtime" not in WORKER_PY
     assert "LlamaIndexAxisEvidenceReviewer" in AXIS_PY
-    assert "LlamaIndexAxisEvidenceReviewer" in WORKER_PY
-    assert "build_vertex_runtime" in WORKER_PY
+    assert "LlamaIndexAxisEvidenceReviewer" not in WORKER_PY
+    assert "build_vertex_runtime" not in WORKER_PY
 
 
 def test_axis_statement_must_be_one_or_two_sentences() -> None:

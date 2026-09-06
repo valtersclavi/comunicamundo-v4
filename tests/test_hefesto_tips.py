@@ -72,16 +72,8 @@ def test_selected_tip_expands_duration_and_keeps_human_gate():
     assert [subject.title for subject in revised.core_subjects] == ["Original", "Selected tip"]
 
 
-def test_normal_tip_command_has_no_keep_duration_option():
+def test_legacy_tip_command_is_not_exposed():
     parser = _parser()
-    parsed = parser.parse_args(
-        [
-            "incorporate-hefesto-tips",
-            "--editorial-project-id",
-            str(uuid4()),
-            "--all",
-        ]
-    )
-    assert parsed.command == "incorporate-hefesto-tips"
-    assert parsed.all is True
-    assert not hasattr(parsed, "keep_duration")
+    subparsers = next(action for action in parser._actions if hasattr(action, "choices") and action.choices)
+    assert "incorporate-hefesto-tips" not in subparsers.choices
+    assert "approve-project-v2" in subparsers.choices

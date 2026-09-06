@@ -74,7 +74,7 @@ class HefestoApplication:
     def _persist_tip_revision(self, stored: StoredEditorialProject, revised) -> StoredEditorialProject:
         """Persist a tip-expanded Project and keep its PlanningRun pointer canonical.
 
-        The clean PlanningRun flow persists both a Firestore operational project and a
+        The legacy PlanningRun flow persisted both an operational project and a
         durable planning artifact. Tip incorporation must advance both, otherwise the
         run would continue pointing at the superseded Project.
         """

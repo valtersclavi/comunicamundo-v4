@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
@@ -11,13 +10,11 @@ import os
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from google.cloud import firestore, storage
+from google.cloud import storage
 
-from .contracts import AxisFeedbackReviewResult, AxisProposalResult, EditorialProjectProposalResult, EnrichmentResolutionChoice, PlanningRequest, PlanningRun, SourceLineage
-from .persistence import GcpEditorialPersistence, GcpPersistenceSettings
-from .planning import PlanningOrchestrator
+from .contracts import PlanningRequest
 
 MAX_REQUEST_BYTES = 50 * 1024 * 1024
 
@@ -73,153 +70,6 @@ def _read_request(location: str, *, project: str) -> dict[str, Any]:
 
 def load_planning_request(location: str, *, project: str) -> PlanningRequest:
     return PlanningRequest.model_validate(_read_request(location, project=project))
-
-
-def _feedback(encoded: str) -> str:
-    try:
-        value = base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8").strip()
-    except Exception as exc:
-        raise ValueError("invalid feedback encoding") from exc
-    if not value:
-        raise ValueError("feedback cannot be empty")
-    return value
-
-
-def _planning_persistence() -> GcpEditorialPersistence:
-    project = _required("GOOGLE_CLOUD_PROJECT")
-    bucket = _required("HEFESTO_GCS_BUCKET")
-    return GcpEditorialPersistence.from_settings(GcpPersistenceSettings(project=project, bucket=bucket))
-
-
-def _graph_extraction_runtime():
-    from .runtime import VertexRuntimeSettings, build_graph_extraction_runtime
-
-    project = _required("GOOGLE_CLOUD_PROJECT")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-    return build_graph_extraction_runtime(VertexRuntimeSettings(project=project, location=location))
-
-
-def _graph_indexing_runtime():
-    from .runtime import VertexRuntimeSettings, build_graph_indexing_runtime
-
-    project = _required("GOOGLE_CLOUD_PROJECT")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-    return build_graph_indexing_runtime(VertexRuntimeSettings(project=project, location=location))
-
-
-def _axis_proposal_runtime():
-    from .runtime import VertexRuntimeSettings, build_axis_proposal_runtime
-
-    project = _required("GOOGLE_CLOUD_PROJECT")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-    return build_axis_proposal_runtime(VertexRuntimeSettings(project=project, location=location))
-
-
-def _editorial_project_runtime():
-    from .runtime import VertexRuntimeSettings, build_editorial_project_runtime
-
-    project = _required("GOOGLE_CLOUD_PROJECT")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-    return build_editorial_project_runtime(VertexRuntimeSettings(project=project, location=location))
-
-
-def run_extract_graph_command(source_lineage_id: UUID) -> SourceLineage:
-    from .graph_extraction import GraphExtractionOrchestrator, LlamaIndexChunkGraphExtractor
-
-    persistence = _planning_persistence()
-    runtime = _graph_extraction_runtime()
-    extractor = LlamaIndexChunkGraphExtractor(runtime)
-    return GraphExtractionOrchestrator(persistence, extractor, model=runtime.model).execute(source_lineage_id)
-
-
-def run_index_graph_command(source_lineage_id: UUID) -> SourceLineage:
-    from .graph_assembly import GraphAssemblyOrchestrator
-
-    persistence = _planning_persistence()
-    runtime = _graph_indexing_runtime()
-    return GraphAssemblyOrchestrator(persistence, runtime).execute(source_lineage_id)
-
-
-def run_propose_axis_command(planning_run_id: UUID) -> AxisProposalResult:
-    from .axis_proposal import (
-        AxisProposalOrchestrator,
-        LlamaIndexAxisEvidenceReviewer,
-        LlamaIndexAxisProposer,
-        LlamaIndexUnderstandingSynthesizer,
-    )
-
-    persistence = _planning_persistence()
-    runtime = _axis_proposal_runtime()
-    return AxisProposalOrchestrator(
-        persistence,
-        runtime,
-        LlamaIndexUnderstandingSynthesizer(runtime),
-        LlamaIndexAxisProposer(runtime),
-        LlamaIndexAxisEvidenceReviewer(runtime),
-    ).execute(planning_run_id)
-
-
-def run_review_axis_feedback_command(planning_run_id: UUID, feedback: str) -> AxisFeedbackReviewResult:
-    from .axis_feedback import (
-        AxisFeedbackOrchestrator,
-        LlamaIndexAxisFeedbackDecider,
-        LlamaIndexAxisFeedbackReviser,
-        LlamaIndexBoundedRecalibrator,
-    )
-    from .axis_proposal import LlamaIndexAxisEvidenceReviewer
-
-    persistence = _planning_persistence()
-    runtime = _axis_proposal_runtime()
-    return AxisFeedbackOrchestrator(
-        persistence,
-        runtime,
-        LlamaIndexAxisFeedbackDecider(runtime),
-        LlamaIndexAxisFeedbackReviser(runtime),
-        LlamaIndexAxisEvidenceReviewer(runtime),
-        LlamaIndexBoundedRecalibrator(runtime),
-    ).review(planning_run_id, feedback)
-
-
-def run_resolve_axis_feedback_command(planning_run_id: UUID, choice: EnrichmentResolutionChoice) -> AxisFeedbackReviewResult:
-    from .axis_feedback import (
-        AxisFeedbackOrchestrator,
-        LlamaIndexAxisFeedbackDecider,
-        LlamaIndexAxisFeedbackReviser,
-        LlamaIndexBoundedRecalibrator,
-    )
-    from .axis_proposal import LlamaIndexAxisEvidenceReviewer
-
-    persistence = _planning_persistence()
-    runtime = _axis_proposal_runtime()
-    return AxisFeedbackOrchestrator(
-        persistence,
-        runtime,
-        LlamaIndexAxisFeedbackDecider(runtime),
-        LlamaIndexAxisFeedbackReviser(runtime),
-        LlamaIndexAxisEvidenceReviewer(runtime),
-        LlamaIndexBoundedRecalibrator(runtime),
-    ).resolve(planning_run_id, choice)
-
-
-def run_approve_axis_command(
-    planning_run_id: UUID, narrative_axis_id: UUID | None = None
-) -> EditorialProjectProposalResult:
-    from .editorial_project import EditorialProjectOrchestrator
-    from .hefesto_tips import HefestoTipsEditorialProjectBuilder
-
-    persistence = _planning_persistence()
-    runtime = _editorial_project_runtime()
-    return EditorialProjectOrchestrator(
-        persistence,
-        runtime,
-        HefestoTipsEditorialProjectBuilder(runtime),
-    ).execute(planning_run_id, narrative_axis_id=narrative_axis_id)
-
-
-def run_plan_command(location: str) -> PlanningRun:
-    project = _required("GOOGLE_CLOUD_PROJECT")
-    request = load_planning_request(location, project=project)
-    return PlanningOrchestrator(_planning_persistence()).execute(request)
 
 
 def _v2_execution_services(
@@ -386,6 +236,7 @@ async def run_digest_v2_command(
     tokens_per_minute: int,
     max_concurrency: int,
     per_project_concurrency: int,
+    execution_run_id: UUID | None = None,
 ):
     project = _required("GOOGLE_CLOUD_PROJECT")
     request = load_planning_request(location, project=project)
@@ -393,7 +244,7 @@ async def run_digest_v2_command(
         tokens_per_minute=tokens_per_minute,
         max_concurrency=max_concurrency,
         per_project_concurrency=per_project_concurrency,
-    ).start(request)
+    ).start(request, execution_run_id=execution_run_id)
 
 
 async def run_resume_digest_v2_command(
@@ -528,7 +379,7 @@ async def run_complete_v2_command(
     metrics_database = PostgresDatabase.from_runtime_environment(max_size=2)
     recorder = PostgresStageRecorder(metrics_database)
     stages: list[dict[str, Any]] = []
-    execution_run_id: UUID | None = None
+    execution_run_id = uuid4()
 
     async def measured(stage: str, operation):
         nonlocal execution_run_id
@@ -537,42 +388,54 @@ async def run_complete_v2_command(
             value = await operation()
         except Exception as error:
             finished = datetime.now(UTC)
-            if execution_run_id is not None:
-                await recorder.record(
-                    execution_run_id=execution_run_id,
-                    project_id=request.project_id,
-                    stage=stage,
-                    status="failed",
-                    started_at=started,
-                    finished_at=finished,
-                    details={"error_class": type(error).__name__, "error_message": str(error)[:4000]},
-                )
-            raise
-        finished = datetime.now(UTC)
-        duration_ms = max(0, int((finished - started).total_seconds() * 1000))
-        stages.append({"stage": stage, "duration_ms": duration_ms})
-        if execution_run_id is not None:
             await recorder.record(
                 execution_run_id=execution_run_id,
                 project_id=request.project_id,
                 stage=stage,
-                status="succeeded",
+                status="failed",
                 started_at=started,
                 finished_at=finished,
-                details={},
+                details={"error_class": type(error).__name__, "error_message": str(error)[:4000]},
             )
+            raise
+        finished = datetime.now(UTC)
+        duration_ms = max(0, int((finished - started).total_seconds() * 1000))
+        stages.append({"stage": stage, "duration_ms": duration_ms})
+        await recorder.record(
+            execution_run_id=execution_run_id,
+            project_id=request.project_id,
+            stage=stage,
+            status="succeeded",
+            started_at=started,
+            finished_at=finished,
+            details={},
+        )
         return value
 
     try:
         digestion_started = datetime.now(UTC)
-        digestion = await run_digest_v2_command(
-            location,
-            tokens_per_minute=tokens_per_minute,
-            max_concurrency=max_concurrency,
-            per_project_concurrency=per_project_concurrency,
-        )
+        try:
+            digestion = await run_digest_v2_command(
+                location,
+                tokens_per_minute=tokens_per_minute,
+                max_concurrency=max_concurrency,
+                per_project_concurrency=per_project_concurrency,
+                execution_run_id=execution_run_id,
+            )
+        except Exception as error:
+            await recorder.record(
+                execution_run_id=execution_run_id,
+                project_id=request.project_id,
+                stage="digestion",
+                status="failed",
+                started_at=digestion_started,
+                finished_at=datetime.now(UTC),
+                details={"error_class": type(error).__name__, "error_message": str(error)[:4000]},
+            )
+            raise
         digestion_finished = datetime.now(UTC)
-        execution_run_id = digestion.execution_run.execution_run_id
+        if digestion.execution_run.execution_run_id != execution_run_id:
+            raise ValueError("digestion returned a different execution identity")
         digestion_ms = max(0, int((digestion_finished - digestion_started).total_seconds() * 1000))
         stages.append({"stage": "digestion", "duration_ms": digestion_ms})
         await recorder.record(
@@ -686,6 +549,18 @@ async def run_complete_v2_command(
             payload=result,
         )
         return {**result, "receipt": receipt.model_dump(mode="json")}
+    except Exception as error:
+        usage = await run_report_v2_command(request.project_id)
+        print(json.dumps({
+            "status": "failed",
+            "project_id": str(request.project_id),
+            "execution_run_id": str(execution_run_id),
+            "failed_stage": "digestion" if not stages else "post_digestion",
+            "error_class": type(error).__name__,
+            "error_message": str(error)[:4000],
+            "usage": usage.model_dump(mode="json"),
+        }, ensure_ascii=False, sort_keys=True), flush=True)
+        raise
     finally:
         await metrics_database.close()
 
@@ -718,19 +593,6 @@ async def run_proof_v2_command(
     return {**result, "proof": staged.model_dump(mode="json")}
 
 
-def _application():
-    from .application import HefestoApplication
-    from .runtime import VertexRuntimeSettings, build_vertex_runtime
-
-    project = _required("GOOGLE_CLOUD_PROJECT")
-    bucket = _required("HEFESTO_GCS_BUCKET")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
-    return HefestoApplication(
-        runtime=build_vertex_runtime(VertexRuntimeSettings(project=project, location=location)),
-        persistence=GcpEditorialPersistence.from_settings(GcpPersistenceSettings(project=project, bucket=bucket)),
-    )
-
-
 async def _run(args: argparse.Namespace) -> None:
     if args.command == "migrate-postgres":
         print(json.dumps(await run_migrate_postgres_command(), sort_keys=True))
@@ -755,10 +617,6 @@ async def _run(args: argparse.Namespace) -> None:
             per_project_concurrency=args.per_project_concurrency,
         )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-        return
-    if args.command == "plan":
-        result = run_plan_command(args.request)
-        print(result.model_dump_json())
         return
     if args.command == "digest-v2":
         result = await run_digest_v2_command(
@@ -818,49 +676,7 @@ async def _run(args: argparse.Namespace) -> None:
         result = await run_report_v2_command(args.project_id)
         print(result.model_dump_json())
         return
-    if args.command == "extract-graph":
-        result = await asyncio.to_thread(run_extract_graph_command, args.source_lineage_id)
-        print(result.model_dump_json())
-        return
-    if args.command == "index-graph":
-        result = await asyncio.to_thread(run_index_graph_command, args.source_lineage_id)
-        print(result.model_dump_json())
-        return
-    if args.command == "propose-axis":
-        result = await asyncio.to_thread(run_propose_axis_command, args.planning_run_id)
-        print(result.model_dump_json())
-        return
-    if args.command == "review-axis-feedback":
-        result = await asyncio.to_thread(
-            run_review_axis_feedback_command, args.planning_run_id, _feedback(args.feedback_b64)
-        )
-        print(result.model_dump_json())
-        return
-    if args.command == "resolve-axis-feedback":
-        result = await asyncio.to_thread(
-            run_resolve_axis_feedback_command, args.planning_run_id, EnrichmentResolutionChoice(args.choice)
-        )
-        print(result.model_dump_json())
-        return
-    if args.command == "approve-axis":
-        result = await asyncio.to_thread(
-            run_approve_axis_command, args.planning_run_id, args.narrative_axis_id
-        )
-        print(result.model_dump_json())
-        return
-    app = _application()
-    if args.command == "revise-project":
-        result = await app.revise_project(args.editorial_project_id, _feedback(args.feedback_b64))
-    elif args.command == "incorporate-hefesto-tips":
-        selected_tips = None if args.all else args.tip
-        result = await app.incorporate_hefesto_tips(args.editorial_project_id, selected_tips)
-    elif args.command == "approve-project":
-        result = await app.approve_project(args.editorial_project_id)
-    elif args.command == "produce":
-        result = await app.produce(args.editorial_project_id)
-    else:
-        raise ValueError(f"unsupported command: {args.command}")
-    print(result.model_dump_json())
+    raise ValueError(f"unsupported command: {args.command}")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -892,8 +708,6 @@ def _parser() -> argparse.ArgumentParser:
         "check-postgres",
         help="verify the pooled runtime connection without exposing credentials",
     )
-    plan = commands.add_parser("plan", help="validate the request, prepare source chunks, and persist a resumable PlanningRun")
-    plan.add_argument("--request", required=True)
     digest_v2 = commands.add_parser(
         "digest-v2",
         help="run the opt-in graph-free V2 digestion path and persist its editorial understanding",
@@ -941,49 +755,6 @@ def _parser() -> argparse.ArgumentParser:
         help="aggregate and persist provider usage, latency, and rated cost for one V2 project",
     )
     report_v2.add_argument("--project-id", type=UUID, required=True)
-    extract_graph = commands.add_parser("extract-graph", help="extract one persisted chunk at a time until graph_extractions_ready")
-    extract_graph.add_argument("--source-lineage-id", type=UUID, required=True)
-    index_graph = commands.add_parser("index-graph", help="assemble persisted graph extractions and index until graph_ready")
-    index_graph.add_argument("--source-lineage-id", type=UUID, required=True)
-    propose_axis = commands.add_parser(
-        "propose-axis",
-        help="persist editorial understanding and propose a Narrative Axis until axis_proposed",
-    )
-    propose_axis.add_argument("--planning-run-id", type=UUID, required=True)
-    review_feedback = commands.add_parser(
-        "review-axis-feedback",
-        help="assess human feedback against the proposed Axis without search or Editorial Project",
-    )
-    review_feedback.add_argument("--planning-run-id", type=UUID, required=True)
-    review_feedback.add_argument("--feedback-b64", required=True)
-    resolve_feedback = commands.add_parser(
-        "resolve-axis-feedback",
-        help="accept or decline an enrichment_required axis feedback decision",
-    )
-    resolve_feedback.add_argument("--planning-run-id", type=UUID, required=True)
-    resolve_feedback.add_argument("--choice", required=True, choices=["accept", "decline"])
-    # The old Axis rewrite CLI is not registered; proposed Axis feedback must go through review-axis-feedback.
-    approve_axis = commands.add_parser(
-        "approve-axis",
-        help="approve the active Narrative Axis and propose one Editorial Project; STOP for human approval",
-    )
-    approve_axis.add_argument("--planning-run-id", type=UUID, required=True)
-    approve_axis.add_argument("--narrative-axis-id", type=UUID, required=False)
-    revise_project = commands.add_parser("revise-project")
-    revise_project.add_argument("--editorial-project-id", type=UUID, required=True)
-    revise_project.add_argument("--feedback-b64", required=True)
-    incorporate_tips = commands.add_parser(
-        "incorporate-hefesto-tips",
-        help="incorporate selected Dicas do Hefesto and increase duration without shrinking approved scope",
-    )
-    incorporate_tips.add_argument("--editorial-project-id", type=UUID, required=True)
-    tip_selection = incorporate_tips.add_mutually_exclusive_group(required=True)
-    tip_selection.add_argument("--all", action="store_true", help="incorporate every Dica do Hefesto")
-    tip_selection.add_argument("--tip", action="append", help="exact Dica do Hefesto text; repeat to select more than one")
-    approve_project = commands.add_parser("approve-project")
-    approve_project.add_argument("--editorial-project-id", type=UUID, required=True)
-    produce = commands.add_parser("produce")
-    produce.add_argument("--editorial-project-id", type=UUID, required=True)
     return parser
 
 
