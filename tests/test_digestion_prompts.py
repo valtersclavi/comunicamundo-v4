@@ -45,6 +45,7 @@ def test_prompts_make_epistemic_and_balance_rules_explicit() -> None:
     assert plan.sections[0].paragraphs[0].paragraph_id not in direct
     assert "preserve every substantively distinct" in direct.lower()
     assert "never return excerpts or locators" in direct.lower()
+    assert "recommendation" in direct.lower()
 
 
 def test_matrix_prompt_uses_equal_ceiling_dossiers_and_never_requires_a_graph() -> None:

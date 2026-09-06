@@ -72,6 +72,7 @@ def _dossier_proposal(section: SourceSection) -> SourceDossierProposal:
             _finding(section),
             *_profile_items(),
             _text_item(DigestionItemKind.LIMITATION, "O desenho não identifica causalidade."),
+            _text_item(DigestionItemKind.RECOMMENDATION, "Proteja o sono dos adolescentes."),
         ],
     )
 
@@ -128,6 +129,7 @@ async def test_direct_dossier_is_an_immutable_budgeted_gateway_call() -> None:
     assert call.intent.budget.capacity_output_tokens == 16_000
     assert gateway.calls[0][3] is SourceDossierProposal
     assert dossier.findings[0].anchors[0].locator == "section 1; paragraph 1; sentences 1"
+    assert dossier.recommendations == ["Proteja o sono dos adolescentes."]
 
 
 def test_intermediate_digest_has_no_editorial_quantity_or_prose_caps() -> None:
@@ -139,10 +141,33 @@ def test_intermediate_digest_has_no_editorial_quantity_or_prose_caps() -> None:
         *[_text_item(DigestionItemKind.LIMITATION, f"Limitação {index}") for index in range(20)],
         *[_text_item(DigestionItemKind.UNCERTAINTY, f"Incerteza {index}") for index in range(20)],
         *[_text_item(DigestionItemKind.DISTINCTIVE_CONTRIBUTION, f"Contribuição {index}") for index in range(20)],
+        *[_text_item(DigestionItemKind.RECOMMENDATION, f"Recomendação {index}") for index in range(20)],
     ]
     proposal = SectionDigestProposal(synopsis="S" * 10_000, items=items)
 
-    assert len(proposal.items) == 115
+    assert len(proposal.items) == 135
+
+
+@pytest.mark.asyncio
+async def test_section_preserves_recommendations_as_a_distinct_nonfinding_category() -> None:
+    source = _source("A organização recomenda proteger o sono.")
+    plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
+    section = plan.sources[0].sections[0]
+    proposal = SectionDigestProposal(
+        synopsis="Recomendação institucional.",
+        items=[_text_item(DigestionItemKind.RECOMMENDATION, "Proteja o sono dos adolescentes.")],
+    )
+    call = DigestionCallFactory(DigestionRuntimeConfig()).section_digest(
+        plan=plan,
+        source=source,
+        source_plan=plan.sources[0],
+        section_ordinal=0,
+    )
+
+    digest = await call.invoke(FakeGateway(proposal))
+
+    assert digest.findings == []
+    assert digest.recommendations == ["Proteja o sono dos adolescentes."]
 
 
 @pytest.mark.parametrize(

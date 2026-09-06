@@ -20,10 +20,10 @@ EvidenceKey = Annotated[str, Field(pattern=r"^E_[0-9a-f]{16}$")]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v16"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v14"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v14"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v11"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v17"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v15"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v15"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v12"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
@@ -389,6 +389,7 @@ class DigestionItemKind(StrEnum):
     PRACTICAL_IMPLICATION = "practical_implication"
     DISTINCTIVE_CONTRIBUTION = "distinctive_contribution"
     COVERAGE_GAP = "coverage_gap"
+    RECOMMENDATION = "recommendation"
     SOURCE_KIND = "source_kind"
     DESIGN = "design"
     POPULATION_OR_SCOPE = "population_or_scope"
@@ -430,6 +431,7 @@ class SectionDigest(StrictModel):
     limitations: list[CompactText] = Field(default_factory=list)
     uncertainties: list[CompactText] = Field(default_factory=list)
     distinctive_contributions: list[CompactText] = Field(default_factory=list)
+    recommendations: list[CompactText] = Field(default_factory=list)
     schema_version: int = 1
     source_id: UUID
     section_id: Sha256
@@ -472,6 +474,7 @@ class SourceDossier(StrictModel):
     practical_implications: list[CompactText] = Field(default_factory=list)
     distinctive_contributions: list[CompactText] = Field(default_factory=list)
     coverage_gaps: list[CompactText] = Field(default_factory=list)
+    recommendations: list[CompactText] = Field(default_factory=list)
     schema_version: int = 1
     dossier_id: UUID = Field(default_factory=uuid4)
     execution_run_id: UUID

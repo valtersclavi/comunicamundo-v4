@@ -63,7 +63,8 @@ def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, o
     return f"""
 Create a bounded digest of this one section. Record only findings actually supported in the section. A references or
 administrative section may legitimately have no findings. Put every output atom in the single items array. Use kinds
-finding, method, limitation, uncertainty, and distinctive_contribution. For each finding item, copy
+finding, method, limitation, uncertainty, distinctive_contribution, and recommendation. Recommendations remain
+recommendations and must never be recast as empirical findings. For each finding item, copy
 first_evidence_key and last_evidence_key exactly from the labels below. Use the same key twice for one sentence. A
 range may contain several consecutive sentences but must stay within one paragraph. Do not return excerpts, hashes,
 numeric coordinates, or nested anchors. Do not infer a whole-source method or conclusion from this
@@ -83,7 +84,7 @@ Build one source dossier from the complete source below. Preserve every substant
 methodological fact, limitation, and uncertainty; consolidate only genuinely redundant wording. Describe the source's
 actual method or institutional role in the same single items array, using one item for each of source_kind, design,
 population_or_scope, measures_or_material, and temporal_scope. Treat recommendations as recommendations, not empirical
-effects. Put every other atom in that items array, using kinds finding, limitation, uncertainty,
+effects. Put every other atom in that items array, using kinds finding, limitation, uncertainty, recommendation,
 boundary_condition, practical_implication, distinctive_contribution, and coverage_gap. Every finding item must copy
 first_evidence_key and last_evidence_key exactly from the labels below. Use the same key for both fields when one
 sentence suffices. Repeat a finding item when another paragraph is needed. Never return excerpts or locators; never return hashes,
@@ -115,6 +116,7 @@ def reduced_source_dossier_prompt(
             "limitations": item.limitations,
             "uncertainties": item.uncertainties,
             "distinctive_contributions": item.distinctive_contributions,
+            "recommendations": item.recommendations,
         }
         payload["validated_findings"] = [
             {
@@ -130,7 +132,7 @@ def reduced_source_dossier_prompt(
     return f"""
 Reduce the section digests into one source dossier. A long source does not receive more representational weight merely
 because it has more pages or sections. Synthesize rather than concatenate, and preserve methodological facts,
-limitations, uncertainty, boundary conditions, implications, distinctive contributions, and coverage gaps. Fill the
+limitations, uncertainty, recommendations, boundary conditions, implications, distinctive contributions, and coverage gaps. Fill the
 five method-profile items and put those other atoms in the same single items array. Do not return finding items or any
 evidence keys: Hefesto carries every validated finding and its relational evidence into the dossier without model
 transcription. Never return excerpts, locators, hashes, numeric coordinates, parallel category arrays, or nested data.
@@ -158,6 +160,7 @@ def evidence_matrix_prompt(*, dossiers: Sequence[SourceDossier], brief: Editoria
         "practical_implications",
         "distinctive_contributions",
         "coverage_gaps",
+        "recommendations",
     }
     serialized = [
         {
