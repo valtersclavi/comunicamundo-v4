@@ -390,13 +390,14 @@ def _materialize_ordinal_anchor(
     last = reference.last_sentence_ordinal - 1
     if first > last:
         raise ValueError("evidence reference sentences must be in source order")
-    if first >= len(paragraph.sentences) or last >= len(paragraph.sentences):
+    if first >= len(paragraph.sentences):
         raise ValueError(
             "evidence reference names a sentence ordinal outside its paragraph: "
             f"section={reference.section_ordinal}, paragraph={reference.paragraph_ordinal}, "
             f"requested={reference.first_sentence_ordinal}-{reference.last_sentence_ordinal}, "
             f"sentence_count={len(paragraph.sentences)}"
         )
+    last = min(last, len(paragraph.sentences) - 1)
     selected = paragraph.sentences[first:last + 1]
     excerpt = paragraph.text[
         selected[0].char_start - paragraph.char_start:
@@ -409,8 +410,12 @@ def _materialize_ordinal_anchor(
         f"section {section.ordinal + 1}; paragraph {paragraph.ordinal + 1}; "
         f"sentences {sentence_label}"
     )
+    resolved_reference = reference.model_copy(update={
+        "first_sentence_ordinal": first + 1,
+        "last_sentence_ordinal": last + 1,
+    })
     return EvidenceAnchor(
-        **reference.model_dump(),
+        **resolved_reference.model_dump(),
         section_id=section.section_id,
         paragraph_id=paragraph.paragraph_id,
         first_sentence_id=selected[0].sentence_id,

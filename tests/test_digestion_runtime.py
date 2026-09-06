@@ -259,7 +259,7 @@ def test_atomic_transport_has_one_uniform_flat_item_shape() -> None:
 
 
 @pytest.mark.asyncio
-async def test_direct_dossier_fails_closed_on_out_of_range_local_coordinate() -> None:
+async def test_direct_dossier_fails_when_sentence_range_has_no_relational_overlap() -> None:
     source = _source("Evidência observada.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     factory = DigestionCallFactory(DigestionRuntimeConfig())
@@ -270,13 +270,42 @@ async def test_direct_dossier_fails_closed_on_out_of_range_local_coordinate() ->
     proposal = proposal.model_copy(
         update={
             "items": [
-                proposal.items[0].model_copy(update={"last_sentence_ordinal": 999}),
+                proposal.items[0].model_copy(update={
+                    "first_sentence_ordinal": 999,
+                    "last_sentence_ordinal": 1000,
+                }),
                 *proposal.items[1:],
             ]
         }
     )
     with pytest.raises(ValueError, match="outside its paragraph"):
         await call.invoke(FakeGateway(proposal))
+
+
+@pytest.mark.asyncio
+async def test_sentence_range_resolves_to_its_existing_relational_intersection() -> None:
+    source = _source("Primeira frase. Segunda frase.")
+    plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
+    section = plan.sources[0].sections[0]
+    proposal = _dossier_proposal(section)
+    proposal = proposal.model_copy(update={
+        "items": [
+            proposal.items[0].model_copy(update={
+                "first_sentence_ordinal": 2,
+                "last_sentence_ordinal": 3,
+            }),
+            *proposal.items[1:],
+        ]
+    })
+
+    dossier = await DigestionCallFactory(DigestionRuntimeConfig()).direct_dossier(
+        plan=plan, source=source, source_plan=plan.sources[0], brief=_brief()
+    ).invoke(FakeGateway(proposal))
+
+    anchor = dossier.findings[0].anchors[0]
+    assert anchor.first_sentence_ordinal == 2
+    assert anchor.last_sentence_ordinal == 2
+    assert anchor.excerpt == "Segunda frase."
 
 
 @pytest.mark.asyncio
