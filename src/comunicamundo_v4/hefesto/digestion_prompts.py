@@ -24,7 +24,8 @@ indeterminate. Never put a causal_status value in evidence_strength; use indeter
 a defensible strength assessment.
 Return one flat items array. Each item has a kind and text. An evidence-bearing item selects paragraph_ordinal,
 first_sentence_ordinal, and last_sentence_ordinal from the displayed local coordinates, plus causal_status and
-evidence_strength. Use the same sentence ordinal twice for one sentence. Both endpoints must remain in the same paragraph
+evidence_strength when the item makes an empirical finding. For evidenced method, context, recommendation, or other
+non-causal material, use empty epistemic fields; Hefesto records them as no_causal_claim and indeterminate. Use the same sentence ordinal twice for one sentence. Both endpoints must remain in the same paragraph
 selected by paragraph_ordinal. When an item needs evidence from different paragraphs, repeat the complete item once per paragraph. Every
 item uses the same eight fields. Non-evidence items use zero for all three coordinates, empty strings for epistemic
 fields, and an empty qualifications array.

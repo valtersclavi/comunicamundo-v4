@@ -106,12 +106,14 @@ jobs:
             gcloud run jobs executions describe "${execution}" --project="${PROJECT_ID}" --region="${REGION}" --format=json > /tmp/execution.json
             complete="$(jq -r '.status.conditions[]? | select(.type == "Completed") | .status' /tmp/execution.json | tail -1)"
             if [[ "${complete}" == "True" ]]; then break; fi
-            if [[ "${complete}" == "False" ]]; then jq . /tmp/execution.json; exit 1; fi
+            if [[ "${complete}" == "False" ]]; then break; fi
             sleep 20
           done
-          test "${complete:-}" = "True"
+          test -n "${complete:-}"
+          echo "JOB_COMPLETED_STATUS=${complete}" >> "${GITHUB_ENV}"
 
       - name: Collect and validate immutable receipt from execution logs
+        if: always() && env.EXECUTION != ''
         run: |
           set -euo pipefail
           filter="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\" AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION}\""
@@ -131,7 +133,9 @@ jobs:
                       value = json.loads(entry.get('textPayload', ''))
                   except (json.JSONDecodeError, TypeError):
                       continue
-              if value.get('status') == 'complete' and value.get('proof', {}).get('variant') == os.environ['VARIANT']:
+              if value.get('status') == 'failed' or (
+                  value.get('status') == 'complete' and value.get('proof', {}).get('variant') == os.environ['VARIANT']
+              ):
                   Path('/tmp/proof-result.json').write_text(json.dumps(value, ensure_ascii=False), encoding='utf-8')
                   raise SystemExit(0)
           raise SystemExit(1)
@@ -142,6 +146,10 @@ jobs:
             sleep 10
           done
           test -s /tmp/proof-result.json
+          if [[ "$(jq -r '.status' /tmp/proof-result.json)" == "failed" ]]; then
+            jq . /tmp/proof-result.json
+            exit 1
+          fi
           jq -e '(.status == "complete") and (.proof.variant == env.VARIANT) and
             (.digestion.source_count == (.proof.sources | length)) and
             (.digestion.sentence_count >= 1) and (.digestion.evidence_anchors >= 1) and

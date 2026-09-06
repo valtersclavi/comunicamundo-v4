@@ -515,18 +515,20 @@ def _partition_items(
     other_items: list[CategorizedText] = []
     finding_groups: dict[tuple[object, ...], SourceFindingProposal] = {}
     for item in items:
-        evidence_presence = (
+        epistemic_presence = (
             bool(item.causal_status),
             bool(item.evidence_strength),
+        )
+        coordinate_presence = (
             item.paragraph_ordinal > 0,
             item.first_sentence_ordinal > 0,
             item.last_sentence_ordinal > 0,
         )
-        if any(evidence_presence) and not all(evidence_presence):
-            raise ValueError(
-                "evidence-bearing items require both epistemic fields and all three local coordinates"
-            )
-        if not any(evidence_presence):
+        if any(coordinate_presence) and not all(coordinate_presence):
+            raise ValueError("evidence coordinates must contain paragraph and both sentence endpoints")
+        if not any(coordinate_presence):
+            if any(epistemic_presence):
+                raise ValueError("epistemic fields without evidence coordinates are not traceable")
             try:
                 kind = DigestionItemKind(item.kind)
             except ValueError:
@@ -541,13 +543,19 @@ def _partition_items(
             continue
         if source_section is None:
             raise ValueError("evidence-bearing items require one code-owned source section")
-        try:
-            causal_status = CausalStatus(item.causal_status)
-        except ValueError:
-            causal_status = CausalStatus.UNCLEAR
-        try:
-            evidence_strength = EvidenceStrength(item.evidence_strength)
-        except ValueError:
+        if item.causal_status:
+            try:
+                causal_status = CausalStatus(item.causal_status)
+            except ValueError:
+                causal_status = CausalStatus.UNCLEAR
+        else:
+            causal_status = CausalStatus.NO_CAUSAL_CLAIM
+        if item.evidence_strength:
+            try:
+                evidence_strength = EvidenceStrength(item.evidence_strength)
+            except ValueError:
+                evidence_strength = EvidenceStrength.INDETERMINATE
+        else:
             evidence_strength = EvidenceStrength.INDETERMINATE
         identity = (
             item.kind,
