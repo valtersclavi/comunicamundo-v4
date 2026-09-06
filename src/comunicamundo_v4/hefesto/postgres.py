@@ -484,7 +484,7 @@ class PostgresKnowledgeRepository:
                             causal_status,evidence_strength,qualifications,payload)
                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
                         (identity, plan.execution_run_id, plan.project_id, source_id, dossier_id, section_id,
-                         finding.finding, finding.causal_status.value, finding.evidence_strength.value,
+                         finding.finding, finding.causal_status, finding.evidence_strength,
                          _json(finding.qualifications), _json(finding)),
                     )
                     for ordinal, anchor in enumerate(finding.anchors):

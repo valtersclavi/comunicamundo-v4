@@ -543,20 +543,8 @@ def _partition_items(
             continue
         if source_section is None:
             raise ValueError("evidence-bearing items require one code-owned source section")
-        if item.causal_status:
-            try:
-                causal_status = CausalStatus(item.causal_status)
-            except ValueError:
-                causal_status = CausalStatus.UNCLEAR
-        else:
-            causal_status = CausalStatus.NO_CAUSAL_CLAIM
-        if item.evidence_strength:
-            try:
-                evidence_strength = EvidenceStrength(item.evidence_strength)
-            except ValueError:
-                evidence_strength = EvidenceStrength.INDETERMINATE
-        else:
-            evidence_strength = EvidenceStrength.INDETERMINATE
+        causal_status = item.causal_status or None
+        evidence_strength = item.evidence_strength or None
         identity = (
             item.kind,
             item.text,

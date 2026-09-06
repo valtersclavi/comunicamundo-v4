@@ -302,8 +302,8 @@ async def test_evidenced_noncausal_category_gets_explicit_neutral_epistemics() -
     ).invoke(FakeGateway(proposal))
 
     assert dossier.findings[0].category == "methodological_fact"
-    assert dossier.findings[0].causal_status is CausalStatus.NO_CAUSAL_CLAIM
-    assert dossier.findings[0].evidence_strength is EvidenceStrength.INDETERMINATE
+    assert dossier.findings[0].causal_status is None
+    assert dossier.findings[0].evidence_strength is None
 
 
 @pytest.mark.asyncio

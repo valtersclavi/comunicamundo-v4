@@ -110,8 +110,8 @@ class ProductionEvidenceBuilder:
                 source_id=dossier.source_id,
                 source_title=dossier.source_title,
                 finding=finding.finding,
-                causal_status=finding.causal_status.value,
-                evidence_strength=finding.evidence_strength.value,
+                causal_status=finding.causal_status,
+                evidence_strength=finding.evidence_strength,
                 qualifications=finding.qualifications,
                 anchors=finding.anchors,
                 relevance_score=score,
@@ -187,7 +187,7 @@ def _render_finding(item: EvidencePacketFinding) -> str:
     return (
         f"SOURCE {item.source_id} — {item.source_title or 'untitled'}\n"
         f"Finding: {item.finding}\n"
-        f"Causality: {item.causal_status}; strength: {item.evidence_strength}\n"
+        f"Causality: {item.causal_status or 'not stated'}; strength: {item.evidence_strength or 'not stated'}\n"
         f"Qualifications: {qualifications}\n"
         f"Anchors: {anchors}"
     )

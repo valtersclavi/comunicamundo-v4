@@ -23,8 +23,8 @@ class EvidencePacketFinding(StrictModel):
     source_id: UUID
     source_title: str | None = None
     finding: str = Field(min_length=1, max_length=1200)
-    causal_status: str = Field(min_length=1, max_length=100)
-    evidence_strength: str = Field(min_length=1, max_length=100)
+    causal_status: str | None = Field(default=None, min_length=1, max_length=100)
+    evidence_strength: str | None = Field(default=None, min_length=1, max_length=100)
     qualifications: list[str] = Field(default_factory=list, max_length=4)
     anchors: list[EvidenceAnchor] = Field(min_length=1, max_length=3)
     relevance_score: int = Field(ge=0)

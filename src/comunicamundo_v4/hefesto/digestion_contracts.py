@@ -346,8 +346,8 @@ class EvidenceAnchor(EvidenceReference):
 class SourceFinding(StrictModel):
     category: CompactText = "finding"
     finding: str = Field(min_length=1)
-    causal_status: CausalStatus
-    evidence_strength: EvidenceStrength
+    causal_status: str | None = None
+    evidence_strength: str | None = None
     anchors: list[EvidenceAnchor] = Field(min_length=1)
     qualifications: list[ShortText] = Field(default_factory=list)
 
@@ -355,8 +355,8 @@ class SourceFinding(StrictModel):
 class SourceFindingProposal(StrictModel):
     category: CompactText = "finding"
     finding: str = Field(min_length=1)
-    causal_status: CausalStatus
-    evidence_strength: EvidenceStrength
+    causal_status: str | None = None
+    evidence_strength: str | None = None
     anchors: list[EvidenceReference] = Field(min_length=1)
     qualifications: list[ShortText] = Field(default_factory=list)
 
