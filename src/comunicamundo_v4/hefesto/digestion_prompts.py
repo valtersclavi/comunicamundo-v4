@@ -22,12 +22,12 @@ quasi_experimental, causal, mixed, and unclear.
 The evidence_strength field is a separate assessment of support. Its only values are strong, moderate, limited, and
 indeterminate. Never put a causal_status value in evidence_strength; use indeterminate when the source does not support
 a defensible strength assessment.
-Every substantive finding must cite supplied opaque evidence keys. Copy first_evidence_key and last_evidence_key
-exactly from the labels; use the same key twice for one sentence. Both endpoints must belong to the same paragraph.
-When a finding needs evidence from different paragraphs, return a separate anchor object for each paragraph.
-The anchors field is always a JSON array, including when it contains exactly one anchor object.
-Structured finding objects belong only in findings. Methods, limitations, uncertainties, and distinctive_contributions
-are arrays of text strings, never arrays of finding objects.
+Return one flat items array. Each item has a kind and text. A finding item also copies first_evidence_key and
+last_evidence_key exactly from the labels, plus causal_status and evidence_strength. Use the same key twice for one
+sentence. Both endpoints must belong to the same paragraph. When a finding needs evidence from different paragraphs,
+repeat the complete finding item once per paragraph with the appropriate key pair. Every item uses the same seven
+fields. Non-finding items use empty strings for evidence and epistemic fields and an empty qualifications array. Never
+create parallel category arrays or nested anchor arrays.
 Include enough consecutive sentences to preserve qualifications. Never invent or calculate a key and never return
 an excerpt: Hefesto resolves immutable sentence rows and reconstructs the exact source text after validating the keys.
 Return only the requested structured object in the requested language.
@@ -62,10 +62,11 @@ def section_digest_prompt(*, source: NormalizedSource, section: SourceSection, o
     }
     return f"""
 Create a bounded digest of this one section. Record only findings actually supported in the section. A references or
-administrative section may legitimately have no findings. For every anchor, copy first_evidence_key and
-last_evidence_key exactly from the labels below. Use the same key twice for one sentence. A range may contain several
-consecutive sentences but must stay within one paragraph. Do not return excerpts, hashes, or numeric coordinates. Do
-not infer a whole-source method or conclusion from this
+administrative section may legitimately have no findings. Put every output atom in the single items array. Use kinds
+finding, method, limitation, uncertainty, and distinctive_contribution. For each finding item, copy
+first_evidence_key and last_evidence_key exactly from the labels below. Use the same key twice for one sentence. A
+range may contain several consecutive sentences but must stay within one paragraph. Do not return excerpts, hashes,
+numeric coordinates, or nested anchors. Do not infer a whole-source method or conclusion from this
 partial section. Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
 OUTPUT LANGUAGE: {output_language}
@@ -80,10 +81,13 @@ def direct_source_dossier_prompt(*, source: NormalizedSource, section: SourceSec
     return f"""
 Build one source dossier from the complete source below. Preserve every substantively distinct finding, qualification,
 methodological fact, limitation, and uncertainty; consolidate only genuinely redundant wording. Describe the source's
-actual method or institutional role. Treat recommendations as recommendations, not empirical effects. Every evidence anchor must
-copy first_evidence_key and last_evidence_key exactly from the labels below. Use the same key for both fields when one
-sentence suffices. Never return excerpts or locators. Do not return hashes or numeric coordinates; Hefesto reconstructs them. Use a
-separate anchor when another paragraph is needed.
+actual method or institutional role in the same single items array, using one item for each of source_kind, design,
+population_or_scope, measures_or_material, and temporal_scope. Treat recommendations as recommendations, not empirical
+effects. Put every other atom in that items array, using kinds finding, limitation, uncertainty,
+boundary_condition, practical_implication, distinctive_contribution, and coverage_gap. Every finding item must copy
+first_evidence_key and last_evidence_key exactly from the labels below. Use the same key for both fields when one
+sentence suffices. Repeat a finding item when another paragraph is needed. Never return excerpts or locators; never return hashes,
+numeric coordinates, parallel category arrays, or nested anchors; Hefesto reconstructs the relational evidence.
 Preserve every substantively distinct finding and consolidate only genuinely redundant wording.
 
 EDITORIAL BRIEF:
@@ -105,30 +109,31 @@ def reduced_source_dossier_prompt(
 ) -> str:
     serialized = []
     for item in section_digests:
-        payload = item.model_dump(mode="json", exclude={"created_at", "findings"})
-        payload["findings"] = [
+        payload = {
+            "synopsis": item.synopsis,
+            "methods": item.methods,
+            "limitations": item.limitations,
+            "uncertainties": item.uncertainties,
+            "distinctive_contributions": item.distinctive_contributions,
+        }
+        payload["validated_findings"] = [
             {
                 "finding": finding.finding,
                 "causal_status": finding.causal_status.value,
                 "evidence_strength": finding.evidence_strength.value,
                 "qualifications": finding.qualifications,
-                "anchors": [
-                    {
-                        "first_evidence_key": evidence_key(anchor.first_sentence_id),
-                        "last_evidence_key": evidence_key(anchor.last_sentence_id),
-                    }
-                    for anchor in finding.anchors
-                ],
+                "evidence": [anchor.excerpt for anchor in finding.anchors],
             }
             for finding in item.findings
         ]
         serialized.append(payload)
     return f"""
 Reduce the section digests into one source dossier. A long source does not receive more representational weight merely
-because it has more pages or sections. Synthesize rather than concatenate, but preserve every substantively distinct
-finding, counterevidence item, qualification, method, limitation, and uncertainty. Reuse only the supplied opaque
-evidence keys. Return first_evidence_key and last_evidence_key exactly as supplied; never return excerpts, locators,
-hashes, or numeric coordinates. Do not alter a key or turn an association into causation during reduction.
+because it has more pages or sections. Synthesize rather than concatenate, and preserve methodological facts,
+limitations, uncertainty, boundary conditions, implications, distinctive contributions, and coverage gaps. Fill the
+five method-profile items and put those other atoms in the same single items array. Do not return finding items or any
+evidence keys: Hefesto carries every validated finding and its relational evidence into the dossier without model
+transcription. Never return excerpts, locators, hashes, numeric coordinates, parallel category arrays, or nested data.
 
 EDITORIAL BRIEF:
 {brief.model_dump_json(indent=2)}
