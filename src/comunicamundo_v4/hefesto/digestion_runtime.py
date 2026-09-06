@@ -524,22 +524,21 @@ def _partition_items(
             item.first_sentence_ordinal > 0,
             item.last_sentence_ordinal > 0,
         )
-        if any(coordinate_presence) and not all(coordinate_presence):
-            raise ValueError("evidence coordinates must contain paragraph and both sentence endpoints")
-        if not any(coordinate_presence):
-            if any(epistemic_presence):
-                raise ValueError("epistemic fields without evidence coordinates are not traceable")
+        if not all(coordinate_presence):
+            if any(coordinate_presence) or any(epistemic_presence):
+                other_items.append(_categorized_item(item))
+                continue
             try:
                 kind = DigestionItemKind(item.kind)
             except ValueError:
                 kind = None
             if kind is None or kind not in allowed or kind is DigestionItemKind.FINDING:
-                other_items.append(CategorizedText(category=item.kind, text=item.text))
+                other_items.append(_categorized_item(item))
             else:
                 grouped[kind].append(item.text)
             continue
         if not allow_findings:
-            other_items.append(CategorizedText(category=item.kind, text=item.text))
+            other_items.append(_categorized_item(item))
             continue
         if source_section is None:
             raise ValueError("evidence-bearing items require one code-owned source section")
@@ -571,6 +570,21 @@ def _partition_items(
         elif anchor not in existing.anchors:
             finding_groups[identity] = existing.model_copy(update={"anchors": [*existing.anchors, anchor]})
     return list(finding_groups.values()), grouped, other_items
+
+
+def _categorized_item(item: DigestionItemProposal) -> CategorizedText:
+    """Preserve every transport field when an item is not a verified citation."""
+
+    return CategorizedText(
+        category=item.kind,
+        text=item.text,
+        causal_status=item.causal_status or None,
+        evidence_strength=item.evidence_strength or None,
+        paragraph_ordinal=item.paragraph_ordinal,
+        first_sentence_ordinal=item.first_sentence_ordinal,
+        last_sentence_ordinal=item.last_sentence_ordinal,
+        qualifications=item.qualifications,
+    )
 
 
 def _profile_value(
