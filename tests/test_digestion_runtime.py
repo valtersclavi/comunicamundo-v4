@@ -73,6 +73,17 @@ def _dossier_proposal(section: SourceSection) -> SourceDossierProposal:
             *_profile_items(),
             _text_item(DigestionItemKind.LIMITATION, "O desenho não identifica causalidade."),
             _text_item(DigestionItemKind.RECOMMENDATION, "Proteja o sono dos adolescentes."),
+            _text_item(DigestionItemKind.METHODOLOGICAL_FACT, "A amostra foi ponderada."),
+            DigestionItemProposal(
+                kind="content",
+                category_detail="institutional_context",
+                text="A fonte também exerce papel normativo.",
+                causal_status="",
+                evidence_strength="",
+                first_evidence_key="",
+                last_evidence_key="",
+                qualifications=[],
+            ),
         ],
     )
 
@@ -130,6 +141,10 @@ async def test_direct_dossier_is_an_immutable_budgeted_gateway_call() -> None:
     assert gateway.calls[0][3] is SourceDossierProposal
     assert dossier.findings[0].anchors[0].locator == "section 1; paragraph 1; sentences 1"
     assert dossier.recommendations == ["Proteja o sono dos adolescentes."]
+    assert dossier.methodological_facts == ["A amostra foi ponderada."]
+    assert [item.model_dump() for item in dossier.other_items] == [
+        {"category": "institutional_context", "text": "A fonte também exerce papel normativo."}
+    ]
 
 
 def test_intermediate_digest_has_no_editorial_quantity_or_prose_caps() -> None:

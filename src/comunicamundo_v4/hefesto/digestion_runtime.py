@@ -14,6 +14,7 @@ from .digestion_contracts import (
     SECTION_DIGEST_PROMPT_VERSION,
     SOURCE_DOSSIER_PROMPT_VERSION,
     CausalStatus,
+    CategorizedText,
     DigestionPlan,
     EvidenceMatrix,
     EvidenceMatrixProposal,
@@ -29,6 +30,7 @@ from .digestion_contracts import (
     SourceDossierProposal,
     SourceFinding,
     SourceFindingProposal,
+    TransportItemKind,
     EvidenceKeyReference,
     canonical_sha256,
 )
@@ -175,7 +177,7 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: SectionDigestProposal) -> SectionDigest:
-            findings, grouped = _partition_items(proposal.items, section=True)
+            findings, grouped, other_items = _partition_items(proposal.items, section=True)
             return SectionDigest(
                 synopsis=proposal.synopsis,
                 findings=materialize_findings(findings, [section]),
@@ -184,6 +186,8 @@ class DigestionCallFactory:
                 uncertainties=grouped[DigestionItemKind.UNCERTAINTY],
                 distinctive_contributions=grouped[DigestionItemKind.DISTINCTIVE_CONTRIBUTION],
                 recommendations=grouped[DigestionItemKind.RECOMMENDATION],
+                methodological_facts=grouped[DigestionItemKind.METHODOLOGICAL_FACT],
+                other_items=other_items,
                 source_id=source.source_id,
                 section_id=section.section_id,
                 section_sha256=section.content_sha256,
@@ -229,13 +233,14 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: SourceDossierProposal) -> SourceDossier:
-            findings, grouped = _partition_items(proposal.items, section=False, allow_findings=True)
+            findings, grouped, other_items = _partition_items(proposal.items, section=False, allow_findings=True)
             dossier = self._dossier(
                 plan,
                 source_plan,
                 proposal,
                 findings=materialize_findings(findings, source_plan.sections),
                 grouped=grouped,
+                other_items=other_items,
             )
             validate_dossier_evidence(dossier, source_plan.sections)
             return dossier
@@ -295,13 +300,14 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: ReducedSourceDossierProposal) -> SourceDossier:
-            _, grouped = _partition_items(proposal.items, section=False, allow_findings=False)
+            _, grouped, other_items = _partition_items(proposal.items, section=False, allow_findings=False)
             dossier = self._dossier(
                 plan,
                 source_plan,
                 proposal,
                 findings=_carry_validated_findings(ordered),
                 grouped=grouped,
+                other_items=other_items,
             )
             validate_reduced_dossier_evidence(dossier, ordered, source_plan.sections)
             return dossier
@@ -375,6 +381,7 @@ class DigestionCallFactory:
         *,
         findings: list[SourceFinding],
         grouped: dict[DigestionItemKind, list[str]],
+        other_items: list[CategorizedText],
     ) -> SourceDossier:
         return SourceDossier(
             executive_synthesis=proposal.executive_synthesis,
@@ -393,6 +400,8 @@ class DigestionCallFactory:
             distinctive_contributions=grouped[DigestionItemKind.DISTINCTIVE_CONTRIBUTION],
             coverage_gaps=grouped[DigestionItemKind.COVERAGE_GAP],
             recommendations=grouped[DigestionItemKind.RECOMMENDATION],
+            methodological_facts=grouped[DigestionItemKind.METHODOLOGICAL_FACT],
+            other_items=other_items,
             execution_run_id=plan.execution_run_id,
             project_id=plan.project_id,
             source_id=source_plan.source_id,
@@ -459,7 +468,7 @@ def _partition_items(
     *,
     section: bool,
     allow_findings: bool = True,
-) -> tuple[list[SourceFindingProposal], dict[DigestionItemKind, list[str]]]:
+) -> tuple[list[SourceFindingProposal], dict[DigestionItemKind, list[str]], list[CategorizedText]]:
     """Route a flat transport into domain fields and group repeated anchors."""
 
     allowed = (
@@ -470,6 +479,8 @@ def _partition_items(
             DigestionItemKind.UNCERTAINTY,
             DigestionItemKind.DISTINCTIVE_CONTRIBUTION,
             DigestionItemKind.RECOMMENDATION,
+            DigestionItemKind.METHODOLOGICAL_FACT,
+            DigestionItemKind.OTHER,
         }
         if section
         else {
@@ -481,6 +492,8 @@ def _partition_items(
             DigestionItemKind.DISTINCTIVE_CONTRIBUTION,
             DigestionItemKind.COVERAGE_GAP,
             DigestionItemKind.RECOMMENDATION,
+            DigestionItemKind.METHODOLOGICAL_FACT,
+            DigestionItemKind.OTHER,
             DigestionItemKind.SOURCE_KIND,
             DigestionItemKind.DESIGN,
             DigestionItemKind.POPULATION_OR_SCOPE,
@@ -489,15 +502,18 @@ def _partition_items(
         }
     )
     grouped = {kind: [] for kind in DigestionItemKind}
+    other_items: list[CategorizedText] = []
     finding_groups: dict[tuple[object, ...], SourceFindingProposal] = {}
     for item in items:
-        try:
-            kind = DigestionItemKind(item.kind)
-        except ValueError as exc:
-            raise ValueError(f"unknown digestion item kind: {item.kind}") from exc
-        if kind not in allowed:
-            raise ValueError(f"{kind.value} is not valid in this digestion phase")
-        if kind is not DigestionItemKind.FINDING:
+        if item.kind is not TransportItemKind.FINDING:
+            kind = _domain_item_kind(item, section=section)
+            if kind is None:
+                detail = item.category_detail.strip() or item.kind.value
+                other_items.append(CategorizedText(category=detail, text=item.text))
+                continue
+            if kind not in allowed:
+                other_items.append(CategorizedText(category=kind.value, text=item.text))
+                continue
             grouped[kind].append(item.text)
             continue
         if not allow_findings:
@@ -532,7 +548,26 @@ def _partition_items(
             )
         elif anchor not in existing.anchors:
             finding_groups[identity] = existing.model_copy(update={"anchors": [*existing.anchors, anchor]})
-    return list(finding_groups.values()), grouped
+    return list(finding_groups.values()), grouped, other_items
+
+
+def _domain_item_kind(item: DigestionItemProposal, *, section: bool) -> DigestionItemKind | None:
+    if item.kind is TransportItemKind.LIMITATION:
+        return DigestionItemKind.LIMITATION
+    if item.kind is TransportItemKind.UNCERTAINTY:
+        return DigestionItemKind.UNCERTAINTY
+    detail = item.category_detail.strip()
+    if item.kind is TransportItemKind.CONTENT and not detail:
+        return None
+    try:
+        candidate = DigestionItemKind(detail)
+    except ValueError:
+        return None
+    if candidate is DigestionItemKind.OTHER:
+        return None
+    if item.kind is TransportItemKind.CONTENT:
+        return candidate
+    return None
 
 
 def _profile_value(
