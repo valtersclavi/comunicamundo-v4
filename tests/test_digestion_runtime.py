@@ -259,7 +259,7 @@ def test_atomic_transport_has_one_uniform_flat_item_shape() -> None:
 
 
 @pytest.mark.asyncio
-async def test_direct_dossier_fails_when_sentence_range_has_no_relational_overlap() -> None:
+async def test_direct_dossier_preserves_statement_when_sentence_range_has_no_relational_overlap() -> None:
     source = _source("Evidência observada.")
     plan = SourceDigestionPlanner().plan(project_id=uuid4(), sources=[source])
     factory = DigestionCallFactory(DigestionRuntimeConfig())
@@ -278,8 +278,11 @@ async def test_direct_dossier_fails_when_sentence_range_has_no_relational_overla
             ]
         }
     )
-    with pytest.raises(ValueError, match="outside its paragraph"):
-        await call.invoke(FakeGateway(proposal))
+    dossier = await call.invoke(FakeGateway(proposal))
+
+    assert dossier.findings[0].finding == "Foi observada uma associação."
+    assert dossier.findings[0].anchors == []
+    assert dossier.findings[0].unresolved_references[0].first_sentence_ordinal == 999
 
 
 @pytest.mark.asyncio

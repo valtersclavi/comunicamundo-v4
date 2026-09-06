@@ -356,7 +356,13 @@ def materialize_findings(
     section_map = {section.section_id: section for section in sections}
     materialized: list[SourceFinding] = []
     for finding in findings:
-        anchors = [_materialize_ordinal_anchor(reference, section_map) for reference in finding.anchors]
+        anchors: list[EvidenceAnchor] = []
+        unresolved_references: list[EvidenceReference] = []
+        for reference in finding.anchors:
+            try:
+                anchors.append(_materialize_ordinal_anchor(reference, section_map))
+            except ValueError:
+                unresolved_references.append(reference)
         materialized.append(
             SourceFinding(
                 category=finding.category,
@@ -364,6 +370,7 @@ def materialize_findings(
                 causal_status=finding.causal_status,
                 evidence_strength=finding.evidence_strength,
                 anchors=anchors,
+                unresolved_references=unresolved_references,
                 qualifications=finding.qualifications,
             )
         )

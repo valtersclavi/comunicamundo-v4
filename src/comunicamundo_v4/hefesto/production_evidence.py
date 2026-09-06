@@ -106,6 +106,8 @@ class ProductionEvidenceBuilder:
         for score, finding, dossier in interleaved:
             if len(findings) >= 100:
                 break
+            if not finding.anchors:
+                continue
             packet_finding = EvidencePacketFinding(
                 source_id=dossier.source_id,
                 source_title=dossier.source_title,
