@@ -20,9 +20,9 @@ EvidenceKey = Annotated[str, Field(pattern=r"^E_[0-9a-f]{16}$")]
 CompactText = Annotated[str, Field(min_length=1)]
 ShortText = Annotated[str, Field(min_length=1)]
 
-DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v15"
-SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v13"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v13"
+DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v16"
+SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v14"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v14"
 EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v11"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
@@ -378,6 +378,38 @@ class SourceFindingProposal(StrictModel):
         return value
 
 
+class DigestionItemKind(StrEnum):
+    """One flat transport vocabulary; domain structure remains code-owned."""
+
+    FINDING = "finding"
+    METHOD = "method"
+    LIMITATION = "limitation"
+    UNCERTAINTY = "uncertainty"
+    BOUNDARY_CONDITION = "boundary_condition"
+    PRACTICAL_IMPLICATION = "practical_implication"
+    DISTINCTIVE_CONTRIBUTION = "distinctive_contribution"
+    COVERAGE_GAP = "coverage_gap"
+    SOURCE_KIND = "source_kind"
+    DESIGN = "design"
+    POPULATION_OR_SCOPE = "population_or_scope"
+    MEASURES_OR_MATERIAL = "measures_or_material"
+    TEMPORAL_SCOPE = "temporal_scope"
+
+
+class DigestionItemProposal(StrictModel):
+    """Atomic model output. Repeated finding items represent separate anchors."""
+
+    # Keep transport deliberately grammar-light. Domain enums, evidence-key
+    # patterns, and per-kind requirements are enforced after parsing in code.
+    kind: str
+    text: CompactText
+    causal_status: str
+    evidence_strength: str
+    first_evidence_key: str
+    last_evidence_key: str
+    qualifications: list[str]
+
+
 class MethodProfile(StrictModel):
     source_kind: str = Field(min_length=1)
     design: str = Field(min_length=1)
@@ -388,49 +420,7 @@ class MethodProfile(StrictModel):
 
 class SectionDigestProposal(StrictModel):
     synopsis: str = Field(min_length=1)
-    findings: list[SourceFindingProposal] = Field(default_factory=list)
-    methods: list[CompactText] = Field(default_factory=list)
-    limitations: list[CompactText] = Field(default_factory=list)
-    uncertainties: list[CompactText] = Field(default_factory=list)
-    distinctive_contributions: list[CompactText] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _restore_misplaced_finding_objects(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return value
-        payload = dict(value)
-        findings = payload.get("findings", [])
-        if isinstance(findings, dict):
-            findings = [findings]
-        if not isinstance(findings, list):
-            return value
-        restored = list(findings)
-        seen = {
-            json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
-            for item in restored
-        }
-        for field_name in (
-            "methods",
-            "limitations",
-            "uncertainties",
-            "distinctive_contributions",
-        ):
-            items = payload.get(field_name)
-            if not isinstance(items, list):
-                continue
-            text_items = []
-            for item in items:
-                if isinstance(item, dict) and {"finding", "anchors"} <= set(item):
-                    identity = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
-                    if identity not in seen:
-                        seen.add(identity)
-                        restored.append(item)
-                else:
-                    text_items.append(item)
-            payload[field_name] = text_items
-        payload["findings"] = restored
-        return payload
+    items: list[DigestionItemProposal] = Field(default_factory=list)
 
 
 class SectionDigest(StrictModel):
@@ -462,14 +452,14 @@ class SectionDigest(StrictModel):
 
 class SourceDossierProposal(StrictModel):
     executive_synthesis: str = Field(min_length=1)
-    method_profile: MethodProfile
-    findings: list[SourceFindingProposal] = Field(default_factory=list)
-    limitations: list[CompactText] = Field(default_factory=list)
-    uncertainties_and_disputes: list[CompactText] = Field(default_factory=list)
-    boundary_conditions: list[CompactText] = Field(default_factory=list)
-    practical_implications: list[CompactText] = Field(default_factory=list)
-    distinctive_contributions: list[CompactText] = Field(default_factory=list)
-    coverage_gaps: list[CompactText] = Field(default_factory=list)
+    items: list[DigestionItemProposal] = Field(default_factory=list)
+
+
+class ReducedSourceDossierProposal(StrictModel):
+    """Reducer transport cannot address evidence or rewrite validated findings."""
+
+    executive_synthesis: str = Field(min_length=1)
+    items: list[DigestionItemProposal] = Field(default_factory=list)
 
 
 class SourceDossier(StrictModel):
