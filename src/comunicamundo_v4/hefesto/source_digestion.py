@@ -371,6 +371,7 @@ def materialize_findings(
         ]
         materialized.append(
             SourceFinding(
+                category=finding.category,
                 finding=finding.finding,
                 causal_status=finding.causal_status,
                 evidence_strength=finding.evidence_strength,
