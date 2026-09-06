@@ -24,7 +24,6 @@ from .digestion_contracts import (
     SourceBalanceMetric,
     SourceDigestionPlan,
     SourceDossier,
-    SourceDossierProposal,
     SourceSection,
     SourceSentence,
     canonical_sha256,
@@ -577,7 +576,17 @@ def source_balance_metrics(dossiers: Sequence[SourceDossier]) -> list[SourceBala
     token_total = sum(item.estimated_source_tokens for item in dossiers)
     # Compare editorial representation, not lineage metadata. A long source has
     # more section IDs, but those IDs never enter the cross-source argument.
-    proposal_fields = set(SourceDossierProposal.model_fields)
+    proposal_fields = {
+        "executive_synthesis",
+        "method_profile",
+        "findings",
+        "limitations",
+        "uncertainties_and_disputes",
+        "boundary_conditions",
+        "practical_implications",
+        "distinctive_contributions",
+        "coverage_gaps",
+    }
     dossier_lengths = [
         len(item.model_dump_json(include=proposal_fields))
         for item in dossiers
