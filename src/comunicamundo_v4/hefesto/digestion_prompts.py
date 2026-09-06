@@ -38,6 +38,30 @@ Return only the requested structured object in the requested language.
 """.strip()
 
 
+def _semantic_finding_payload(finding: object) -> dict[str, object]:
+    """Keep every intellectual field; relational evidence stays in PostgreSQL."""
+
+    return {
+        "category": finding.category,
+        "finding": finding.finding,
+        "causal_status": finding.causal_status,
+        "evidence_strength": finding.evidence_strength,
+        "qualifications": finding.qualifications,
+    }
+
+
+def _semantic_categorized_payload(item: object) -> dict[str, object]:
+    """Remove only already-resolved transport coordinates from categorized text."""
+
+    return {
+        "category": item.category,
+        "text": item.text,
+        "causal_status": item.causal_status,
+        "evidence_strength": item.evidence_strength,
+        "qualifications": item.qualifications,
+    }
+
+
 def _coordinate_text(section: SourceSection) -> str:
     """Render one-based local positions; immutable identities remain code-owned."""
 
@@ -125,18 +149,11 @@ def reduced_source_dossier_prompt(
             "distinctive_contributions": item.distinctive_contributions,
             "recommendations": item.recommendations,
             "methodological_facts": item.methodological_facts,
-            "other_items": [entry.model_dump(mode="json") for entry in item.other_items],
+            "other_items": [_semantic_categorized_payload(entry) for entry in item.other_items],
         }
         payload["validated_findings"] = [
             {
-                "finding": finding.finding,
-                "causal_status": finding.causal_status,
-                "evidence_strength": finding.evidence_strength,
-                "qualifications": finding.qualifications,
-                "evidence": [anchor.excerpt for anchor in finding.anchors],
-                "unresolved_references": [
-                    reference.model_dump(mode="json") for reference in finding.unresolved_references
-                ],
+                **_semantic_finding_payload(finding),
             }
             for finding in item.findings
         ]
@@ -164,27 +181,26 @@ SECTION DIGESTS:
 
 def evidence_matrix_prompt(*, dossiers: Sequence[SourceDossier], brief: EditorialBrief) -> str:
     metrics = [item.model_dump(mode="json") for item in source_balance_metrics(dossiers)]
-    proposal_fields = {
-        "executive_synthesis",
-        "method_profile",
-        "findings",
-        "limitations",
-        "uncertainties_and_disputes",
-        "boundary_conditions",
-        "practical_implications",
-        "distinctive_contributions",
-        "coverage_gaps",
-        "recommendations",
-        "methodological_facts",
-        "other_items",
-    }
     serialized = [
         {
             "source_id": str(item.source_id),
             "source_ordinal": item.source_ordinal,
             "source_title": item.source_title,
             "source_language": item.source_language,
-            "dossier": item.model_dump(mode="json", include=proposal_fields),
+            "dossier": {
+                "executive_synthesis": item.executive_synthesis,
+                "method_profile": item.method_profile.model_dump(mode="json"),
+                "findings": [_semantic_finding_payload(finding) for finding in item.findings],
+                "limitations": item.limitations,
+                "uncertainties_and_disputes": item.uncertainties_and_disputes,
+                "boundary_conditions": item.boundary_conditions,
+                "practical_implications": item.practical_implications,
+                "distinctive_contributions": item.distinctive_contributions,
+                "coverage_gaps": item.coverage_gaps,
+                "recommendations": item.recommendations,
+                "methodological_facts": item.methodological_facts,
+                "other_items": [_semantic_categorized_payload(entry) for entry in item.other_items],
+            },
         }
         for item in dossiers
     ]

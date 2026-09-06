@@ -15,6 +15,7 @@ from comunicamundo_v4.hefesto.digestion_prompts import (
     DIGESTION_SYSTEM_INSTRUCTION,
     direct_source_dossier_prompt,
     evidence_matrix_prompt,
+    reduced_source_dossier_prompt,
 )
 from comunicamundo_v4.hefesto.execution_contracts import text_sha256
 from comunicamundo_v4.hefesto.source_digestion import SourceDigestionPlanner
@@ -103,3 +104,65 @@ def test_matrix_prompt_uses_equal_ceiling_dossiers_and_never_requires_a_graph() 
     assert "relations_and_tensions must contain at least one" in prompt
     assert "dominance_assessment.source_ids must be empty" in prompt
     assert "knowledge graph" not in prompt
+    assert "an association was observed" in prompt
+    assert "correlational" in prompt
+    assert "moderate" in prompt
+    assert "association\"" not in prompt
+    assert text_sha256("sentence") not in prompt
+    assert "locator" not in prompt
+
+
+def test_reducer_keeps_semantics_without_retransmitting_relational_evidence() -> None:
+    source_id, project_id, run_id = uuid4(), uuid4(), uuid4()
+    source = NormalizedSource(
+        source_id=source_id,
+        text="Observed association.",
+        language="en",
+        title="Study",
+    )
+    plan = SourceDigestionPlanner(
+        analyst_load_tokens=1,
+        hard_section_tokens=10,
+    ).plan_source(source, source_ordinal=0)
+    anchor = EvidenceAnchor(
+        section_ordinal=1,
+        paragraph_ordinal=1,
+        first_sentence_ordinal=1,
+        last_sentence_ordinal=1,
+        section_id=plan.sections[0].section_id,
+        paragraph_id=plan.sections[0].paragraphs[0].paragraph_id,
+        first_sentence_id=plan.sections[0].paragraphs[0].sentences[0].sentence_id,
+        last_sentence_id=plan.sections[0].paragraphs[0].sentences[0].sentence_id,
+        locator="secret-relational-locator",
+        excerpt="verbatim relational evidence",
+    )
+    from comunicamundo_v4.hefesto.digestion_contracts import SectionDigest
+
+    digest = SectionDigest(
+        synopsis="Complete synopsis.",
+        findings=[SourceFinding(
+            finding="Intellectual claim survives.",
+            causal_status="correlational",
+            evidence_strength="moderate",
+            anchors=[anchor],
+            qualifications=["Important qualification survives."],
+        )],
+        source_id=source_id,
+        section_id=plan.sections[0].section_id,
+        section_sha256=plan.sections[0].content_sha256,
+        model="test",
+    )
+
+    prompt = reduced_source_dossier_prompt(
+        source=source,
+        section_digests=[digest],
+        brief=EditorialBrief(theme="Social media", approach="Neutral", duration_minutes=15),
+    )
+
+    assert "Intellectual claim survives." in prompt
+    assert "Important qualification survives." in prompt
+    assert "correlational" in prompt
+    assert "moderate" in prompt
+    assert "verbatim relational evidence" not in prompt
+    assert "secret-relational-locator" not in prompt
+    assert anchor.first_sentence_id not in prompt

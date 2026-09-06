@@ -21,8 +21,8 @@ ShortText = Annotated[str, Field(min_length=1)]
 
 DIGESTION_ENGINE_VERSION = "hefesto.source-digestion.v25"
 SECTION_DIGEST_PROMPT_VERSION = "hefesto.section-digest.v19"
-SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v19"
-EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v14"
+SOURCE_DOSSIER_PROMPT_VERSION = "hefesto.source-dossier.v20"
+EVIDENCE_MATRIX_PROMPT_VERSION = "hefesto.evidence-matrix.v15"
 EDITORIAL_UNDERSTANDING_V2_CONTRACT_VERSION = "editorial-understanding.v2"
 
 
