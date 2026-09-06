@@ -13,14 +13,23 @@ from .digestion_contracts import (
     EVIDENCE_MATRIX_PROMPT_VERSION,
     SECTION_DIGEST_PROMPT_VERSION,
     SOURCE_DOSSIER_PROMPT_VERSION,
+    CausalStatus,
     DigestionPlan,
     EvidenceMatrix,
     EvidenceMatrixProposal,
+    EvidenceStrength,
+    DigestionItemKind,
+    DigestionItemProposal,
+    MethodProfile,
+    ReducedSourceDossierProposal,
     SectionDigest,
     SectionDigestProposal,
     SourceDigestionPlan,
     SourceDossier,
     SourceDossierProposal,
+    SourceFinding,
+    SourceFindingProposal,
+    EvidenceKeyReference,
     canonical_sha256,
 )
 from .digestion_prompts import (
@@ -166,10 +175,14 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: SectionDigestProposal) -> SectionDigest:
-            payload = proposal.model_dump(exclude={"findings"})
+            findings, grouped = _partition_items(proposal.items, section=True)
             return SectionDigest(
-                **payload,
-                findings=materialize_findings(proposal.findings, [section]),
+                synopsis=proposal.synopsis,
+                findings=materialize_findings(findings, [section]),
+                methods=grouped[DigestionItemKind.METHOD],
+                limitations=grouped[DigestionItemKind.LIMITATION],
+                uncertainties=grouped[DigestionItemKind.UNCERTAINTY],
+                distinctive_contributions=grouped[DigestionItemKind.DISTINCTIVE_CONTRIBUTION],
                 source_id=source.source_id,
                 section_id=section.section_id,
                 section_sha256=section.content_sha256,
@@ -215,7 +228,14 @@ class DigestionCallFactory:
         )
 
         def finalize(proposal: SourceDossierProposal) -> SourceDossier:
-            dossier = self._dossier(plan, source_plan, proposal)
+            findings, grouped = _partition_items(proposal.items, section=False, allow_findings=True)
+            dossier = self._dossier(
+                plan,
+                source_plan,
+                proposal,
+                findings=materialize_findings(findings, source_plan.sections),
+                grouped=grouped,
+            )
             validate_dossier_evidence(dossier, source_plan.sections)
             return dossier
 
@@ -240,7 +260,7 @@ class DigestionCallFactory:
         source_plan: SourceDigestionPlan,
         section_digests: Sequence[SectionDigest],
         brief: EditorialBrief,
-    ) -> PreparedDigestionCall[SourceDossier, SourceDossierProposal]:
+    ) -> PreparedDigestionCall[SourceDossier, ReducedSourceDossierProposal]:
         if source_plan.mode.value != "hierarchical":
             raise ValueError("dossier reduction requires a hierarchical source plan")
         expected = {section.section_id for section in source_plan.sections}
@@ -255,13 +275,13 @@ class DigestionCallFactory:
             section_digests=ordered,
             brief=brief,
         )
-        prompt = bind_json_output_contract(prompt, SourceDossierProposal)
+        prompt = bind_json_output_contract(prompt, ReducedSourceDossierProposal)
         intent = self._intent(
             plan=plan,
             task_type="source_dossier_reduce",
             prompt_version=SOURCE_DOSSIER_PROMPT_VERSION,
             prompt=prompt,
-            response_schema=SourceDossierProposal,
+            response_schema=ReducedSourceDossierProposal,
             input_sha256s=[
                 text_sha256(str(source_plan.source_id)),
                 source_plan.source_sha256,
@@ -273,15 +293,22 @@ class DigestionCallFactory:
             thinking_tokens=self.config.dossier_thinking_tokens,
         )
 
-        def finalize(proposal: SourceDossierProposal) -> SourceDossier:
-            dossier = self._dossier(plan, source_plan, proposal)
+        def finalize(proposal: ReducedSourceDossierProposal) -> SourceDossier:
+            _, grouped = _partition_items(proposal.items, section=False, allow_findings=False)
+            dossier = self._dossier(
+                plan,
+                source_plan,
+                proposal,
+                findings=_carry_validated_findings(ordered),
+                grouped=grouped,
+            )
             validate_reduced_dossier_evidence(dossier, ordered, source_plan.sections)
             return dossier
 
         return PreparedDigestionCall(
             intent=intent,
             prompt=prompt,
-            response_schema=SourceDossierProposal,
+            response_schema=ReducedSourceDossierProposal,
             output_schema=SourceDossier,
             input_sha256s=tuple(
                 [
@@ -343,12 +370,27 @@ class DigestionCallFactory:
         self,
         plan: DigestionPlan,
         source_plan: SourceDigestionPlan,
-        proposal: SourceDossierProposal,
+        proposal: SourceDossierProposal | ReducedSourceDossierProposal,
+        *,
+        findings: list[SourceFinding],
+        grouped: dict[DigestionItemKind, list[str]],
     ) -> SourceDossier:
-        payload = proposal.model_dump(exclude={"findings"})
         return SourceDossier(
-            **payload,
-            findings=materialize_findings(proposal.findings, source_plan.sections),
+            executive_synthesis=proposal.executive_synthesis,
+            method_profile=MethodProfile(
+                source_kind=_profile_value(grouped, DigestionItemKind.SOURCE_KIND),
+                design=_profile_value(grouped, DigestionItemKind.DESIGN),
+                population_or_scope=_profile_value(grouped, DigestionItemKind.POPULATION_OR_SCOPE),
+                measures_or_material=_profile_value(grouped, DigestionItemKind.MEASURES_OR_MATERIAL),
+                temporal_scope=_profile_value(grouped, DigestionItemKind.TEMPORAL_SCOPE),
+            ),
+            findings=findings,
+            limitations=grouped[DigestionItemKind.LIMITATION],
+            uncertainties_and_disputes=grouped[DigestionItemKind.UNCERTAINTY],
+            boundary_conditions=grouped[DigestionItemKind.BOUNDARY_CONDITION],
+            practical_implications=grouped[DigestionItemKind.PRACTICAL_IMPLICATION],
+            distinctive_contributions=grouped[DigestionItemKind.DISTINCTIVE_CONTRIBUTION],
+            coverage_gaps=grouped[DigestionItemKind.COVERAGE_GAP],
             execution_run_id=plan.execution_run_id,
             project_id=plan.project_id,
             source_id=source_plan.source_id,
@@ -362,7 +404,6 @@ class DigestionCallFactory:
             section_ids=[section.section_id for section in source_plan.sections],
             model=self.config.model,
         )
-
     def _intent(
         self,
         *,
@@ -409,3 +450,106 @@ class DigestionCallFactory:
             budget=budget,
             max_attempts=self.config.max_attempts,
         )
+
+
+def _partition_items(
+    items: Sequence[DigestionItemProposal],
+    *,
+    section: bool,
+    allow_findings: bool = True,
+) -> tuple[list[SourceFindingProposal], dict[DigestionItemKind, list[str]]]:
+    """Route a flat transport into domain fields and group repeated anchors."""
+
+    allowed = (
+        {
+            DigestionItemKind.FINDING,
+            DigestionItemKind.METHOD,
+            DigestionItemKind.LIMITATION,
+            DigestionItemKind.UNCERTAINTY,
+            DigestionItemKind.DISTINCTIVE_CONTRIBUTION,
+        }
+        if section
+        else {
+            DigestionItemKind.FINDING,
+            DigestionItemKind.LIMITATION,
+            DigestionItemKind.UNCERTAINTY,
+            DigestionItemKind.BOUNDARY_CONDITION,
+            DigestionItemKind.PRACTICAL_IMPLICATION,
+            DigestionItemKind.DISTINCTIVE_CONTRIBUTION,
+            DigestionItemKind.COVERAGE_GAP,
+            DigestionItemKind.SOURCE_KIND,
+            DigestionItemKind.DESIGN,
+            DigestionItemKind.POPULATION_OR_SCOPE,
+            DigestionItemKind.MEASURES_OR_MATERIAL,
+            DigestionItemKind.TEMPORAL_SCOPE,
+        }
+    )
+    grouped = {kind: [] for kind in DigestionItemKind}
+    finding_groups: dict[tuple[object, ...], SourceFindingProposal] = {}
+    for item in items:
+        try:
+            kind = DigestionItemKind(item.kind)
+        except ValueError as exc:
+            raise ValueError(f"unknown digestion item kind: {item.kind}") from exc
+        if kind not in allowed:
+            raise ValueError(f"{kind.value} is not valid in this digestion phase")
+        if kind is not DigestionItemKind.FINDING:
+            grouped[kind].append(item.text)
+            continue
+        if not allow_findings:
+            raise ValueError("a dossier reducer cannot create or rewrite evidence-bearing findings")
+        if (
+            not item.causal_status
+            or not item.evidence_strength
+            or not item.first_evidence_key
+            or not item.last_evidence_key
+        ):
+            raise ValueError("every finding item requires status, strength, and two evidence keys")
+        causal_status = CausalStatus(item.causal_status)
+        evidence_strength = EvidenceStrength(item.evidence_strength)
+        identity = (
+            item.text,
+            causal_status,
+            evidence_strength,
+            tuple(item.qualifications),
+        )
+        anchor = EvidenceKeyReference(
+            first_evidence_key=item.first_evidence_key,
+            last_evidence_key=item.last_evidence_key,
+        )
+        existing = finding_groups.get(identity)
+        if existing is None:
+            finding_groups[identity] = SourceFindingProposal(
+                finding=item.text,
+                causal_status=causal_status,
+                evidence_strength=evidence_strength,
+                anchors=[anchor],
+                qualifications=item.qualifications,
+            )
+        elif anchor not in existing.anchors:
+            finding_groups[identity] = existing.model_copy(update={"anchors": [*existing.anchors, anchor]})
+    return list(finding_groups.values()), grouped
+
+
+def _profile_value(
+    grouped: dict[DigestionItemKind, list[str]],
+    kind: DigestionItemKind,
+) -> str:
+    values = list(dict.fromkeys(grouped[kind]))
+    if not values:
+        raise ValueError(f"dossier requires one {kind.value} item")
+    return "; ".join(values)
+
+
+def _carry_validated_findings(section_digests: Sequence[SectionDigest]) -> list[SourceFinding]:
+    """Carry immutable evidence atoms through reduction without model transcription."""
+
+    carried: list[SourceFinding] = []
+    seen: set[str] = set()
+    for digest in section_digests:
+        for finding in digest.findings:
+            identity = canonical_sha256(finding.model_dump(mode="json"))
+            if identity not in seen:
+                seen.add(identity)
+                carried.append(finding)
+    return carried
