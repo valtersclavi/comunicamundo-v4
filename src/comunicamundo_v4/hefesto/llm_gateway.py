@@ -146,6 +146,12 @@ class LLMGateway:
             # in Pydantic/PostgreSQL; only small schemas reach the provider.
             if _schema_node_count(provider_schema) <= MAX_PROVIDER_SCHEMA_NODES:
                 config_kwargs["response_json_schema"] = provider_schema
+            else:
+                # MIME type alone does not guarantee syntactically complete
+                # JSON. Keep a tiny serving grammar for the root object while
+                # binding the complete shape in the immutable prompt and
+                # enforcing it after generation with Pydantic/PostgreSQL.
+                config_kwargs["response_json_schema"] = {"type": "object"}
         config = types.GenerateContentConfig(**config_kwargs)
 
         queued_at = self._utc_now()

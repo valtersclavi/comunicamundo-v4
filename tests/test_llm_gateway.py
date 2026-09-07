@@ -19,6 +19,7 @@ from comunicamundo_v4.hefesto.llm_gateway import (
     LLMGateway,
     _provider_response_schema,
 )
+from comunicamundo_v4.hefesto.digestion_contracts import EvidenceMatrixProposal
 
 
 PROMPT = "Sintetize as evidências sem inventar causalidade."
@@ -179,6 +180,34 @@ def test_provider_schema_preserves_a_property_named_title() -> None:
     assert set(subject["required"]) == {"title", "development"}
     assert set(subject["properties"]) == {"title", "development"}
     assert "title" not in subject["properties"]["title"]
+
+
+@pytest.mark.asyncio
+async def test_complex_contract_uses_root_object_serving_grammar() -> None:
+    response = _response()
+    response.parsed = EvidenceMatrixProposal(
+        central_ideas=["Idea"],
+        relations_and_tensions=["Tension"],
+        dominance_assessment={
+            "long_source_dominance_detected": False,
+            "source_ids": [],
+            "explanation": "No dominance.",
+        },
+        integrated_synthesis="Integrated synthesis.",
+    )
+    transport = FakeTransport([response])
+    gateway = LLMGateway(transport)
+
+    result = await gateway.generate(
+        _intent(response_schema=EvidenceMatrixProposal),
+        prompt=PROMPT,
+        response_schema=EvidenceMatrixProposal,
+    )
+
+    assert isinstance(result.parsed, EvidenceMatrixProposal)
+    config = transport.calls[0]["config"]
+    assert config.response_mime_type == "application/json"
+    assert config.response_json_schema == {"type": "object"}
 
 
 @pytest.mark.asyncio
