@@ -1,18 +1,6 @@
-# ComunicAmundo V4 — Hefesto clean rebuild
+# ComunicAmundo V4 — Hefesto
 
-This lineage starts from repository commit `919a5709fbf39a5d5fe6f984087b8cee65461341`, before Hefesto, LlamaIndex, PropertyGraph, persistence, workers or deployment existed.
+Hefesto is a paragraph-first editorial system. Sources and the user's brief are digested once, synthesized once, and then used to propose a Narrative Axis and Editorial Project at explicit human gates.
 
-Canonical product flow:
+The canonical architecture is documented in `docs/decisions/2026-09-07-hefesto-product-architecture.md`.
 
-`brief + normalized sources -> NEW PropertyGraph -> project understanding -> proposed Narrative Axis -> human approval -> Editorial Project -> human approval -> production`
-
-Rules:
-
-- every new plan builds a new project-scoped LlamaIndex `PropertyGraphIndex`;
-- the Narrative Axis is 1–2 sentences and is never auto-approved;
-- the Editorial Project does not exist until the Axis is approved;
-- the Editorial Project is compact: core subjects, model-knowledge subjects, and enrichment opportunities;
-- production cannot start until the Editorial Project is independently approved;
-- user revisions are natural-language editorial feedback, not field-level patch instructions.
-
-This branch does not copy the previous `graph.py`, `runtime.py`, or approval implementation.

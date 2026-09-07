@@ -1,4 +1,0 @@
-Read-only Cloud Run diagnostics for hefesto-v4-isolated-luto-axis-feedback-clean.
-No model call.
-No approval.
-No canonical mutation.

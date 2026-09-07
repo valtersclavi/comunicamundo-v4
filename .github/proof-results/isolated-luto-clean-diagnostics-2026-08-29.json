@@ -1,6 +1,0 @@
-{
-  "service_rc": 1,
-  "service": "ERROR: (gcloud.run.services.describe) Cannot find service [hefesto-v4-isolated-luto-axis-feedback-clean]",
-  "logs_rc": 1,
-  "logs": "ERROR: (gcloud.logging.read) PERMISSION_DENIED: Permission denied for all log views. This command is authenticated as github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com using the credentials in /home/runner/work/comunicamundo-v4/comunicamundo-v4/gha-creds-c0925edcdb979903.json, specified by the [auth/credential_file_override] property\n[]"
-}

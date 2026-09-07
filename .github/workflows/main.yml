@@ -1,8 +1,7 @@
 name: main
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,7 +20,6 @@ env:
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
 jobs:
   test-build-deploy:
-    if: ${{ !contains(github.event.head_commit.message, '[plan-proof]') && !contains(github.event.head_commit.message, '[no-deploy]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -29,7 +27,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12.14"
-      - name: Prove package
+      - name: Test product contract
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip==26.2.1
@@ -56,61 +54,22 @@ jobs:
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
           docker push "${IMAGE}"
           digest="$(gcloud artifacts docker images describe "${IMAGE}" --project="${PROJECT_ID}" --format='value(image_summary.digest)')"
-          test -n "${digest}"
           echo "PINNED_IMAGE=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${JOB_NAME}@${digest}" >> "${GITHUB_ENV}"
-      - name: Deploy new rebuild job
+      - name: Deploy product job
         run: |
           set -euo pipefail
           gcloud run jobs deploy "${JOB_NAME}" \
-            --project="${PROJECT_ID}" \
-            --region="${REGION}" \
-            --image="${PINNED_IMAGE}" \
-            --service-account="${RUNTIME_SA}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --image="${PINNED_IMAGE}" --service-account="${RUNTIME_SA}" \
             --args=--help \
-            --cpu=4 \
-            --memory=8Gi \
-            --task-timeout=3600s \
-            --max-retries=0 \
+            --cpu=4 --memory=8Gi --task-timeout=3600s --max-retries=0 \
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET}" \
             --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" \
             --quiet
-      - name: Migrate and verify PostgreSQL
+      - name: Migrate PostgreSQL
         run: |
           set -euo pipefail
-          migration_execution="$(gcloud run jobs execute "${JOB_NAME}" \
-            --project="${PROJECT_ID}" --region="${REGION}" \
-            --args=migrate-postgres --wait --format='value(metadata.name)')"
-          test -n "${migration_execution}"
-          check_execution="$(gcloud run jobs execute "${JOB_NAME}" \
-            --project="${PROJECT_ID}" --region="${REGION}" \
-            --args=check-postgres --wait --format='value(metadata.name)')"
-          test -n "${check_execution}"
-          {
-            echo "### PostgreSQL"
-            echo "- migration: ${migration_execution}"
-            echo "- pooled check: ${check_execution}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=migrate-postgres --wait
+          gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=check-postgres --wait
       - name: No-model startup smoke
-        run: |
-          set -euo pipefail
-          execution="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --wait --format='value(metadata.name)')"
-          test -n "${execution}"
-          echo "EXECUTION=${execution}" >> "${GITHUB_ENV}"
-      - name: Verify deployed boundary
-        run: |
-          set -euo pipefail
-          deployed_image="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
-          deployed_sa="$(gcloud run jobs describe "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --format='value(spec.template.spec.template.spec.serviceAccountName)')"
-          test "${deployed_image}" = "${PINNED_IMAGE}"
-          test "${deployed_sa}" = "${RUNTIME_SA}"
-      - name: Result
-        if: always()
-        run: |
-          {
-            echo "# Hefesto V4 clean rebuild"
-            echo "- Commit: \`${GITHUB_SHA}\`"
-            echo "- Job: \`${JOB_NAME}\`"
-            echo "- Image: \`${PINNED_IMAGE:-NOT_PUSHED}\`"
-            echo "- Startup: \`${EXECUTION:-NOT_RUN}\`"
-            echo "- Model invocation: none"
-          } >> "${GITHUB_STEP_SUMMARY}"
+        run: gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --wait

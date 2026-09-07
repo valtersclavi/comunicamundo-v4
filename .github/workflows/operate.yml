@@ -1,0 +1,49 @@
+name: operate-hefesto
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Operation
+        required: true
+        type: choice
+        options: [test-a, inspect]
+      execution_run_id:
+        description: Required only for inspect
+        required: false
+        type: string
+permissions:
+  contents: read
+  id-token: write
+env:
+  PROJECT_ID: comunicamundo-v4
+  REGION: us-central1
+  JOB_NAME: hefesto-v4-rebuild
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+jobs:
+  operate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Execute
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.operation }}" == "test-a" ]]; then
+            args="run-proof,--variant=A"
+          else
+            test -n "${{ inputs.execution_run_id }}"
+            args="inspect,--execution-run-id=${{ inputs.execution_run_id }}"
+          fi
+          execution="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args="${args}" --wait --format='value(metadata.name)')"
+          echo "Execution: ${execution}" >> "${GITHUB_STEP_SUMMARY}"
+          filter="resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"${execution}\""
+          gcloud logging read "${filter}" --project="${PROJECT_ID}" --freshness=2h --order=asc --limit=100 --format='value(textPayload)' | tee /tmp/result.log
+          echo '```json' >> "${GITHUB_STEP_SUMMARY}"
+          tail -1 /tmp/result.log >> "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"

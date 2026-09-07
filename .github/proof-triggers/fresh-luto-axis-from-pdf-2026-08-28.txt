@@ -1,6 +1,0 @@
-Fresh end-to-end Hefesto V4 proof trigger.
-
-Source requirement: exact original PDF SHA-256 21db1d9274ae0f72e266bce2e040ef47a754680bd24489c470c514f54c66bf17.
-Brief requirement: original childhood-grief brief, unchanged.
-Freshness requirement: new project/source/PlanningRun/SourceLineage/graph/understanding/NarrativeAxis.
-Stop requirement: axis_proposed, human approval required, no Editorial Project.

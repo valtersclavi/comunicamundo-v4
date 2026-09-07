@@ -4,16 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comunicamundo-v4"
-version = "0.2.0"
-description = "ComunicAmundo V4 editorial intelligence"
+version = "1.0.0"
+description = "Hefesto paragraph-first editorial intelligence"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "google-cloud-storage==3.13.1",
   "google-genai==2.19.0",
-  "llama-index-core==0.14.24",
-  "llama-index-embeddings-google-genai==0.5.1",
-  "llama-index-llms-google-genai==0.10.0",
-  "markdown-it-py==4.2.0",
   "pydantic>=2.12,<3",
   "psycopg[binary,pool]==3.3.5",
   "pypdf==6.10.0",
@@ -23,10 +19,7 @@ dependencies = [
 comunicamundo-v4-worker = "comunicamundo_v4.hefesto.worker:main"
 
 [project.optional-dependencies]
-dev = [
-  "pytest==8.4.2",
-  "pytest-asyncio==1.1.0",
-]
+dev = ["pytest==8.4.2", "pytest-asyncio==1.1.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -35,4 +28,4 @@ where = ["src"]
 addopts = "-q"
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["tests"]
+

@@ -1,342 +1,144 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from hashlib import sha256
 import json
-from pathlib import Path
-from typing import Any
-from uuid import UUID, uuid4
+import re
+from typing import Sequence
+from uuid import UUID
+
+from pydantic import BaseModel
 
 from comunicamundo_v4.hefesto.contracts import (
-    ChunkManifest,
-    ChunkManifestEntry,
-    EditorialUnderstanding,
-    GraphArtifact,
-    GraphArtifactFile,
-    GraphExtraction,
-    GraphExtractionManifest,
-    GraphReadyManifest,
-    PersistedNarrativeAxis,
-    PlanningRequest,
-    PlanningRun,
-    PreparedChunk,
-    SourceLineage,
-    AxisFeedbackDecision,
-    PersistedEditorialProject,
+    CallUsage,
+    EditorialProjectProposal,
+    EditorialUnderstandingProposal,
+    NarrativeAxisProposal,
+    Paragraph,
+    ParagraphBatchProposal,
+    ParagraphNote,
+    ProductRun,
 )
+from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
 
 
-class FakeSnapshot:
-    def __init__(self, data: dict[str, Any] | None) -> None:
-        self._data = data
-
-    @property
-    def exists(self) -> bool:
-        return self._data is not None
-
-    def to_dict(self) -> dict[str, Any] | None:
-        if self._data is None:
-            return None
-        return json.loads(json.dumps(self._data))
-
-
-class FakeDocument:
-    def __init__(self, store: dict[tuple[str, str], dict[str, Any]], collection: str, doc_id: str) -> None:
-        self._store = store
-        self._key = (collection, doc_id)
-
-    def set(self, data: dict[str, Any]) -> None:
-        self._store[self._key] = json.loads(json.dumps(data))
-
-    def get(self) -> FakeSnapshot:
-        return FakeSnapshot(self._store.get(self._key))
-
-
-class FakeCollection:
-    def __init__(self, store: dict[tuple[str, str], dict[str, Any]], name: str) -> None:
-        self._store = store
-        self._name = name
-
-    def document(self, doc_id: str) -> FakeDocument:
-        return FakeDocument(self._store, self._name, doc_id)
-
-
-class FakeDocumentStore:
+class MemoryRepository:
     def __init__(self) -> None:
-        self._store: dict[tuple[str, str], dict[str, Any]] = {}
+        self.runs: dict[UUID, ProductRun] = {}
+        self.structures: dict[UUID, list[Paragraph]] = {}
+        self.saved_notes: dict[UUID, dict[str, ParagraphNote]] = {}
+        self.usage: dict[UUID, list[CallUsage]] = {}
 
-    def collection(self, name: str) -> FakeCollection:
-        return FakeCollection(self._store, name)
+    async def save_run(self, run: ProductRun) -> None:
+        self.runs[run.execution_run_id] = run
 
+    async def get_run(self, execution_run_id: UUID) -> ProductRun | None:
+        return self.runs.get(execution_run_id)
 
-class FakeBlob:
-    def __init__(self) -> None:
-        self._data = b""
+    async def save_structure(self, execution_run_id: UUID, paragraphs: Sequence[Paragraph]) -> None:
+        self.structures[execution_run_id] = list(paragraphs)
 
-    def upload_from_string(self, data: bytes | str, content_type: str | None = None) -> None:
-        self._data = data if isinstance(data, bytes) else data.encode("utf-8")
+    async def save_note(self, execution_run_id: UUID, note: ParagraphNote) -> None:
+        self.saved_notes.setdefault(execution_run_id, {}).setdefault(note.paragraph_id, note)
 
-    def download_as_bytes(self) -> bytes:
-        return self._data
+    async def notes(self, execution_run_id: UUID) -> list[ParagraphNote]:
+        structure = self.structures[execution_run_id]
+        values = self.saved_notes.get(execution_run_id, {})
+        return [values[item.paragraph_id] for item in structure if item.paragraph_id in values]
 
+    async def record_usage(self, execution_run_id: UUID, project_id: UUID, usage: CallUsage) -> None:
+        self.usage.setdefault(execution_run_id, []).append(usage)
 
-class FakeBucket:
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.blobs: dict[str, FakeBlob] = {}
-
-    def blob(self, name: str) -> FakeBlob:
-        return self.blobs.setdefault(name, FakeBlob())
-
-
-class FakeStorageClient:
-    def __init__(self) -> None:
-        self.buckets: dict[str, FakeBucket] = {}
-
-    def bucket(self, name: str) -> FakeBucket:
-        return self.buckets.setdefault(name, FakeBucket(name))
+    async def usage_report(self, execution_run_id: UUID) -> dict[str, object]:
+        calls = self.usage.get(execution_run_id, [])
+        return {"call_count": len(calls), "total_tokens": sum(item.total_tokens for item in calls)}
 
 
-class MemoryPlanningPersistence:
-    def __init__(self) -> None:
-        self.runs: dict[UUID, PlanningRun] = {}
-        self.intents: dict[tuple[UUID, str], UUID] = {}
-        self.lineages: dict[UUID, SourceLineage] = {}
-        self.lineage_keys: dict[tuple[UUID, str], UUID] = {}
-        self.objects: dict[str, object] = {}
-        self.request_writes = 0
-        self.chunk_writes = 0
-        self.manifest_writes = 0
-        self.extraction_writes = 0
-        self.extraction_manifest_writes = 0
-        self.graph_writes = 0
-        self.graph_manifest_writes = 0
-        self.understanding_writes = 0
-        self.axis_writes = 0
-        self.feedback_writes = 0
-        self.project_writes = 0
-        self.stored_axes: dict = {}
-        self.stored_projects: dict = {}
+class FakeGateway:
+    def __init__(self, *, fail_understanding_once: bool = False) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.paragraph_ids: list[str] = []
+        self.fail_understanding_once = fail_understanding_once
 
-    def save_run(self, run: PlanningRun) -> PlanningRun:
-        updated = run.model_copy(update={"updated_at": datetime.now(UTC)})
-        self.runs[updated.planning_run_id] = updated
-        self.intents[(updated.project_id, updated.request_fingerprint)] = updated.planning_run_id
-        return updated
-
-    def get_run(self, planning_run_id: UUID) -> PlanningRun | None:
-        stored = self.runs.get(planning_run_id)
-        return None if stored is None else stored.model_copy()
-
-    def find_run(self, project_id: UUID, request_fingerprint: str) -> PlanningRun | None:
-        run_id = self.intents.get((project_id, request_fingerprint))
-        if run_id is None:
-            return None
-        return self.get_run(run_id)
-
-    def save_source_lineage(self, lineage: SourceLineage) -> SourceLineage:
-        updated = lineage.model_copy(update={"updated_at": datetime.now(UTC)})
-        self.lineages[updated.source_lineage_id] = updated
-        self.lineage_keys[(updated.project_id, updated.source_fingerprint)] = updated.source_lineage_id
-        return updated
-
-    def get_source_lineage(self, source_lineage_id: UUID) -> SourceLineage | None:
-        stored = self.lineages.get(source_lineage_id)
-        return None if stored is None else stored.model_copy()
-
-    def find_source_lineage(self, project_id: UUID, source_fingerprint: str) -> SourceLineage | None:
-        lineage_id = self.lineage_keys.get((project_id, source_fingerprint))
-        if lineage_id is None:
-            return None
-        return self.get_source_lineage(lineage_id)
-
-    def persist_request(self, run: PlanningRun, request: PlanningRequest) -> str:
-        self.request_writes += 1
-        uri = f"gs://memory/{run.planning_run_id}/request.json"
-        self.objects[uri] = request.model_copy()
-        return uri
-
-    def load_request(self, uri: str) -> PlanningRequest:
-        request = self.objects[uri]
-        assert isinstance(request, PlanningRequest)
-        return request.model_copy()
-
-    def persist_understanding(self, run: PlanningRun, understanding: EditorialUnderstanding) -> str:
-        self.understanding_writes += 1
-        uri = f"gs://memory/{run.planning_run_id}/understanding.json"
-        self.objects[uri] = understanding.model_copy()
-        return uri
-
-    def load_understanding(self, uri: str) -> EditorialUnderstanding:
-        understanding = self.objects[uri]
-        assert isinstance(understanding, EditorialUnderstanding)
-        return understanding.model_copy()
-
-    def persist_narrative_axis(self, run: PlanningRun, record: PersistedNarrativeAxis) -> str:
-        self.axis_writes += 1
-        uri = f"gs://memory/{run.planning_run_id}/axis.json"
-        self.objects[uri] = record.model_copy()
-        return uri
-
-    def load_narrative_axis(self, uri: str) -> PersistedNarrativeAxis:
-        record = self.objects[uri]
-        assert isinstance(record, PersistedNarrativeAxis)
-        return record.model_copy()
-
-    def persist_axis_feedback_decision(self, run: PlanningRun, record: AxisFeedbackDecision) -> str:
-        self.feedback_writes += 1
-        uri = f"gs://memory/{run.planning_run_id}/feedback/{record.feedback_decision_id}.json"
-        self.objects[uri] = record.model_copy()
-        return uri
-
-    def load_axis_feedback_decision(self, uri: str) -> AxisFeedbackDecision:
-        record = self.objects[uri]
-        if isinstance(record, AxisFeedbackDecision):
-            return record.model_copy()
-        return AxisFeedbackDecision.model_validate(record)
-
-    def persist_editorial_project(self, run: PlanningRun, record: PersistedEditorialProject) -> str:
-        self.project_writes += 1
-        uri = f"gs://memory/{run.planning_run_id}/editorial-project.json"
-        self.objects[uri] = record.model_copy()
-        return uri
-
-    def load_editorial_project(self, uri: str) -> PersistedEditorialProject:
-        record = self.objects[uri]
-        assert isinstance(record, PersistedEditorialProject)
-        return record.model_copy()
-
-    def save_axis(self, stored):
-        self.stored_axes[stored.narrative_axis.narrative_axis_id] = stored.model_copy()
-        return stored
-
-    def get_axis(self, axis_id):
-        stored = self.stored_axes.get(axis_id)
-        return None if stored is None else stored.model_copy()
-
-    def save_project(self, stored):
-        self.stored_projects[stored.editorial_project.editorial_project_id] = stored.model_copy()
-        return stored
-
-    def get_project(self, project_id):
-        stored = self.stored_projects.get(project_id)
-        return None if stored is None else stored.model_copy()
-
-    def persist_chunks(self, lineage: SourceLineage, chunks: list[PreparedChunk]) -> str:
-        if lineage.chunk_manifest_uri is not None:
-            raise ValueError("source lineage chunks already persisted")
-        self.chunk_writes += 1
-        entries: list[ChunkManifestEntry] = []
-        for chunk in chunks:
-            chunk_uri = f"gs://memory/sources/{lineage.source_lineage_id}/chunks/{chunk.chunk_id}.json"
-            self.objects[chunk_uri] = chunk.model_copy()
-            entries.append(
-                ChunkManifestEntry(
-                    chunk_id=chunk.chunk_id,
-                    source_id=chunk.source_id,
-                    source_ordinal=chunk.source_ordinal,
-                    chunk_ordinal=chunk.chunk_ordinal,
-                    sequence=chunk.sequence,
-                    content_sha256=chunk.content_sha256,
-                    status=chunk.status,
-                    chunk_uri=chunk_uri,
-                    extraction_ref=chunk.extraction_ref,
-                )
+    async def generate(
+        self,
+        *,
+        task_type: str,
+        prompt: str,
+        schema: type[BaseModel],
+        system_instruction: str,
+        max_output_tokens: int,
+        thinking_tokens: int,
+    ) -> ModelResult:
+        self.calls.append({"task_type": task_type, "prompt": prompt, "schema": schema.__name__})
+        usage = CallUsage(
+            task_type=task_type, prompt_tokens=10, output_tokens=5,
+            reasoning_tokens=1, total_tokens=16, latency_ms=2,
+            rated_cost_usd="0.000015800", status="succeeded",
+        )
+        if task_type == "paragraph_batch":
+            ids = re.findall(r'"paragraph_id":\s*"([0-9a-f]{64})"', prompt)
+            self.paragraph_ids.extend(ids)
+            value = ParagraphBatchProposal.model_validate(
+                {
+                    "notes": [
+                        {
+                            "paragraph_id": item,
+                            "observations": [
+                                {
+                                    "observation": f"Meaning of {item[:8]}",
+                                    "tags": ["free-tag-not-in-an-ontology"],
+                                    "evidence_sentence_ordinals": [1],
+                                },
+                                {
+                                    "observation": f"A distinct nuance from {item[:8]}",
+                                    "tags": ["second-observation"],
+                                    "evidence_sentence_ordinals": [1],
+                                },
+                            ],
+                            "brief_relevance": "Potentially relevant without erasing the source.",
+                        }
+                        for item in ids
+                    ]
+                }
             )
-        manifest = ChunkManifest(
-            source_lineage_id=lineage.source_lineage_id,
-            project_id=lineage.project_id,
-            source_fingerprint=lineage.source_fingerprint,
-            chunk_count=len(entries),
-            chunks=entries,
-        )
-        uri = f"gs://memory/sources/{lineage.source_lineage_id}/chunks/manifest.json"
-        self.objects[uri] = manifest
-        self.manifest_writes += 1
-        return uri
-
-    def load_chunk_manifest(self, uri: str) -> ChunkManifest:
-        manifest = self.objects[uri]
-        assert isinstance(manifest, ChunkManifest)
-        return manifest.model_copy()
-
-    def load_chunk(self, uri: str) -> PreparedChunk:
-        chunk = self.objects[uri]
-        assert isinstance(chunk, PreparedChunk)
-        return chunk.model_copy()
-
-    def persist_graph_extraction(self, lineage: SourceLineage, extraction: GraphExtraction) -> str:
-        self.extraction_writes += 1
-        uri = f"gs://memory/sources/{lineage.source_lineage_id}/graph-extractions/{extraction.chunk_id}.json"
-        self.objects[uri] = extraction.model_copy()
-        return uri
-
-    def persist_graph_extraction_manifest(self, lineage: SourceLineage, manifest: GraphExtractionManifest) -> str:
-        self.extraction_manifest_writes += 1
-        uri = f"gs://memory/sources/{lineage.source_lineage_id}/graph-extractions/manifest.json"
-        self.objects[uri] = manifest.model_copy()
-        return uri
-
-    def load_graph_extraction_manifest(self, uri: str) -> GraphExtractionManifest:
-        manifest = self.objects[uri]
-        assert isinstance(manifest, GraphExtractionManifest)
-        return manifest.model_copy()
-
-    def load_graph_extraction(self, uri: str) -> GraphExtraction:
-        extraction = self.objects[uri]
-        assert isinstance(extraction, GraphExtraction)
-        return extraction.model_copy()
-
-    def persist_source_lineage_graph(self, lineage: SourceLineage, directory: Path) -> GraphArtifact:
-        self.graph_writes += 1
-        artifact_id = uuid4()
-        prefix = f"comunicamundo-v4-rebuild/projects/{lineage.project_id}/sources/{lineage.source_lineage_id}/graph/{artifact_id}"
-        records: list[GraphArtifactFile] = []
-        for local in sorted(path for path in directory.rglob("*") if path.is_file()):
-            relative = local.relative_to(directory).as_posix()
-            data = local.read_bytes()
-            uri = f"gs://memory/{prefix}/files/{relative}"
-            self.objects[uri] = data
-            records.append(GraphArtifactFile(path=relative, size_bytes=len(data), sha256=sha256(data).hexdigest()))
-        created_at = datetime.now(UTC)
-        manifest_uri = f"gs://memory/{prefix}/manifest.json"
-        artifact = GraphArtifact(
-            project_id=lineage.project_id,
-            artifact_id=artifact_id,
-            bucket="memory",
-            prefix=prefix,
-            manifest_uri=manifest_uri,
-            files=records,
-            created_at=created_at,
-        )
-        self.objects[manifest_uri] = artifact.model_copy()
-        return artifact
-
-    def restore_source_lineage_graph(self, artifact: GraphArtifact, destination: Path) -> None:
-        destination.mkdir(parents=True, exist_ok=True)
-        if any(destination.iterdir()):
-            raise ValueError("graph restore destination must be empty")
-        stored = self.objects[artifact.manifest_uri]
-        assert isinstance(stored, GraphArtifact)
-        if stored.artifact_id != artifact.artifact_id:
-            raise ValueError("graph manifest mismatch")
-        for record in artifact.files:
-            data = self.objects[f"gs://memory/{artifact.prefix}/files/{record.path}"]
-            assert isinstance(data, (bytes, bytearray))
-            if len(data) != record.size_bytes or sha256(data).hexdigest() != record.sha256:
-                raise ValueError(f"graph artifact integrity failure: {record.path}")
-            target = destination / record.path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-
-    def persist_graph_ready_manifest(self, lineage: SourceLineage, manifest: GraphReadyManifest) -> str:
-        self.graph_manifest_writes += 1
-        uri = f"gs://memory/sources/{lineage.source_lineage_id}/graph/manifest.json"
-        self.objects[uri] = manifest.model_copy()
-        return uri
-
-    def load_graph_ready_manifest(self, uri: str) -> GraphReadyManifest:
-        manifest = self.objects[uri]
-        assert isinstance(manifest, GraphReadyManifest)
-        return manifest.model_copy()
-
+        elif task_type == "editorial_understanding":
+            if self.fail_understanding_once:
+                self.fail_understanding_once = False
+                raise ModelCallError("synthetic synthesis failure")
+            value = EditorialUnderstandingProposal(
+                synthesis="Integrated reading guided by the brief and requested duration.",
+                central_ideas=["A central idea"],
+                relations_and_tensions=["A meaningful tension"],
+                nuances_and_limits=["A limit"],
+                editorial_possibilities=["A viable editorial direction"],
+                supporting_paragraph_ids=self.paragraph_ids[:2],
+            )
+        elif task_type == "narrative_axis":
+            value = NarrativeAxisProposal(
+                statement="A concise intellectual direction for the piece.",
+                rationale="It selects what matters for the brief.",
+                supporting_paragraph_ids=self.paragraph_ids[:1],
+            )
+        elif task_type == "editorial_project":
+            duration = int(re.search(r'"duration_minutes":\s*(\d+)', prompt).group(1))
+            value = EditorialProjectProposal.model_validate(
+                {
+                    "working_title": "Working title",
+                    "editorial_promise": "A concrete promise",
+                    "duration_minutes": duration,
+                    "source_supported_subjects": [
+                        {
+                            "title": "Core subject",
+                            "editorial_role": "Develop the Axis",
+                            "depth": "Enough depth for the requested duration",
+                            "allocated_minutes": duration,
+                            "supporting_paragraph_ids": self.paragraph_ids[:1],
+                        }
+                    ],
+                    "model_knowledge_suggestions": ["Optional model suggestion"],
+                    "source_enrichment_opportunities": ["Additional source opportunity"],
+                }
+            )
+        else:
+            raise AssertionError(task_type)
+        assert isinstance(value, schema)
+        return ModelResult(value=value, usage=usage)

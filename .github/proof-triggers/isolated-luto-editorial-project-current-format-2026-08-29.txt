@@ -1,7 +1,0 @@
-Generate the Editorial Project from isolated PlanningRun cef3b6a8-cf58-4eb9-80af-ea3b0cec08cb using the current canonical Editorial Project format.
-Approved Narrative Axis: d2e086ac-1b06-44c6-94ae-a6a1578ad092.
-STOP at project_proposed for human review.
-No article production.
-No search.
-No graph rebuild.
-No understanding rebuild.

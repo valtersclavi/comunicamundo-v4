@@ -1,4 +1,0 @@
-Trigger v2 fresh proof.
-
-Start from a freshly downloaded PDF whose extracted canonical text must match the fingerprint calculated from the exact original Library PDF.
-Create all planning artifacts fresh and stop at axis_proposed.

@@ -1,1 +1,0 @@
-Read-only log inspection for the successful canary execution hefesto-v4-rebuild-2vg6b.

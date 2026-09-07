@@ -1,1 +1,0 @@
-Authorized proof: run the full test suite and frozen Editorial Project scope tests against branch freeze-project-scope-before-production-2026-08-29. Do not deploy this branch and do not touch the real Editorial Project.

@@ -1,1 +1,0 @@
-Read-only inspection for failed Test A execution hefesto-v4-rebuild-vhh84.

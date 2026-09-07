@@ -1,2 +1,0 @@
-Read-only diagnostic trigger for hefesto-v4-rebuild-ksxpg after granting roles/logging.viewer.
-No model rerun.
