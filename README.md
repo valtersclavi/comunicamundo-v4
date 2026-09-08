@@ -35,6 +35,8 @@ Every editorial project enters through the same JSON contract. Tests, subjects, 
 
 `ingest` downloads each PDF, validates it, stores an immutable original, extracts layout-aware text, creates complete paragraphs and sentence addresses, and persists that structure in PostgreSQL. It makes zero model calls. `plan` performs the same input stage and continues through digestion and the proposed Narrative Axis. `resume-plan` resumes persisted work; `approve-axis` is the explicit action that proposes the Editorial Project.
 
+Every operation emits a durable receipt with state, error details, stage timings, and exact provider usage when model calls occur.
+
 ```bash
 comunicamundo-v4-worker ingest --request gs://bucket/project-input.json
 comunicamundo-v4-worker plan --request gs://bucket/project-input.json
