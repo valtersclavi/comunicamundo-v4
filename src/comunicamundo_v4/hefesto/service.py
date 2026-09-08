@@ -17,6 +17,7 @@ from .contracts import (
     NarrativeAxisRecord,
     Paragraph,
     ParagraphBatchProposal,
+    ParagraphCoordinate,
     ParagraphObservation,
     ParagraphNote,
     PlanningRequest,
@@ -84,9 +85,7 @@ class Hefesto:
                 max_output_tokens=8_192,
                 thinking_tokens=2_000,
             )
-            known = {item.paragraph_id for item in paragraphs}
-            if not set(result.value.supporting_paragraph_ids).issubset(known):
-                raise ValueError("understanding referenced an unknown paragraph")
+            self._validate_paragraphs(run, result.value.supporting_paragraphs)
             understanding = EditorialUnderstanding(
                 **result.value.model_dump(),
                 execution_run_id=run.execution_run_id,
@@ -128,7 +127,7 @@ class Hefesto:
                 max_output_tokens=2_048,
                 thinking_tokens=1_000,
             )
-            self._validate_paragraph_ids(run, result.value.supporting_paragraph_ids)
+            self._validate_paragraphs(run, result.value.supporting_paragraphs)
             axis = NarrativeAxisRecord(
                 execution_run_id=run.execution_run_id,
                 project_id=run.project_id,
@@ -173,7 +172,7 @@ class Hefesto:
             if result.value.duration_minutes != run.request.brief.duration_minutes:
                 raise ValueError("Editorial Project changed the requested duration")
             for subject in result.value.source_supported_subjects:
-                self._validate_paragraph_ids(run, subject.supporting_paragraph_ids)
+                self._validate_paragraphs(run, subject.supporting_paragraphs)
             project = EditorialProjectRecord(
                 execution_run_id=run.execution_run_id,
                 project_id=run.project_id,
@@ -222,13 +221,12 @@ class Hefesto:
                     max_output_tokens=12_288,
                     thinking_tokens=1_000,
                 )
-                expected = [item.paragraph_id for item in batch.paragraphs]
-                actual = [item.paragraph_id for item in result.value.notes]
+                expected = list(range(1, len(batch.paragraphs) + 1))
+                actual = [item.paragraph_number for item in result.value.notes]
                 if actual != expected or len(actual) != len(set(actual)):
                     raise ValueError("batch must return exactly one ordered note per paragraph")
-                by_id = {item.paragraph_id: item for item in batch.paragraphs}
                 for proposal in result.value.notes:
-                    paragraph = by_id[proposal.paragraph_id]
+                    paragraph = batch.paragraphs[proposal.paragraph_number - 1]
                     sentence_by_ordinal = {item.ordinal: item for item in paragraph.sentences}
                     observations: list[ParagraphObservation] = []
                     for observation in proposal.observations:
@@ -248,7 +246,7 @@ class Hefesto:
                             )
                         )
                     note = ParagraphNote(
-                        paragraph_id=proposal.paragraph_id,
+                        paragraph_id=paragraph.paragraph_id,
                         observations=observations,
                         brief_relevance=proposal.brief_relevance,
                         source_id=paragraph.source_id,
@@ -323,9 +321,18 @@ class Hefesto:
             raise KeyError(f"unknown execution {execution_run_id}")
         return run
 
-    def _validate_paragraph_ids(self, run: ProductRun, values: Sequence[str]) -> None:
-        known = {item.paragraph_id for item in segment_sources(run.request.sources)}
-        if not values or not set(values).issubset(known):
+    def _validate_paragraphs(
+        self, run: ProductRun, values: Sequence[ParagraphCoordinate]
+    ) -> None:
+        known = {
+            (item.source_ordinal, item.ordinal)
+            for item in segment_sources(run.request.sources)
+        }
+        supplied = {
+            (item.source_ordinal, item.paragraph_ordinal)
+            for item in values
+        }
+        if not values or len(supplied) != len(values) or not supplied.issubset(known):
             raise ValueError("editorial output referenced an unknown paragraph")
 
     async def _fail(self, run: ProductRun, error: Exception) -> None:

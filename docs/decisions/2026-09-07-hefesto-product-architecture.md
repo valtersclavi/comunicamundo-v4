@@ -35,6 +35,7 @@ Requested duration is editorial capacity. It governs selection and depth in the 
 10. The Editorial Project consumes the approved Axis, brief, and understanding. It returns: source-supported subjects, optional model-knowledge suggestions, and opportunities requiring additional sources. It stops for human approval.
 11. No renderer or production work occurs before Project approval.
 12. Every paid call is recorded with provider-reported usage, latency, outcome, and rated cost. Completed work is resumable by deterministic identity.
+13. Opaque hashes and UUIDs are code-owned persistence identities. The model never has to reproduce them; model-facing evidence uses short batch numbers or source/paragraph coordinates.
 
 ## Model contracts
 
@@ -44,7 +45,7 @@ Input: complete adjacent paragraphs with paragraph and sentence ordinals, plus t
 
 Output: exactly one structured note for every input paragraph:
 
-- `paragraph_id`
+- `paragraph_number` (short, batch-local, code-owned)
 - `observations` (one or more); each contains:
   - `observation`
   - `tags` (free-form strings)
@@ -64,7 +65,7 @@ Output:
 - meaningful relations or tensions;
 - nuances and limits when the material contains them;
 - editorial possibilities appropriate to the requested product and duration;
-- supporting paragraph IDs.
+- supporting source/paragraph coordinates.
 
 This is the only corpus-level interpretation before the Axis.
 
@@ -72,7 +73,7 @@ This is the only corpus-level interpretation before the Axis.
 
 Input: brief plus editorial understanding.
 
-Output: one 1-2 sentence intellectual/editorial direction, a short rationale, and supporting paragraph IDs. No outline and no Editorial Project.
+Output: one 1-2 sentence intellectual/editorial direction, a short rationale, and supporting source/paragraph coordinates. No outline and no Editorial Project.
 
 ### Editorial Project
 

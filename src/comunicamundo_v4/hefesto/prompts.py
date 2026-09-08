@@ -18,7 +18,7 @@ SYSTEM = """You are Hefesto, an attentive and disciplined editor. Understand the
 def paragraph_batch_prompt(brief: EditorialBrief, paragraphs: Sequence[Paragraph]) -> str:
     payload = [
         {
-            "paragraph_id": item.paragraph_id,
+            "paragraph_number": number,
             "source_ordinal": item.source_ordinal,
             "paragraph_ordinal": item.ordinal,
             "sentences": [
@@ -26,10 +26,10 @@ def paragraph_batch_prompt(brief: EditorialBrief, paragraphs: Sequence[Paragraph
                 for sentence in item.sentences
             ],
         }
-        for item in paragraphs
+        for number, item in enumerate(paragraphs, start=1)
     ]
     return f"""
-Read every paragraph exactly once and return exactly one structured note for each paragraph_id, in input order.
+Read every paragraph exactly once and return exactly one structured note for each paragraph_number, in input order.
 
 For each paragraph, return every substantively distinct observation needed to
 understand what it adds in light of the brief. Give each observation whatever
@@ -52,7 +52,6 @@ PARAGRAPHS:
 def understanding_prompt(brief: EditorialBrief, notes: Sequence[ParagraphNote]) -> str:
     payload = [
         {
-            "paragraph_id": item.paragraph_id,
             "source_ordinal": item.source_ordinal,
             "paragraph_ordinal": item.paragraph_ordinal,
             "observations": [
@@ -69,7 +68,7 @@ def understanding_prompt(brief: EditorialBrief, notes: Sequence[ParagraphNote]) 
     return f"""
 Create the single editorial understanding for this corpus. Synthesize rather than concatenate. Decide what matters for the user's intention, audience, product, and requested duration while preserving meaningful tensions, nuances, limits, and unexpected but useful material.
 
-Use only paragraph_ids supplied below. The understanding should be compact enough to drive the Narrative Axis and Editorial Project without reproducing all paragraph notes.
+Use only source/paragraph coordinates supplied below. The understanding should be compact enough to drive the Narrative Axis and Editorial Project without reproducing all paragraph notes.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}

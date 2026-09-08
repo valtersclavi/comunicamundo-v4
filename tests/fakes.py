@@ -55,7 +55,6 @@ class MemoryRepository:
 class FakeGateway:
     def __init__(self, *, fail_understanding_once: bool = False) -> None:
         self.calls: list[dict[str, object]] = []
-        self.paragraph_ids: list[str] = []
         self.fail_understanding_once = fail_understanding_once
 
     async def generate(
@@ -75,28 +74,27 @@ class FakeGateway:
             rated_cost_usd="0.000015800", status="succeeded",
         )
         if task_type == "paragraph_batch":
-            ids = re.findall(r'"paragraph_id":\s*"([0-9a-f]{64})"', prompt)
-            self.paragraph_ids.extend(ids)
+            numbers = [int(item) for item in re.findall(r'"paragraph_number":\s*(\d+)', prompt)]
             value = ParagraphBatchProposal.model_validate(
                 {
                     "notes": [
                         {
-                            "paragraph_id": item,
+                            "paragraph_number": item,
                             "observations": [
                                 {
-                                    "observation": f"Meaning of {item[:8]}",
+                                    "observation": f"Meaning of paragraph {item}",
                                     "tags": ["free-tag-not-in-an-ontology"],
                                     "evidence_sentence_ordinals": [1],
                                 },
                                 {
-                                    "observation": f"A distinct nuance from {item[:8]}",
+                                    "observation": f"A distinct nuance from paragraph {item}",
                                     "tags": ["second-observation"],
                                     "evidence_sentence_ordinals": [1],
                                 },
                             ],
                             "brief_relevance": "Potentially relevant without erasing the source.",
                         }
-                        for item in ids
+                        for item in numbers
                     ]
                 }
             )
@@ -110,13 +108,16 @@ class FakeGateway:
                 relations_and_tensions=["A meaningful tension"],
                 nuances_and_limits=["A limit"],
                 editorial_possibilities=["A viable editorial direction"],
-                supporting_paragraph_ids=self.paragraph_ids[:2],
+                supporting_paragraphs=[
+                    {"source_ordinal": 1, "paragraph_ordinal": 1},
+                    {"source_ordinal": 1, "paragraph_ordinal": 2},
+                ],
             )
         elif task_type == "narrative_axis":
             value = NarrativeAxisProposal(
                 statement="A concise intellectual direction for the piece.",
                 rationale="It selects what matters for the brief.",
-                supporting_paragraph_ids=self.paragraph_ids[:1],
+                supporting_paragraphs=[{"source_ordinal": 1, "paragraph_ordinal": 1}],
             )
         elif task_type == "editorial_project":
             duration = int(re.search(r'"duration_minutes":\s*(\d+)', prompt).group(1))
@@ -131,7 +132,9 @@ class FakeGateway:
                             "editorial_role": "Develop the Axis",
                             "depth": "Enough depth for the requested duration",
                             "allocated_minutes": duration,
-                            "supporting_paragraph_ids": self.paragraph_ids[:1],
+                            "supporting_paragraphs": [
+                                {"source_ordinal": 1, "paragraph_ordinal": 1}
+                            ],
                         }
                     ],
                     "model_knowledge_suggestions": ["Optional model suggestion"],

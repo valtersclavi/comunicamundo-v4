@@ -6,6 +6,7 @@ import pytest
 
 from comunicamundo_v4.hefesto.contracts import EditorialBrief, NormalizedSource, PlanningRequest, RunState
 from comunicamundo_v4.hefesto.segmentation import make_batches, segment_sources
+from comunicamundo_v4.hefesto.prompts import paragraph_batch_prompt
 from comunicamundo_v4.hefesto.service import Hefesto
 from fakes import FakeGateway, MemoryRepository
 
@@ -46,6 +47,9 @@ def test_paragraph_is_comprehension_unit_and_sentence_is_evidence_address() -> N
     assert [item.paragraph_id for batch in batches for item in batch.paragraphs] == [
         item.paragraph_id for item in paragraphs
     ]
+    prompt = paragraph_batch_prompt(request().brief, paragraphs)
+    assert all(item.paragraph_id not in prompt for item in paragraphs)
+    assert '"paragraph_number": 1' in prompt
 
 
 @pytest.mark.asyncio
