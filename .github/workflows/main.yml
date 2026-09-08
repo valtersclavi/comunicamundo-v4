@@ -20,7 +20,6 @@ env:
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
-  PRODUCT_USER: valtersclavi@gmail.com
 jobs:
   test-build-deploy:
     runs-on: ubuntu-latest
@@ -120,11 +119,6 @@ jobs:
             --role="roles/run.invoker" --quiet
           gcloud run services update "${API_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" --iap --quiet
-          gcloud iap web add-iam-policy-binding \
-            --member="user:${PRODUCT_USER}" \
-            --role="roles/iap.httpsResourceAccessor" \
-            --region="${REGION}" --resource-type=cloud-run \
-            --service="${API_NAME}" --quiet
           api_url="$(gcloud run services describe "${API_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
             --format='value(status.url)')"
