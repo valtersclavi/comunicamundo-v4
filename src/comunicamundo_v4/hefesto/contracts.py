@@ -58,11 +58,9 @@ class Paragraph(StrictModel):
 class ParagraphObservationProposal(StrictModel):
     observation: str = Field(min_length=1, max_length=900)
     tags: list[str] = Field(default_factory=list, max_length=12)
-    evidence_sentence_ordinals: list[int] = Field(min_length=1)
 
 
 class ParagraphNoteProposal(StrictModel):
-    paragraph_number: int = Field(ge=1)
     observations: list[ParagraphObservationProposal] = Field(min_length=1)
     brief_relevance: str = Field(min_length=1, max_length=600)
 
@@ -72,7 +70,7 @@ class ParagraphBatchProposal(StrictModel):
 
 
 class ParagraphObservation(ParagraphObservationProposal):
-    evidence_sentence_ids: list[Sha256] = Field(min_length=1)
+    pass
 
 
 class ParagraphNote(StrictModel):
@@ -84,18 +82,12 @@ class ParagraphNote(StrictModel):
     paragraph_ordinal: int = Field(ge=1)
 
 
-class ParagraphCoordinate(StrictModel):
-    source_ordinal: int = Field(ge=1)
-    paragraph_ordinal: int = Field(ge=1)
-
-
 class EditorialUnderstandingProposal(StrictModel):
     synthesis: str = Field(min_length=1)
     central_ideas: list[str] = Field(min_length=1)
     relations_and_tensions: list[str] = Field(default_factory=list)
     nuances_and_limits: list[str] = Field(default_factory=list)
     editorial_possibilities: list[str] = Field(min_length=1)
-    supporting_paragraphs: list[ParagraphCoordinate] = Field(min_length=1)
 
 
 class EditorialUnderstanding(EditorialUnderstandingProposal):
@@ -107,7 +99,6 @@ class EditorialUnderstanding(EditorialUnderstandingProposal):
 class NarrativeAxisProposal(StrictModel):
     statement: str = Field(min_length=1)
     rationale: str = Field(min_length=1)
-    supporting_paragraphs: list[ParagraphCoordinate] = Field(min_length=1)
 
 
 class NarrativeAxisRecord(StrictModel):
@@ -124,7 +115,6 @@ class EditorialSubject(StrictModel):
     editorial_role: str = Field(min_length=1)
     depth: str = Field(min_length=1)
     allocated_minutes: float = Field(gt=0)
-    supporting_paragraphs: list[ParagraphCoordinate] = Field(default_factory=list)
 
 
 class EditorialProjectProposal(StrictModel):
@@ -196,6 +186,7 @@ class CallUsage(StrictModel):
     latency_ms: int = Field(ge=0)
     rated_cost_usd: str | None = None
     status: str
+    error_message: str | None = None
 
 
 def content_hash(value: str) -> str:

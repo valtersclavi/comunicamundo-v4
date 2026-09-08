@@ -16,7 +16,7 @@ Requested duration is editorial capacity. It governs selection and depth in the 
 
 - Source: immutable normalized input.
 - Paragraph: the unit of LLM comprehension.
-- Sentence: the address of evidence inside a paragraph.
+- Sentence: a relationally stored source address inside a paragraph; it is code-owned and is not generated or selected by the LLM during digestion.
 - Batch: an operational envelope containing adjacent complete paragraphs. It exists only for concurrency and provider efficiency; it is not an editorial layer.
 - Paragraph note: the sole interpretation produced for a paragraph. It contains one or more distinct observations, free-form tags chosen by the model for each observation, paragraph-level relevance to the brief, and references to source sentences.
 - Editorial understanding: one corpus-level synthesis built from paragraph notes. It selects and relates what matters for this specific brief and duration.
@@ -26,7 +26,7 @@ Requested duration is editorial capacity. It governs selection and depth in the 
 1. Every paragraph is interpreted exactly once per digestion run.
 2. A paragraph belongs to exactly one batch.
 3. Batches may run concurrently, but concurrency cannot create extra interpretations, analyst personas, voting, reducers, or editorial layers.
-4. No paragraph is split. Sentence coordinates are deterministic and code-owned.
+4. No paragraph is split. Sentence records and all source relations are deterministic and code-owned.
 5. The model chooses free-form observations and tags. Code validates identity, order, cardinality, evidence coordinates, persistence, and state; it does not impose a domain ontology.
 6. Batch results are assembled deterministically and persisted. They are never sent to a reducer.
 7. There is exactly one corpus synthesis before the Narrative Axis.
@@ -35,7 +35,7 @@ Requested duration is editorial capacity. It governs selection and depth in the 
 10. The Editorial Project consumes the approved Axis, brief, and understanding. It returns: source-supported subjects, optional model-knowledge suggestions, and opportunities requiring additional sources. It stops for human approval.
 11. No renderer or production work occurs before Project approval.
 12. Every paid call is recorded with provider-reported usage, latency, outcome, and rated cost. Completed work is resumable by deterministic identity.
-13. Opaque hashes and UUIDs are code-owned persistence identities. The model never has to reproduce them; model-facing evidence uses short batch numbers or source/paragraph coordinates.
+13. Hashes, UUIDs, ordinals, and source relations are code-owned. The model never has to reproduce identifiers or coordinates.
 
 ## Model contracts
 
@@ -45,11 +45,9 @@ Input: complete adjacent paragraphs with paragraph and sentence ordinals, plus t
 
 Output: exactly one structured note for every input paragraph:
 
-- `paragraph_number` (short, batch-local, code-owned)
 - `observations` (one or more); each contains:
   - `observation`
   - `tags` (free-form strings)
-  - `evidence_sentence_ordinals`
 - `brief_relevance`
 
 One reading may yield several observations; this does not create several analysts or readings. The output has no fixed scientific taxonomy. Empty or content-free paragraphs are handled deterministically before batching and are not sent to the model.
@@ -65,7 +63,6 @@ Output:
 - meaningful relations or tensions;
 - nuances and limits when the material contains them;
 - editorial possibilities appropriate to the requested product and duration;
-- supporting source/paragraph coordinates.
 
 This is the only corpus-level interpretation before the Axis.
 
@@ -73,7 +70,7 @@ This is the only corpus-level interpretation before the Axis.
 
 Input: brief plus editorial understanding.
 
-Output: one 1-2 sentence intellectual/editorial direction, a short rationale, and supporting source/paragraph coordinates. No outline and no Editorial Project.
+Output: one 1-2 sentence intellectual/editorial direction and a short rationale. No identifiers, outline, or Editorial Project.
 
 ### Editorial Project
 

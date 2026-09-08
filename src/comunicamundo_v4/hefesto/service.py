@@ -17,7 +17,6 @@ from .contracts import (
     NarrativeAxisRecord,
     Paragraph,
     ParagraphBatchProposal,
-    ParagraphCoordinate,
     ParagraphObservation,
     ParagraphNote,
     PlanningRequest,
@@ -48,7 +47,7 @@ class Hefesto:
         repository: Repository,
         gateway: ModelGateway,
         *,
-        batch_target_tokens: int = 12_000,
+        batch_target_tokens: int = 8_000,
         concurrency: int = 6,
     ) -> None:
         if concurrency <= 0:
@@ -85,7 +84,6 @@ class Hefesto:
                 max_output_tokens=8_192,
                 thinking_tokens=2_000,
             )
-            self._validate_paragraphs(run, result.value.supporting_paragraphs)
             understanding = EditorialUnderstanding(
                 **result.value.model_dump(),
                 execution_run_id=run.execution_run_id,
@@ -127,7 +125,6 @@ class Hefesto:
                 max_output_tokens=2_048,
                 thinking_tokens=1_000,
             )
-            self._validate_paragraphs(run, result.value.supporting_paragraphs)
             axis = NarrativeAxisRecord(
                 execution_run_id=run.execution_run_id,
                 project_id=run.project_id,
@@ -171,8 +168,6 @@ class Hefesto:
             )
             if result.value.duration_minutes != run.request.brief.duration_minutes:
                 raise ValueError("Editorial Project changed the requested duration")
-            for subject in result.value.source_supported_subjects:
-                self._validate_paragraphs(run, subject.supporting_paragraphs)
             project = EditorialProjectRecord(
                 execution_run_id=run.execution_run_id,
                 project_id=run.project_id,
@@ -218,33 +213,16 @@ class Hefesto:
                     task_type="paragraph_batch",
                     prompt=paragraph_batch_prompt(run.request.brief, batch.paragraphs),
                     schema=ParagraphBatchProposal,
-                    max_output_tokens=12_288,
+                    max_output_tokens=32_768,
                     thinking_tokens=1_000,
                 )
-                expected = list(range(1, len(batch.paragraphs) + 1))
-                actual = [item.paragraph_number for item in result.value.notes]
-                if actual != expected or len(actual) != len(set(actual)):
+                if len(result.value.notes) != len(batch.paragraphs):
                     raise ValueError("batch must return exactly one ordered note per paragraph")
-                for proposal in result.value.notes:
-                    paragraph = batch.paragraphs[proposal.paragraph_number - 1]
-                    sentence_by_ordinal = {item.ordinal: item for item in paragraph.sentences}
-                    observations: list[ParagraphObservation] = []
-                    for observation in proposal.observations:
-                        ordinals = observation.evidence_sentence_ordinals
-                        if len(ordinals) != len(set(ordinals)) or any(
-                            item not in sentence_by_ordinal for item in ordinals
-                        ):
-                            raise ValueError(
-                                "paragraph observation contains invalid sentence coordinates"
-                            )
-                        observations.append(
-                            ParagraphObservation(
-                                **observation.model_dump(),
-                                evidence_sentence_ids=[
-                                    sentence_by_ordinal[item].sentence_id for item in ordinals
-                                ],
-                            )
-                        )
+                for paragraph, proposal in zip(batch.paragraphs, result.value.notes, strict=True):
+                    observations = [
+                        ParagraphObservation(**observation.model_dump())
+                        for observation in proposal.observations
+                    ]
                     note = ParagraphNote(
                         paragraph_id=paragraph.paragraph_id,
                         observations=observations,
@@ -270,22 +248,32 @@ class Hefesto:
         max_output_tokens: int,
         thinking_tokens: int,
     ) -> ModelResult[OutputT]:
-        try:
-            result = await self._gateway.generate(
-                task_type=task_type,
-                prompt=prompt,
-                schema=schema,
-                system_instruction=SYSTEM,
-                max_output_tokens=max_output_tokens,
-                thinking_tokens=thinking_tokens,
+        for attempt in range(2):
+            try:
+                result = await self._gateway.generate(
+                    task_type=task_type,
+                    prompt=prompt,
+                    schema=schema,
+                    system_instruction=SYSTEM,
+                    max_output_tokens=max_output_tokens,
+                    thinking_tokens=thinking_tokens,
+                )
+            except ModelCallError as error:
+                if error.usage is not None:
+                    failed = error.usage.model_copy(
+                        update={"status": "failed", "error_message": str(error)[:2000]}
+                    )
+                    await self._repository.record_usage(
+                        run.execution_run_id, run.project_id, failed
+                    )
+                if attempt == 0:
+                    continue
+                raise
+            await self._repository.record_usage(
+                run.execution_run_id, run.project_id, result.usage
             )
-        except ModelCallError as error:
-            if error.usage is not None:
-                failed = error.usage.model_copy(update={"status": "failed"})
-                await self._repository.record_usage(run.execution_run_id, run.project_id, failed)
-            raise
-        await self._repository.record_usage(run.execution_run_id, run.project_id, result.usage)
-        return result
+            return result
+        raise AssertionError("unreachable")
 
     async def _load_or_create(self, request: PlanningRequest, execution_run_id: UUID | None) -> ProductRun:
         if execution_run_id is not None:
@@ -320,20 +308,6 @@ class Hefesto:
         if run is None:
             raise KeyError(f"unknown execution {execution_run_id}")
         return run
-
-    def _validate_paragraphs(
-        self, run: ProductRun, values: Sequence[ParagraphCoordinate]
-    ) -> None:
-        known = {
-            (item.source_ordinal, item.ordinal)
-            for item in segment_sources(run.request.sources)
-        }
-        supplied = {
-            (item.source_ordinal, item.paragraph_ordinal)
-            for item in values
-        }
-        if not values or len(supplied) != len(values) or not supplied.issubset(known):
-            raise ValueError("editorial output referenced an unknown paragraph")
 
     async def _fail(self, run: ProductRun, error: Exception) -> None:
         failed = run.model_copy(

@@ -18,23 +18,17 @@ SYSTEM = """You are Hefesto, an attentive and disciplined editor. Understand the
 def paragraph_batch_prompt(brief: EditorialBrief, paragraphs: Sequence[Paragraph]) -> str:
     payload = [
         {
-            "paragraph_number": number,
-            "source_ordinal": item.source_ordinal,
-            "paragraph_ordinal": item.ordinal,
-            "sentences": [
-                {"ordinal": sentence.ordinal, "text": sentence.text}
-                for sentence in item.sentences
-            ],
+            "text": item.text,
         }
-        for number, item in enumerate(paragraphs, start=1)
+        for item in paragraphs
     ]
     return f"""
-Read every paragraph exactly once and return exactly one structured note for each paragraph_number, in input order.
+Read every paragraph exactly once and return exactly one structured note for each input paragraph, in the same order.
 
 For each paragraph, return every substantively distinct observation needed to
 understand what it adds in light of the brief. Give each observation whatever
-free-form tags help describe its meaning and the sentence ordinals that support
-it. Explain the paragraph's possible relevance to the brief. Be concise, but do
+free-form tags help describe its meaning. Explain the paragraph's possible
+relevance to the brief. Be concise, but do
 not collapse distinct observations into one. Do not force scientific, causal,
 methodological, or any other fixed taxonomy. Do not omit a paragraph because it
 seems peripheral. Low relevance is information, not permission to discard it.
@@ -68,7 +62,7 @@ def understanding_prompt(brief: EditorialBrief, notes: Sequence[ParagraphNote]) 
     return f"""
 Create the single editorial understanding for this corpus. Synthesize rather than concatenate. Decide what matters for the user's intention, audience, product, and requested duration while preserving meaningful tensions, nuances, limits, and unexpected but useful material.
 
-Use only source/paragraph coordinates supplied below. The understanding should be compact enough to drive the Narrative Axis and Editorial Project without reproducing all paragraph notes.
+The understanding should be compact enough to drive the Narrative Axis and Editorial Project without reproducing all paragraph notes. Do not emit database identifiers or source coordinates.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}

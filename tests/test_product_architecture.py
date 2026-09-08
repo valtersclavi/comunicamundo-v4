@@ -49,7 +49,8 @@ def test_paragraph_is_comprehension_unit_and_sentence_is_evidence_address() -> N
     ]
     prompt = paragraph_batch_prompt(request().brief, paragraphs)
     assert all(item.paragraph_id not in prompt for item in paragraphs)
-    assert '"paragraph_number": 1' in prompt
+    assert "paragraph_number" not in prompt
+    assert "sentence_id" not in prompt
 
 
 @pytest.mark.asyncio
@@ -110,7 +111,7 @@ async def test_batch_size_changes_calls_not_semantic_cardinality() -> None:
 async def test_resume_does_not_reread_completed_paragraphs() -> None:
     source = request()
     repository = MemoryRepository()
-    gateway = FakeGateway(fail_understanding_once=True)
+    gateway = FakeGateway(fail_understanding_times=2)
     hefesto = Hefesto(repository, gateway, batch_target_tokens=100_000)
     with pytest.raises(Exception, match="synthetic synthesis failure"):
         await hefesto.digest(source)

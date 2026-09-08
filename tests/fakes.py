@@ -53,9 +53,9 @@ class MemoryRepository:
 
 
 class FakeGateway:
-    def __init__(self, *, fail_understanding_once: bool = False) -> None:
+    def __init__(self, *, fail_understanding_times: int = 0) -> None:
         self.calls: list[dict[str, object]] = []
-        self.fail_understanding_once = fail_understanding_once
+        self.understanding_failures_remaining = fail_understanding_times
 
     async def generate(
         self,
@@ -74,33 +74,30 @@ class FakeGateway:
             rated_cost_usd="0.000015800", status="succeeded",
         )
         if task_type == "paragraph_batch":
-            numbers = [int(item) for item in re.findall(r'"paragraph_number":\s*(\d+)', prompt)]
+            paragraphs = json.loads(prompt.split("PARAGRAPHS:\n", 1)[1])
             value = ParagraphBatchProposal.model_validate(
                 {
                     "notes": [
                         {
-                            "paragraph_number": item,
                             "observations": [
                                 {
-                                    "observation": f"Meaning of paragraph {item}",
+                                    "observation": f"Meaning of paragraph {number}",
                                     "tags": ["free-tag-not-in-an-ontology"],
-                                    "evidence_sentence_ordinals": [1],
                                 },
                                 {
-                                    "observation": f"A distinct nuance from paragraph {item}",
+                                    "observation": f"A distinct nuance from paragraph {number}",
                                     "tags": ["second-observation"],
-                                    "evidence_sentence_ordinals": [1],
                                 },
                             ],
                             "brief_relevance": "Potentially relevant without erasing the source.",
                         }
-                        for item in numbers
+                        for number, _ in enumerate(paragraphs, start=1)
                     ]
                 }
             )
         elif task_type == "editorial_understanding":
-            if self.fail_understanding_once:
-                self.fail_understanding_once = False
+            if self.understanding_failures_remaining:
+                self.understanding_failures_remaining -= 1
                 raise ModelCallError("synthetic synthesis failure")
             value = EditorialUnderstandingProposal(
                 synthesis="Integrated reading guided by the brief and requested duration.",
@@ -108,16 +105,11 @@ class FakeGateway:
                 relations_and_tensions=["A meaningful tension"],
                 nuances_and_limits=["A limit"],
                 editorial_possibilities=["A viable editorial direction"],
-                supporting_paragraphs=[
-                    {"source_ordinal": 1, "paragraph_ordinal": 1},
-                    {"source_ordinal": 1, "paragraph_ordinal": 2},
-                ],
             )
         elif task_type == "narrative_axis":
             value = NarrativeAxisProposal(
                 statement="A concise intellectual direction for the piece.",
                 rationale="It selects what matters for the brief.",
-                supporting_paragraphs=[{"source_ordinal": 1, "paragraph_ordinal": 1}],
             )
         elif task_type == "editorial_project":
             duration = int(re.search(r'"duration_minutes":\s*(\d+)', prompt).group(1))
@@ -132,9 +124,6 @@ class FakeGateway:
                             "editorial_role": "Develop the Axis",
                             "depth": "Enough depth for the requested duration",
                             "allocated_minutes": duration,
-                            "supporting_paragraphs": [
-                                {"source_ordinal": 1, "paragraph_ordinal": 1}
-                            ],
                         }
                     ],
                     "model_knowledge_suggestions": ["Optional model suggestion"],
