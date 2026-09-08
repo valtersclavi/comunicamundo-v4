@@ -3,9 +3,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  issue_comment:
+    types: [created]
 permissions:
   contents: read
   id-token: write
+  issues: write
 concurrency:
   group: comunicamundo-v4-main
   cancel-in-progress: false
@@ -21,6 +24,11 @@ env:
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
 jobs:
   test-build-deploy:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.number == 119 &&
+       github.event.comment.user.login == 'valtersclavi' &&
+       github.event.comment.body == '/deploy-hefesto')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -100,3 +108,20 @@ jobs:
           gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=check-postgres --wait
       - name: No-model startup smoke
         run: gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --wait
+      - name: Publish deployment receipt
+        if: always() && github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/deploy-receipt.md <<EOF
+          ## Deploy Hefesto V4 — ${JOB_STATUS}
+
+          - Commit: \`${GITHUB_SHA}\`
+          - Job: \`${JOB_NAME}\`
+          - API: \`${API_NAME}\`
+          - Image: \`${PINNED_IMAGE:-not-built}\`
+          - Actions run: \`${GITHUB_RUN_ID}\`
+          EOF
+          gh issue comment 119 --repo "${GITHUB_REPOSITORY}" --body-file /tmp/deploy-receipt.md
