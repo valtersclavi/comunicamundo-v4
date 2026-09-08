@@ -15,6 +15,7 @@ env:
   BUCKET: comunicamundo-v4-hefesto-30524898837
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
   CANONICAL_IMAGE: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:de1192b34cc5fc3f21a07106d36ba3e0651b585229d8cbe10efeee149e00e3e9
   TEST_A_REQUEST: gs://comunicamundo-v4-hefesto-30524898837/hefesto-product/projects/998c20a2-8c64-44ea-977e-d2ea6aa5e246/request.json
   B_SOURCE_COMMIT: 49d397b9d48444983183986b03f5416bec8ecf42
@@ -60,12 +61,23 @@ jobs:
           from urllib.parse import urlparse
           from uuid import uuid4
 
+          import google.auth
+          from google.auth import impersonated_credentials
           from google.cloud import storage
           from comunicamundo_v4.hefesto.contracts import PlanningRequest
           from comunicamundo_v4.hefesto.proof_requests import _extract
 
           bucket_name = os.environ["BUCKET"]
-          client = storage.Client(project=os.environ["PROJECT_ID"])
+          source_credentials, _ = google.auth.default()
+          runtime_credentials = impersonated_credentials.Credentials(
+              source_credentials=source_credentials,
+              target_principal=os.environ["RUNTIME_SA"],
+              target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
+              lifetime=3600,
+          )
+          client = storage.Client(
+              project=os.environ["PROJECT_ID"], credentials=runtime_credentials
+          )
           bucket = client.bucket(bucket_name)
 
           def split_gs(uri: str) -> tuple[str, str]:
