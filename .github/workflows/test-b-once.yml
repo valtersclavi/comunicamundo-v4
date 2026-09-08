@@ -1,0 +1,242 @@
+name: hefesto-test-b-once
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: comunicamundo-v4
+  REGION: us-central1
+  JOB_NAME: hefesto-v4-rebuild
+  BUCKET: comunicamundo-v4-hefesto-30524898837
+  WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+  DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+  CANONICAL_IMAGE: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:de1192b34cc5fc3f21a07106d36ba3e0651b585229d8cbe10efeee149e00e3e9
+  TEST_A_REQUEST: gs://comunicamundo-v4-hefesto-30524898837/hefesto-product/projects/998c20a2-8c64-44ea-977e-d2ea6aa5e246/request.json
+  B_SOURCE_COMMIT: 49d397b9d48444983183986b03f5416bec8ecf42
+
+jobs:
+  run-test-b:
+    if: contains(github.event.head_commit.message, '[test-b]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12.14"
+      - name: Install the frozen client contracts
+        run: python -m pip install -e .
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Verify the frozen runtime
+        run: |
+          set -euo pipefail
+          deployed_image="$(gcloud run jobs describe "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test "${deployed_image}" = "${CANONICAL_IMAGE}"
+          echo "Frozen image verified: ${deployed_image}"
+      - name: Stage independent Test B request
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from copy import deepcopy
+          from hashlib import sha256
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          from urllib.parse import urlparse
+          from uuid import uuid4
+
+          from google.cloud import storage
+          from comunicamundo_v4.hefesto.contracts import PlanningRequest
+          from comunicamundo_v4.hefesto.proof_requests import _extract
+
+          bucket_name = os.environ["BUCKET"]
+          client = storage.Client(project=os.environ["PROJECT_ID"])
+          bucket = client.bucket(bucket_name)
+
+          def split_gs(uri: str) -> tuple[str, str]:
+              parsed = urlparse(uri)
+              if parsed.scheme != "gs" or not parsed.netloc or not parsed.path:
+                  raise ValueError(f"invalid GCS URI: {uri}")
+              return parsed.netloc, parsed.path.lstrip("/")
+
+          a_bucket, a_name = split_gs(os.environ["TEST_A_REQUEST"])
+          a_request = json.loads(client.bucket(a_bucket).blob(a_name).download_as_bytes())
+          project_id = uuid4()
+          sources = []
+
+          for ordinal, source in enumerate(a_request["sources"][:3], start=1):
+              copied = deepcopy(source)
+              copied["source_id"] = str(uuid4())
+              original_bucket, original_name = split_gs(source["metadata"]["original_gcs_uri"])
+              original = client.bucket(original_bucket).blob(original_name).download_as_bytes()
+              target = f"hefesto-product/projects/{project_id}/sources/{copied['source_id']}/original.pdf"
+              bucket.blob(target).upload_from_string(
+                  original, content_type="application/pdf", if_generation_match=0
+              )
+              copied["metadata"] = {
+                  **copied["metadata"],
+                  "original_gcs_uri": f"gs://{bucket_name}/{target}",
+                  "test_variant": "B",
+                  "source_ordinal": ordinal,
+              }
+              sources.append(copied)
+
+          report_path = "calibracao/multifonte-social-media/B04_National_Academies_Full_Report.pdf"
+          report = subprocess.check_output(
+              ["git", "show", f"{os.environ['B_SOURCE_COMMIT']}:{report_path}"]
+          )
+          if not report.startswith(b"%PDF"):
+              raise ValueError("archived Test B source is not a PDF")
+          report_text = _extract(report, "pdf")
+          report_source_id = uuid4()
+          report_target = f"hefesto-product/projects/{project_id}/sources/{report_source_id}/original.pdf"
+          bucket.blob(report_target).upload_from_string(
+              report, content_type="application/pdf", if_generation_match=0
+          )
+          sources.append({
+              "source_id": str(report_source_id),
+              "title": "Social Media and Adolescent Health — Full Report",
+              "language": "en",
+              "text": report_text,
+              "metadata": {
+                  "source_url": "https://www.ncbi.nlm.nih.gov/books/n/nap27396/pdf/",
+                  "original_gcs_uri": f"gs://{bucket_name}/{report_target}",
+                  "binary_sha256": sha256(report).hexdigest(),
+                  "test_variant": "B",
+                  "source_ordinal": 4,
+                  "controlled_difference": "Full Report replaces Highlights",
+              },
+          })
+
+          request = PlanningRequest.model_validate({
+              "project_id": str(project_id),
+              "brief": a_request["brief"],
+              "sources": sources,
+          })
+          request_name = f"hefesto-product/projects/{project_id}/request.json"
+          bucket.blob(request_name).upload_from_string(
+              request.model_dump_json().encode(),
+              content_type="application/json",
+              if_generation_match=0,
+          )
+          control = {
+              "project_id": str(project_id),
+              "request_uri": f"gs://{bucket_name}/{request_name}",
+              "source_count": len(sources),
+              "brief": request.brief.model_dump(mode="json"),
+          }
+          Path("/tmp/hefesto-test-b-control.json").write_text(
+              json.dumps(control, ensure_ascii=False), encoding="utf-8"
+          )
+          print(json.dumps(control, ensure_ascii=False))
+          PY
+      - name: Digest Test B on the frozen image
+        id: digest
+        run: |
+          set -euo pipefail
+          request_uri="$(jq -r '.request_uri' /tmp/hefesto-test-b-control.json)"
+          set +e
+          gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --args="digest,--request=${request_uri}" --wait \
+            --format='value(metadata.name)' \
+            >/tmp/test-b-digest.out 2>/tmp/test-b-digest.err
+          digest_status=$?
+          set -e
+          cat /tmp/test-b-digest.out /tmp/test-b-digest.err
+          echo "digest_status=${digest_status}" >> "${GITHUB_OUTPUT}"
+      - name: Resolve the product execution
+        run: |
+          set -euo pipefail
+          project_id="$(jq -r '.project_id' /tmp/hefesto-test-b-control.json)"
+          database_url="$(gcloud secrets versions access latest \
+            --project="${PROJECT_ID}" --secret=hefesto-postgres-direct-url)"
+          echo "::add-mask::${database_url}"
+          HEFESTO_QUERY_URL="${database_url}" HEFESTO_TEST_B_PROJECT_ID="${project_id}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import psycopg
+
+          with psycopg.connect(os.environ["HEFESTO_QUERY_URL"]) as connection:
+              row = connection.execute(
+                  """SELECT execution_run_id::text, state, payload->>'error_class', payload->>'error_message'
+                     FROM hefesto_product.runs WHERE project_id=%s
+                     ORDER BY updated_at DESC LIMIT 1""",
+                  (os.environ["HEFESTO_TEST_B_PROJECT_ID"],),
+              ).fetchone()
+          if row is None:
+              raise SystemExit("Test B created no product execution")
+          result = {
+              "execution_run_id": row[0], "state_after_digest": row[1],
+              "error_class": row[2], "error_message": row[3],
+          }
+          Path("/tmp/hefesto-test-b-execution.json").write_text(
+              json.dumps(result, ensure_ascii=False), encoding="utf-8"
+          )
+          print(json.dumps(result, ensure_ascii=False))
+          PY
+      - name: Resume through the proposed Editorial Project
+        id: proof
+        run: |
+          set -euo pipefail
+          execution_run_id="$(jq -r '.execution_run_id' /tmp/hefesto-test-b-execution.json)"
+          set +e
+          gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --args="resume-proof,--execution-run-id=${execution_run_id}" --wait \
+            --format='value(metadata.name)' \
+            >/tmp/test-b-proof.out 2>/tmp/test-b-proof.err
+          proof_status=$?
+          set -e
+          cat /tmp/test-b-proof.out /tmp/test-b-proof.err
+          proof_execution="$(tail -1 /tmp/test-b-proof.out)"
+          if [[ -z "${proof_execution}" ]]; then
+            proof_execution="$(sed -n 's/.*executions describe \([^ ]*\).*/\1/p' /tmp/test-b-proof.err | tail -1)"
+          fi
+          test -n "${proof_execution}"
+          echo "proof_status=${proof_status}" >> "${GITHUB_OUTPUT}"
+          echo "proof_execution=${proof_execution}" >> "${GITHUB_OUTPUT}"
+      - name: Collect the Test B receipt
+        if: always() && steps.proof.outputs.proof_execution != ''
+        run: |
+          set -euo pipefail
+          execution="${{ steps.proof.outputs.proof_execution }}"
+          filter="resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"${execution}\""
+          gcloud logging read "${filter}" --project="${PROJECT_ID}" \
+            --freshness=4h --order=asc --limit=2000 --format=json >/tmp/test-b-logs.json
+          jq -c '[.[] | select(.jsonPayload.execution_run_id? != null) | .jsonPayload] | last' \
+            /tmp/test-b-logs.json >/tmp/hefesto-test-b-receipt.json
+          jq . /tmp/hefesto-test-b-receipt.json
+          status="$(jq -r '.status' /tmp/hefesto-test-b-receipt.json)"
+          receipt_uri="$(jq -r '.receipt_uri // empty' /tmp/hefesto-test-b-receipt.json)"
+          test -n "${receipt_uri}"
+          {
+            echo "# Hefesto V4 — Test B"
+            echo "- Frozen image: \`${CANONICAL_IMAGE}\`"
+            echo "- Cloud Run execution: \`${execution}\`"
+            echo "- Product execution: \`$(jq -r '.execution_run_id' /tmp/hefesto-test-b-receipt.json)\`"
+            echo "- Project: \`$(jq -r '.project_id' /tmp/hefesto-test-b-receipt.json)\`"
+            echo "- Status: \`${status}\`"
+            echo "- Receipt: \`${receipt_uri}\`"
+            echo '```json'
+            jq -c '{status,project_id,execution_run_id,error_class,error_message,usage,stages,narrative_axis,editorial_project,receipt_uri}' /tmp/hefesto-test-b-receipt.json
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          test "${status}" = "project_proposed"
+          test "${{ steps.proof.outputs.proof_status }}" = "0"
