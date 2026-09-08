@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Sequence
 from uuid import UUID
@@ -13,8 +12,8 @@ from comunicamundo_v4.hefesto.contracts import (
     EditorialUnderstandingProposal,
     NarrativeAxisProposal,
     Paragraph,
-    ParagraphBatchProposal,
     ParagraphNote,
+    ParagraphNoteProposal,
     ProductRun,
 )
 from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
@@ -73,26 +72,20 @@ class FakeGateway:
             reasoning_tokens=1, total_tokens=16, latency_ms=2,
             rated_cost_usd="0.000015800", status="succeeded",
         )
-        if task_type == "paragraph_batch":
-            paragraphs = json.loads(prompt.split("PARAGRAPHS:\n", 1)[1])
-            value = ParagraphBatchProposal.model_validate(
+        if task_type == "paragraph_digest":
+            value = ParagraphNoteProposal.model_validate(
                 {
-                    "notes": [
+                    "observations": [
                         {
-                            "observations": [
-                                {
-                                    "observation": f"Meaning of paragraph {number}",
-                                    "tags": ["free-tag-not-in-an-ontology"],
-                                },
-                                {
-                                    "observation": f"A distinct nuance from paragraph {number}",
-                                    "tags": ["second-observation"],
-                                },
-                            ],
-                            "brief_relevance": "Potentially relevant without erasing the source.",
-                        }
-                        for number, _ in enumerate(paragraphs, start=1)
-                    ]
+                            "observation": "Meaning of the paragraph",
+                            "tags": ["free-tag-not-in-an-ontology"],
+                        },
+                        {
+                            "observation": "A distinct nuance from the paragraph",
+                            "tags": ["second-observation"],
+                        },
+                    ],
+                    "brief_relevance": "Potentially relevant without erasing the source.",
                 }
             )
         elif task_type == "editorial_understanding":

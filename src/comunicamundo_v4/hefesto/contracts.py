@@ -56,17 +56,13 @@ class Paragraph(StrictModel):
 
 
 class ParagraphObservationProposal(StrictModel):
-    observation: str = Field(min_length=1, max_length=900)
-    tags: list[str] = Field(default_factory=list, max_length=12)
+    observation: str = Field(min_length=1)
+    tags: list[str] = Field(default_factory=list)
 
 
 class ParagraphNoteProposal(StrictModel):
     observations: list[ParagraphObservationProposal] = Field(min_length=1)
-    brief_relevance: str = Field(min_length=1, max_length=600)
-
-
-class ParagraphBatchProposal(StrictModel):
-    notes: list[ParagraphNoteProposal] = Field(min_length=1)
+    brief_relevance: str = Field(min_length=1)
 
 
 class ParagraphObservation(ParagraphObservationProposal):
@@ -76,7 +72,7 @@ class ParagraphObservation(ParagraphObservationProposal):
 class ParagraphNote(StrictModel):
     paragraph_id: Sha256
     observations: list[ParagraphObservation] = Field(min_length=1)
-    brief_relevance: str = Field(min_length=1, max_length=600)
+    brief_relevance: str = Field(min_length=1)
     source_id: UUID
     source_ordinal: int = Field(ge=1)
     paragraph_ordinal: int = Field(ge=1)

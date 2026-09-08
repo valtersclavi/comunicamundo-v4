@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
 from typing import Sequence
 
@@ -50,51 +49,3 @@ def _sentences(paragraph_id: str, text: str) -> list[Sentence]:
         )
         for ordinal, value in enumerate(parts, start=1)
     ]
-
-
-@dataclass(frozen=True, slots=True)
-class ParagraphBatch:
-    batch_id: str
-    paragraphs: tuple[Paragraph, ...]
-    estimated_tokens: int
-
-
-def make_batches(paragraphs: Sequence[Paragraph], *, target_tokens: int = 12_000) -> list[ParagraphBatch]:
-    """Pack adjacent whole paragraphs. Batch boundaries never change semantic cardinality."""
-    if target_tokens <= 0:
-        raise ValueError("target_tokens must be positive")
-    batches: list[ParagraphBatch] = []
-    current: list[Paragraph] = []
-    current_tokens = 0
-
-    def flush() -> None:
-        nonlocal current, current_tokens
-        if not current:
-            return
-        identity = "|".join(item.paragraph_id for item in current)
-        batches.append(
-            ParagraphBatch(
-                batch_id=content_hash(identity),
-                paragraphs=tuple(current),
-                estimated_tokens=current_tokens,
-            )
-        )
-        current = []
-        current_tokens = 0
-
-    for paragraph in paragraphs:
-        estimate = max(1, (len(paragraph.text) + 2) // 3)
-        if current and (
-            paragraph.source_id != current[-1].source_id
-            or current_tokens + estimate > target_tokens
-        ):
-            flush()
-        current.append(paragraph)
-        current_tokens += estimate
-    flush()
-    flattened = [item.paragraph_id for batch in batches for item in batch.paragraphs]
-    expected = [item.paragraph_id for item in paragraphs]
-    if flattened != expected or len(flattened) != len(set(flattened)):
-        raise AssertionError("each paragraph must belong to exactly one ordered batch")
-    return batches
-

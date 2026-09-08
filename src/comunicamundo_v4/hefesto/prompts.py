@@ -15,31 +15,25 @@ from .contracts import (
 SYSTEM = """You are Hefesto, an attentive and disciplined editor. Understand the supplied material faithfully. The brief guides editorial attention but never changes what a source says. Return only the requested JSON object."""
 
 
-def paragraph_batch_prompt(brief: EditorialBrief, paragraphs: Sequence[Paragraph]) -> str:
-    payload = [
-        {
-            "text": item.text,
-        }
-        for item in paragraphs
-    ]
+def paragraph_prompt(brief: EditorialBrief, paragraph: Paragraph) -> str:
     return f"""
-Read every paragraph exactly once and return exactly one structured note for each input paragraph, in the same order.
+Read this paragraph once and return one structured note.
 
-For each paragraph, return every substantively distinct observation needed to
-understand what it adds in light of the brief. Give each observation whatever
+Return every substantively distinct observation needed to understand what the
+paragraph adds in light of the brief. Give each observation whatever
 free-form tags help describe its meaning. Explain the paragraph's possible
 relevance to the brief. Be concise, but do
 not collapse distinct observations into one. Do not force scientific, causal,
-methodological, or any other fixed taxonomy. Do not omit a paragraph because it
-seems peripheral. Low relevance is information, not permission to discard it.
+methodological, or any other fixed taxonomy. Low relevance is information, not
+permission to discard it.
 
 The requested duration ({brief.duration_minutes} minutes) guides eventual editorial selection and depth. It does not truncate reading.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
 
-PARAGRAPHS:
-{json.dumps(payload, ensure_ascii=False)}
+PARAGRAPH:
+{paragraph.text}
 """.strip()
 
 

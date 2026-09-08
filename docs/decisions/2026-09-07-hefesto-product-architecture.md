@@ -17,18 +17,18 @@ Requested duration is editorial capacity. It governs selection and depth in the 
 - Source: immutable normalized input.
 - Paragraph: the unit of LLM comprehension.
 - Sentence: a relationally stored source address inside a paragraph; it is code-owned and is not generated or selected by the LLM during digestion.
-- Batch: an operational envelope containing adjacent complete paragraphs. It exists only for concurrency and provider efficiency; it is not an editorial layer.
+- Parallelism: independent paragraph calls may run concurrently. It changes elapsed time only; there is no multi-paragraph model contract or editorial layer.
 - Paragraph note: the sole interpretation produced for a paragraph. It contains one or more distinct observations, free-form tags chosen by the model for each observation, paragraph-level relevance to the brief, and references to source sentences.
 - Editorial understanding: one corpus-level synthesis built from paragraph notes. It selects and relates what matters for this specific brief and duration.
 
 ## Non-negotiable invariants
 
 1. Every paragraph is interpreted exactly once per digestion run.
-2. A paragraph belongs to exactly one batch.
-3. Batches may run concurrently, but concurrency cannot create extra interpretations, analyst personas, voting, reducers, or editorial layers.
+2. One successful model call produces the sole note for one paragraph.
+3. Paragraph calls may run concurrently, but concurrency cannot create extra interpretations, analyst personas, voting, reducers, or editorial layers.
 4. No paragraph is split. Sentence records and all source relations are deterministic and code-owned.
 5. The model chooses free-form observations and tags. Code validates identity, order, cardinality, evidence coordinates, persistence, and state; it does not impose a domain ontology.
-6. Batch results are assembled deterministically and persisted. They are never sent to a reducer.
+6. Paragraph results are associated by the code with the paragraph that originated each call, assembled deterministically, and persisted. They are never sent to a reducer.
 7. There is exactly one corpus synthesis before the Narrative Axis.
 8. There are no Source Dossiers, Reduced Dossiers, Property Graph, Evidence Matrix, dominance analysis, or duplicated Understanding/Matrix payloads in the product path.
 9. The Narrative Axis consumes only the brief and the editorial understanding. It is proposed once and then stops for human approval.
@@ -39,18 +39,18 @@ Requested duration is editorial capacity. It governs selection and depth in the 
 
 ## Model contracts
 
-### Paragraph batch
+### Paragraph digestion
 
-Input: complete adjacent paragraphs with paragraph and sentence ordinals, plus the full brief.
+Input: one complete paragraph plus the full brief.
 
-Output: exactly one structured note for every input paragraph:
+Output: exactly one structured note:
 
 - `observations` (one or more); each contains:
   - `observation`
   - `tags` (free-form strings)
 - `brief_relevance`
 
-One reading may yield several observations; this does not create several analysts or readings. The output has no fixed scientific taxonomy. Empty or content-free paragraphs are handled deterministically before batching and are not sent to the model.
+One reading may yield several observations; this does not create several analysts or readings. The output has no fixed scientific taxonomy. Empty or content-free paragraphs are handled deterministically and are not sent to the model.
 
 ### Editorial understanding
 
@@ -80,7 +80,7 @@ Output: working title, editorial promise, source-supported core subjects sized t
 
 ## Cost and complexity law
 
-Source text is read by the model once. Downstream stages receive compact paragraph notes or the single understanding, never the complete source plus successive verbose rewrites. Adding parallel workers may reduce elapsed time; it must not increase the number of semantic layers.
+Each paragraph is read successfully by the model once. A malformed or interrupted provider attempt may be repeated once, and every attempt is charged to the receipt. Downstream stages receive compact paragraph notes or the single understanding, never the complete source plus successive verbose rewrites. Increasing concurrency may reduce elapsed time; it cannot change call cardinality or add semantic layers.
 
 ## Acceptance proof
 
@@ -89,7 +89,7 @@ Before a paid multifonte run:
 - unit tests prove paragraph partition completeness and uniqueness;
 - tests prove the brief and duration reach paragraph digestion, understanding, Axis, and Project;
 - tests prove free-form tags survive without ontology coercion;
-- tests prove batch count changes concurrency only, not semantic output cardinality;
+- tests prove concurrency changes neither call count nor semantic output cardinality;
 - tests prove exactly one synthesis call and one Axis call occur;
 - tests prove the pipeline stops at proposed Axis and proposed Project gates;
 - tests prove failure resumes completed paragraph batches without rereading them;

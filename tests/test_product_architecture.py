@@ -5,8 +5,8 @@ from uuid import uuid4
 import pytest
 
 from comunicamundo_v4.hefesto.contracts import EditorialBrief, NormalizedSource, PlanningRequest, RunState
-from comunicamundo_v4.hefesto.segmentation import make_batches, segment_sources
-from comunicamundo_v4.hefesto.prompts import paragraph_batch_prompt
+from comunicamundo_v4.hefesto.segmentation import segment_sources
+from comunicamundo_v4.hefesto.prompts import paragraph_prompt
 from comunicamundo_v4.hefesto.service import Hefesto
 from fakes import FakeGateway, MemoryRepository
 
@@ -43,12 +43,9 @@ def test_paragraph_is_comprehension_unit_and_sentence_is_evidence_address() -> N
     assert [item.ordinal for item in paragraphs[:3]] == [1, 2, 3]
     assert len(paragraphs[0].sentences) == 2
     assert paragraphs[0].sentences[0].text == "First claim."
-    batches = make_batches(paragraphs, target_tokens=1)
-    assert [item.paragraph_id for batch in batches for item in batch.paragraphs] == [
-        item.paragraph_id for item in paragraphs
-    ]
-    prompt = paragraph_batch_prompt(request().brief, paragraphs)
-    assert all(item.paragraph_id not in prompt for item in paragraphs)
+    assert len({item.paragraph_id for item in paragraphs}) == len(paragraphs)
+    prompt = paragraph_prompt(request().brief, paragraphs[0])
+    assert paragraphs[0].paragraph_id not in prompt
     assert "paragraph_number" not in prompt
     assert "sentence_id" not in prompt
 
@@ -57,7 +54,7 @@ def test_paragraph_is_comprehension_unit_and_sentence_is_evidence_address() -> N
 async def test_brief_and_duration_guide_every_editorial_stage() -> None:
     repository = MemoryRepository()
     gateway = FakeGateway()
-    hefesto = Hefesto(repository, gateway, batch_target_tokens=12)
+    hefesto = Hefesto(repository, gateway)
     run = await hefesto.digest(request())
     run = await hefesto.propose_axis(run.execution_run_id)
     run = await hefesto.approve_axis_and_propose_project(run.execution_run_id)
@@ -79,11 +76,11 @@ async def test_brief_and_duration_guide_every_editorial_stage() -> None:
 
 
 @pytest.mark.asyncio
-async def test_parallel_batches_create_one_note_per_paragraph_without_ontology_coercion() -> None:
+async def test_parallel_calls_create_one_note_per_paragraph_without_ontology_coercion() -> None:
     source = request()
     repository = MemoryRepository()
     gateway = FakeGateway()
-    run = await Hefesto(repository, gateway, batch_target_tokens=10, concurrency=4).digest(source)
+    run = await Hefesto(repository, gateway, concurrency=4).digest(source)
     notes = await repository.notes(run.execution_run_id)
     assert len(notes) == len(segment_sources(source.sources))
     assert len({item.paragraph_id for item in notes}) == len(notes)
@@ -91,19 +88,19 @@ async def test_parallel_batches_create_one_note_per_paragraph_without_ontology_c
         item.observations[0].tags == ["free-tag-not-in-an-ontology"] for item in notes
     )
     assert all(len(item.observations) == 2 for item in notes)
-    assert len([item for item in gateway.calls if item["task_type"] == "paragraph_batch"]) > 1
+    assert len([item for item in gateway.calls if item["task_type"] == "paragraph_digest"]) == len(notes)
 
 
 @pytest.mark.asyncio
-async def test_batch_size_changes_calls_not_semantic_cardinality() -> None:
+async def test_concurrency_changes_no_semantic_cardinality() -> None:
     source = request()
     small_repo, large_repo = MemoryRepository(), MemoryRepository()
     small_gateway, large_gateway = FakeGateway(), FakeGateway()
-    small = await Hefesto(small_repo, small_gateway, batch_target_tokens=10).digest(source)
-    large = await Hefesto(large_repo, large_gateway, batch_target_tokens=100_000).digest(source)
+    small = await Hefesto(small_repo, small_gateway, concurrency=1).digest(source)
+    large = await Hefesto(large_repo, large_gateway, concurrency=4).digest(source)
     assert len(await small_repo.notes(small.execution_run_id)) == len(await large_repo.notes(large.execution_run_id))
-    assert len([c for c in small_gateway.calls if c["task_type"] == "paragraph_batch"]) > len(
-        [c for c in large_gateway.calls if c["task_type"] == "paragraph_batch"]
+    assert len([c for c in small_gateway.calls if c["task_type"] == "paragraph_digest"]) == len(
+        [c for c in large_gateway.calls if c["task_type"] == "paragraph_digest"]
     )
 
 
@@ -112,13 +109,13 @@ async def test_resume_does_not_reread_completed_paragraphs() -> None:
     source = request()
     repository = MemoryRepository()
     gateway = FakeGateway(fail_understanding_times=2)
-    hefesto = Hefesto(repository, gateway, batch_target_tokens=100_000)
+    hefesto = Hefesto(repository, gateway)
     with pytest.raises(Exception, match="synthetic synthesis failure"):
         await hefesto.digest(source)
     execution_id = next(iter(repository.runs))
-    paragraph_calls_before = len([item for item in gateway.calls if item["task_type"] == "paragraph_batch"])
+    paragraph_calls_before = len([item for item in gateway.calls if item["task_type"] == "paragraph_digest"])
     resumed = await hefesto.resume_digest(execution_id)
-    paragraph_calls_after = len([item for item in gateway.calls if item["task_type"] == "paragraph_batch"])
+    paragraph_calls_after = len([item for item in gateway.calls if item["task_type"] == "paragraph_digest"])
     assert resumed.state is RunState.UNDERSTANDING_READY
     assert paragraph_calls_after == paragraph_calls_before
 

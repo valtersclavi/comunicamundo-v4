@@ -16,16 +16,16 @@ from .contracts import (
     NarrativeAxisProposal,
     NarrativeAxisRecord,
     Paragraph,
-    ParagraphBatchProposal,
     ParagraphObservation,
     ParagraphNote,
+    ParagraphNoteProposal,
     PlanningRequest,
     ProductRun,
     RunState,
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
-from .prompts import SYSTEM, axis_prompt, paragraph_batch_prompt, project_prompt, understanding_prompt
-from .segmentation import ParagraphBatch, make_batches, segment_sources
+from .prompts import SYSTEM, axis_prompt, paragraph_prompt, project_prompt, understanding_prompt
+from .segmentation import segment_sources
 
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
@@ -47,14 +47,12 @@ class Hefesto:
         repository: Repository,
         gateway: ModelGateway,
         *,
-        batch_target_tokens: int = 8_000,
-        concurrency: int = 6,
+        concurrency: int = 20,
     ) -> None:
         if concurrency <= 0:
             raise ValueError("concurrency must be positive")
         self._repository = repository
         self._gateway = gateway
-        self._batch_target_tokens = batch_target_tokens
         self._concurrency = concurrency
 
     async def digest(
@@ -72,7 +70,7 @@ class Hefesto:
         missing = [item for item in paragraphs if item.paragraph_id not in existing]
         try:
             if missing:
-                await self._run_batches(run, make_batches(missing, target_tokens=self._batch_target_tokens))
+                await self._run_paragraphs(run, missing)
             notes = await self._repository.notes(run.execution_run_id)
             if [item.paragraph_id for item in notes] != [item.paragraph_id for item in paragraphs]:
                 raise ValueError("digestion did not produce exactly one ordered note per paragraph")
@@ -203,37 +201,38 @@ class Hefesto:
             "usage": await self._repository.usage_report(execution_run_id),
         }
 
-    async def _run_batches(self, run: ProductRun, batches: Sequence[ParagraphBatch]) -> None:
+    async def _run_paragraphs(
+        self, run: ProductRun, paragraphs: Sequence[Paragraph]
+    ) -> None:
         semaphore = asyncio.Semaphore(self._concurrency)
 
-        async def execute(batch: ParagraphBatch) -> None:
+        async def execute(paragraph: Paragraph) -> None:
             async with semaphore:
                 result = await self._call(
                     run,
-                    task_type="paragraph_batch",
-                    prompt=paragraph_batch_prompt(run.request.brief, batch.paragraphs),
-                    schema=ParagraphBatchProposal,
+                    task_type="paragraph_digest",
+                    prompt=paragraph_prompt(run.request.brief, paragraph),
+                    schema=ParagraphNoteProposal,
                     max_output_tokens=32_768,
-                    thinking_tokens=1_000,
+                    thinking_tokens=0,
                 )
-                if len(result.value.notes) != len(batch.paragraphs):
-                    raise ValueError("batch must return exactly one ordered note per paragraph")
-                for paragraph, proposal in zip(batch.paragraphs, result.value.notes, strict=True):
-                    observations = [
+                proposal = result.value
+                note = ParagraphNote(
+                    paragraph_id=paragraph.paragraph_id,
+                    observations=[
                         ParagraphObservation(**observation.model_dump())
                         for observation in proposal.observations
-                    ]
-                    note = ParagraphNote(
-                        paragraph_id=paragraph.paragraph_id,
-                        observations=observations,
-                        brief_relevance=proposal.brief_relevance,
-                        source_id=paragraph.source_id,
-                        source_ordinal=paragraph.source_ordinal,
-                        paragraph_ordinal=paragraph.ordinal,
-                    )
-                    await self._repository.save_note(run.execution_run_id, note)
+                    ],
+                    brief_relevance=proposal.brief_relevance,
+                    source_id=paragraph.source_id,
+                    source_ordinal=paragraph.source_ordinal,
+                    paragraph_ordinal=paragraph.ordinal,
+                )
+                await self._repository.save_note(run.execution_run_id, note)
 
-        results = await asyncio.gather(*(execute(batch) for batch in batches), return_exceptions=True)
+        results = await asyncio.gather(
+            *(execute(paragraph) for paragraph in paragraphs), return_exceptions=True
+        )
         errors = [item for item in results if isinstance(item, BaseException)]
         if errors:
             raise errors[0]
