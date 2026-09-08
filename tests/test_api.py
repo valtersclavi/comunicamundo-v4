@@ -24,6 +24,14 @@ class Blob:
             raise NotFound("missing")
         return self.values[self.name]
 
+    def create_resumable_upload_session(self, **kwargs) -> str:
+        return f"https://storage.example/upload/{self.name}"
+
+    def reload(self) -> None:
+        if self.name not in self.values:
+            raise NotFound("missing")
+        self.size = len(self.values[self.name])
+
 
 class Bucket:
     def __init__(self, values: dict[str, bytes]) -> None:
@@ -48,6 +56,45 @@ class Dispatcher:
     def run(self, args: list[str]) -> str:
         self.calls.append(args)
         return f"operations/{len(self.calls)}"
+
+
+class Access:
+    def __init__(self) -> None:
+        self.submissions: dict[UUID, dict[str, object]] = {}
+        self.uploads: dict[UUID, dict[str, object]] = {}
+
+    async def register_submission(self, execution_id, project_id, owner_id, payload) -> None:
+        existing = self.submissions.get(execution_id)
+        if existing and existing["owner_id"] != owner_id:
+            raise PermissionError("execution belongs to another user")
+        self.submissions[execution_id] = {
+            "execution_run_id": str(execution_id), "project_id": str(project_id),
+            "owner_id": owner_id, "request": payload,
+            "created_at": "2026-09-08T00:00:00Z", "updated_at": "2026-09-08T00:00:00Z",
+        }
+
+    async def assert_owner(self, execution_id, owner_id) -> None:
+        item = self.submissions.get(execution_id)
+        if not item:
+            raise KeyError("unknown execution")
+        if item["owner_id"] != owner_id:
+            raise PermissionError("execution belongs to another user")
+
+    async def list_submissions(self, owner_id):
+        return [{key: value for key, value in item.items() if key != "owner_id"} for item in self.submissions.values() if item["owner_id"] == owner_id]
+
+    async def register_upload(self, **values) -> None:
+        self.uploads[values["upload_id"]] = {**values, "status": "uploading"}
+
+    async def get_upload(self, upload_id, owner_id):
+        item = self.uploads.get(upload_id)
+        return item if item and item["owner_id"] == owner_id else None
+
+    async def complete_upload(self, upload_id, owner_id) -> None:
+        self.uploads[upload_id]["status"] = "stored"
+
+    async def owns_source(self, owner_id, object_uri) -> bool:
+        return any(item["owner_id"] == owner_id and item["status"] == "stored" and item["object_uri"] == object_uri for item in self.uploads.values())
 
 
 class Response:
@@ -79,7 +126,7 @@ def request() -> dict[str, object]:
     }
 
 
-def client(storage: Storage, dispatcher: Dispatcher, receipt=None) -> TestClient:
+def client(storage: Storage, dispatcher: Dispatcher, receipt=None, access=None) -> TestClient:
     async def receipt_reader(execution_id: UUID):
         return receipt
 
@@ -89,6 +136,8 @@ def client(storage: Storage, dispatcher: Dispatcher, receipt=None) -> TestClient
             bucket_name="product",
             dispatcher=dispatcher,
             receipt_reader=receipt_reader,
+            access_store=access or Access(),
+            identity_reader=lambda request: request.headers.get("x-test-user", "editor@example.com"),
         )
     )
 
@@ -184,10 +233,10 @@ def test_api_dispatches_human_gate_as_separate_action() -> None:
 def test_api_rejects_human_gate_before_axis_exists() -> None:
     storage, dispatcher = Storage(), Dispatcher()
     api = client(storage, dispatcher, receipt={"status": "understanding_ready"})
-    execution_id = uuid4()
+    execution_id = api.post("/v1/plans", json=request()).json()["execution_run_id"]
     response = api.post(f"/v1/plans/{execution_id}/approve-axis")
     assert response.status_code == 409
-    assert dispatcher.calls == []
+    assert len(dispatcher.calls) == 1
 
 
 def test_api_rejects_invalid_manifest_before_dispatch() -> None:
@@ -208,3 +257,82 @@ def test_api_health_does_not_initialize_cloud_clients() -> None:
     assert api.get("/healthz").json() == {
         "status": "ready", "service": "hefesto-editorial-api"
     }
+
+
+def test_product_interface_is_the_root_entrypoint() -> None:
+    api = client(Storage(), Dispatcher())
+    response = api.get("/")
+    assert response.status_code == 200
+    assert "Transforme fontes" in response.text
+    assert "/assets/app.js" in response.text
+
+
+def test_execution_access_is_scoped_to_authenticated_user() -> None:
+    access = Access()
+    api = client(Storage(), Dispatcher(), access=access)
+    submitted = api.post("/v1/plans", json=request()).json()
+    response = api.get(
+        f"/v1/plans/{submitted['execution_run_id']}",
+        headers={"x-test-user": "another@example.com"},
+    )
+    assert response.status_code == 403
+
+
+def test_upload_initialization_is_owned_and_chunked() -> None:
+    access = Access()
+    api = client(Storage(), Dispatcher(), access=access)
+    response = api.post(
+        "/v1/uploads",
+        json={"file_name": "fonte.pdf", "content_type": "application/pdf", "size_bytes": 12},
+    )
+    assert response.status_code == 201
+    assert response.json()["chunk_size"] == 8 * 1024 * 1024
+    upload_id = UUID(response.json()["upload_id"])
+    assert access.uploads[upload_id]["owner_id"] == "editor@example.com"
+
+
+def test_uploaded_pdf_enters_the_same_generic_plan_path(monkeypatch) -> None:
+    storage, dispatcher, access = Storage(), Dispatcher(), Access()
+    api = client(storage, dispatcher, access=access)
+    started = api.post(
+        "/v1/uploads",
+        json={"file_name": "qualquer-tema.pdf", "content_type": "application/pdf", "size_bytes": 11},
+    ).json()
+
+    class Upstream:
+        status_code = 200
+
+    def put(url, *, data, headers, timeout):
+        name = url.removeprefix("https://storage.example/upload/")
+        storage.values[name] = data
+        assert headers["Content-Range"] == "bytes 0-10/11"
+        return Upstream()
+
+    monkeypatch.setattr("comunicamundo_v4.hefesto.api.requests.put", put)
+    chunk = api.put(
+        f"/v1/uploads/{started['upload_id']}",
+        content=b"%PDF source",
+        headers={"Content-Range": "bytes 0-10/11"},
+    )
+    assert chunk.status_code == 204
+    completed = api.post(f"/v1/uploads/{started['upload_id']}/complete")
+    assert completed.status_code == 200
+
+    payload = request()
+    payload["sources"] = [{
+        "uri": completed.json()["uri"], "title": completed.json()["title"], "language": "pt-BR"
+    }]
+    submitted = api.post("/v1/plans", json=payload)
+    assert submitted.status_code == 202
+    assert dispatcher.calls[0][0] == "plan"
+
+
+def test_project_approval_is_a_separate_human_action() -> None:
+    storage, dispatcher = Storage(), Dispatcher()
+    api = client(storage, dispatcher, receipt={"status": "project_proposed"})
+    execution_id = api.post("/v1/plans", json=request()).json()["execution_run_id"]
+    response = api.post(f"/v1/plans/{execution_id}/approve-project")
+    assert response.status_code == 202
+    assert dispatcher.calls[-1] == [
+        "approve-project", f"--execution-run-id={execution_id}"
+    ]

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171a18">
+  <title>Hefesto — Planejamento editorial</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Hefesto — início">
+      <span class="brand-mark" aria-hidden="true">H</span>
+      <span>Hefesto</span>
+    </a>
+    <div class="identity"><span class="status-dot"></span><span id="identity">Conta Google</span></div>
+  </header>
+
+  <main class="shell">
+    <aside class="history-panel">
+      <div class="history-heading">
+        <div>
+          <p class="eyebrow">Seu trabalho</p>
+          <h2>Planejamentos</h2>
+        </div>
+        <button id="new-plan" class="icon-button" type="button" aria-label="Novo planejamento">+</button>
+      </div>
+      <div id="history" class="history-list" aria-live="polite">
+        <p class="muted">Carregando…</p>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <section id="composer" class="composer">
+        <div class="intro">
+          <p class="eyebrow">Novo planejamento</p>
+          <h1>Transforme fontes em uma direção editorial clara.</h1>
+          <p>Envie os documentos, descreva o que você quer produzir e acompanhe cada etapa até aprovar o Eixo Narrativo.</p>
+        </div>
+
+        <form id="plan-form" novalidate>
+          <div class="field-grid">
+            <label class="field field-wide">
+              <span>Tema</span>
+              <input id="theme" name="theme" required maxlength="500" placeholder="Sobre o que é o conteúdo?">
+            </label>
+            <label class="field field-wide">
+              <span>Abordagem e intenção editorial</span>
+              <textarea id="approach" name="approach" required rows="4" placeholder="O que precisa ser compreendido, demonstrado ou discutido?"></textarea>
+            </label>
+            <label class="field">
+              <span>Público</span>
+              <input id="audience" name="audience" required placeholder="Ex.: público não especialista">
+            </label>
+            <label class="field">
+              <span>Produto</span>
+              <select id="product" name="product">
+                <option value="article">Artigo</option>
+                <option value="video">Vídeo</option>
+                <option value="podcast">Podcast</option>
+                <option value="newsletter">Newsletter</option>
+                <option value="report">Relatório</option>
+                <option value="presentation">Apresentação</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Duração</span>
+              <div class="input-suffix"><input id="duration" name="duration" type="number" min="1" max="1440" value="10" required><span>min</span></div>
+            </label>
+            <label class="field">
+              <span>Idioma de saída</span>
+              <input id="language" name="language" value="pt-BR" required>
+            </label>
+          </div>
+
+          <fieldset class="sources">
+            <legend>Fontes</legend>
+            <p class="field-help">Adicione PDFs do seu computador e/ou URLs públicas. Até 64 fontes por planejamento.</p>
+            <label id="dropzone" class="dropzone" for="files">
+              <input id="files" type="file" accept="application/pdf,.pdf" multiple>
+              <span class="upload-symbol" aria-hidden="true">↑</span>
+              <strong>Escolha PDFs</strong>
+              <span>ou arraste os arquivos para cá · até 1 GB cada</span>
+            </label>
+            <div id="file-list" class="file-list"></div>
+            <label class="field url-field">
+              <span>URLs públicas</span>
+              <textarea id="urls" rows="3" placeholder="Uma URL por linha, começando com https://"></textarea>
+            </label>
+          </fieldset>
+
+          <div id="form-error" class="notice error" role="alert" hidden></div>
+          <button id="submit-plan" class="primary-button" type="submit">Criar planejamento</button>
+        </form>
+      </section>
+
+      <section id="execution" class="execution" hidden aria-live="polite">
+        <div class="execution-header">
+          <div>
+            <p class="eyebrow">Planejamento editorial</p>
+            <h1 id="execution-title">Processando</h1>
+            <p id="execution-subtitle" class="muted"></p>
+          </div>
+          <button id="back-to-form" class="secondary-button" type="button">Novo planejamento</button>
+        </div>
+
+        <div id="run-error" class="notice error" role="alert" hidden></div>
+        <button id="resume-plan" class="secondary-button" type="button" hidden>Retomar processamento</button>
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">Acompanhamento</p><h2>Etapas</h2></div>
+            <span id="run-status" class="status-pill">Na fila</span>
+          </div>
+          <div id="stages" class="stage-list"></div>
+        </section>
+
+        <section id="metrics-panel" class="metrics panel" hidden>
+          <div><span>Chamadas de modelo</span><strong id="metric-calls">0</strong></div>
+          <div><span>Tokens de entrada</span><strong id="metric-input">0</strong></div>
+          <div><span>Tokens de saída</span><strong id="metric-output">0</strong></div>
+          <div><span>Tokens totais</span><strong id="metric-total">0</strong></div>
+          <div><span>Custo</span><strong id="metric-cost">US$ 0</strong></div>
+        </section>
+
+        <section id="axis-panel" class="panel artifact" hidden>
+          <p class="eyebrow">Primeira decisão editorial</p>
+          <h2>Eixo Narrativo</h2>
+          <blockquote id="axis-statement"></blockquote>
+          <p id="axis-rationale" class="artifact-copy"></p>
+          <div class="approval-row">
+            <p>O Projeto Editorial só será criado depois da sua aprovação.</p>
+            <button id="approve-axis" class="primary-button" type="button">Aprovar Eixo e continuar</button>
+          </div>
+        </section>
+
+        <section id="project-panel" class="panel artifact" hidden>
+          <p class="eyebrow">Resultado</p>
+          <h2 id="project-title">Projeto Editorial</h2>
+          <p id="project-promise" class="lead"></p>
+          <div id="project-duration" class="duration-badge"></div>
+          <h3>Estrutura sustentada pelas fontes</h3>
+          <div id="subjects" class="subject-list"></div>
+          <div id="suggestions"></div>
+          <div class="approval-row">
+            <p id="project-approval-copy">Revise o projeto antes de concluir o planejamento.</p>
+            <button id="approve-project" class="primary-button" type="button">Aprovar Projeto Editorial</button>
+          </div>
+        </section>
+      </section>
+    </section>
+  </main>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

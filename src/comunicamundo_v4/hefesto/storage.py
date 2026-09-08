@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from base64 import b64decode
 from typing import Any
 from uuid import UUID
 
@@ -30,19 +29,10 @@ def load_request(client: storage.Client, uri: str) -> PlanningRequest:
 def load_input_request(
     client: storage.Client,
     *,
-    uri: str | None = None,
-    encoded: str | None = None,
+    uri: str,
 ) -> EditorialInputRequest:
-    if (uri is None) == (encoded is None):
-        raise ValueError("provide exactly one input request transport")
-    if uri is not None:
-        bucket, name = parse_gs_uri(uri)
-        data = client.bucket(bucket).blob(name).download_as_bytes()
-    else:
-        try:
-            data = b64decode(encoded or "", validate=True)
-        except ValueError as error:
-            raise ValueError("input request is not valid base64") from error
+    bucket, name = parse_gs_uri(uri)
+    data = client.bucket(bucket).blob(name).download_as_bytes()
     if len(data) > 1_000_000:
         raise ValueError("input request exceeds 1 MB")
     return EditorialInputRequest.model_validate_json(data)
@@ -56,7 +46,6 @@ def persist_json_immutable(
     payload: dict[str, Any],
 ) -> str:
     data = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
-    blob = client.bucket(bucket_name).blob(name)
     persist_bytes_immutable(
         client, bucket_name=bucket_name, name=name, data=data,
         content_type="application/json",

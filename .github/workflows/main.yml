@@ -3,15 +3,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  issue_comment:
-    types: [created]
 permissions:
   contents: read
   id-token: write
   issues: write
 concurrency:
   group: comunicamundo-v4-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
@@ -22,13 +20,9 @@ env:
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
   RUNTIME_SA: hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com
+  PRODUCT_USER: valtersclavi@gmail.com
 jobs:
   test-build-deploy:
-    if: >-
-      github.event_name != 'issue_comment' ||
-      (github.event.issue.number == 119 &&
-       github.event.comment.user.login == 'valtersclavi' &&
-       github.event.comment.body == '/deploy-hefesto')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -51,6 +45,19 @@ jobs:
           image="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${JOB_NAME}:sha-${GITHUB_SHA}"
           docker build --tag "${image}" .
           echo "IMAGE=${image}" >> "${GITHUB_ENV}"
+      - name: Smoke product image
+        run: |
+          set -euo pipefail
+          container="$(docker run --detach --publish 127.0.0.1:8080:8080 \
+            --entrypoint uvicorn "${IMAGE}" \
+            comunicamundo_v4.hefesto.api:app --host 0.0.0.0 --port 8080)"
+          trap 'docker rm --force "${container}" >/dev/null' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz >/tmp/health.json; then break; fi
+            sleep 1
+          done
+          jq -e '.status == "ready" and .service == "hefesto-editorial-api"' /tmp/health.json
+          curl --fail --silent http://127.0.0.1:8080/ | grep -q 'Transforme fontes'
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.PROJECT_ID }}
@@ -75,9 +82,22 @@ jobs:
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET}" \
             --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" \
             --quiet
+      - name: Migrate PostgreSQL
+        run: |
+          set -euo pipefail
+          migration="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=migrate-postgres --wait --format='value(metadata.name)')"
+          check="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=check-postgres --wait --format='value(metadata.name)')"
+          test -n "${migration}${check}"
+          echo "MIGRATION_EXECUTION=${migration}" >> "${GITHUB_ENV}"
+          echo "DATABASE_CHECK_EXECUTION=${check}" >> "${GITHUB_ENV}"
       - name: Authorize and deploy product API
         run: |
           set -euo pipefail
+          gcloud services enable iap.googleapis.com --project="${PROJECT_ID}"
+          gcloud beta services identity create --service=iap.googleapis.com \
+            --project="${PROJECT_ID}"
+          project_number="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
+          iap_service_agent="service-${project_number}@gcp-sa-iap.iam.gserviceaccount.com"
           gcloud run jobs add-iam-policy-binding "${JOB_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
             --member="serviceAccount:${RUNTIME_SA}" \
@@ -96,20 +116,35 @@ jobs:
             --project="${PROJECT_ID}" --region="${REGION}" \
             --member="serviceAccount:${DEPLOYER_SA}" \
             --role="roles/run.invoker" --quiet
+          gcloud run services add-iam-policy-binding "${API_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --member="serviceAccount:${iap_service_agent}" \
+            --role="roles/run.invoker" --quiet
+          gcloud run services update "${API_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" --iap --quiet
+          gcloud iap web add-iam-policy-binding \
+            --member="user:${PRODUCT_USER}" \
+            --role="roles/iap.httpsResourceAccessor" \
+            --region="${REGION}" --resource-type=cloud-run \
+            --service="${API_NAME}" --quiet
           api_url="$(gcloud run services describe "${API_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
             --format='value(status.url)')"
           test -n "${api_url}"
           echo "HEFESTO_API_URL=${api_url}" >> "${GITHUB_ENV}"
-      - name: Migrate PostgreSQL
+          revision="$(gcloud run services describe "${API_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(status.latestReadyRevisionName)')"
+          test -n "${revision}"
+          echo "API_REVISION=${revision}" >> "${GITHUB_ENV}"
+      - name: No-model startup smoke
         run: |
           set -euo pipefail
-          gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=migrate-postgres --wait
-          gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=check-postgres --wait
-      - name: No-model startup smoke
-        run: gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --wait
+          smoke="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --wait --format='value(metadata.name)')"
+          test -n "${smoke}"
+          echo "JOB_SMOKE_EXECUTION=${smoke}" >> "${GITHUB_ENV}"
       - name: Publish deployment receipt
-        if: always() && github.event_name == 'issue_comment'
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_STATUS: ${{ job.status }}
@@ -121,7 +156,12 @@ jobs:
           - Commit: \`${GITHUB_SHA}\`
           - Job: \`${JOB_NAME}\`
           - API: \`${API_NAME}\`
+          - API revision: \`${API_REVISION:-not-deployed}\`
+          - Product URL: ${HEFESTO_API_URL:-not-deployed}
           - Image: \`${PINNED_IMAGE:-not-built}\`
+          - PostgreSQL migration: \`${MIGRATION_EXECUTION:-not-run}\`
+          - PostgreSQL check: \`${DATABASE_CHECK_EXECUTION:-not-run}\`
+          - Job smoke: \`${JOB_SMOKE_EXECUTION:-not-run}\`
           - Actions run: \`${GITHUB_RUN_ID}\`
           EOF
           gh issue comment 119 --repo "${GITHUB_REPOSITORY}" --body-file /tmp/deploy-receipt.md

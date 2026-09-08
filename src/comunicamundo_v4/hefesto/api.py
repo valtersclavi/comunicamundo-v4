@@ -1,26 +1,77 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 import json
 import os
+from pathlib import Path
+import re
 from typing import Any, Callable, Protocol
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4, uuid5
 
 import google.auth
 from google.api_core.exceptions import NotFound, PreconditionFailed
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud import storage
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
+import requests
 
 from .contracts import EditorialInputRequest
 from .postgres import ProductRepository
-from .storage import persist_json_immutable
+from .storage import parse_gs_uri, persist_json_immutable
 
 
 class Dispatcher(Protocol):
     def run(self, args: list[str]) -> str: ...
+
+
+class AccessStore(Protocol):
+    async def register_submission(self, execution_id: UUID, project_id: UUID, owner_id: str, payload: dict[str, Any]) -> None: ...
+    async def assert_owner(self, execution_id: UUID, owner_id: str) -> None: ...
+    async def list_submissions(self, owner_id: str) -> list[dict[str, Any]]: ...
+    async def register_upload(self, **values: Any) -> None: ...
+    async def get_upload(self, upload_id: UUID, owner_id: str) -> dict[str, Any] | None: ...
+    async def complete_upload(self, upload_id: UUID, owner_id: str) -> None: ...
+    async def owns_source(self, owner_id: str, object_uri: str) -> bool: ...
+
+
+class PostgresAccessStore:
+    async def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        repository = ProductRepository(_required("HEFESTO_POSTGRES_URL"))
+        await repository.open()
+        try:
+            return await getattr(repository, method)(*args, **kwargs)
+        finally:
+            await repository.close()
+
+    async def register_submission(self, execution_id: UUID, project_id: UUID, owner_id: str, payload: dict[str, Any]) -> None:
+        await self._call("register_submission", execution_id, project_id, owner_id, payload)
+
+    async def assert_owner(self, execution_id: UUID, owner_id: str) -> None:
+        stored = await self._call("submission_owner", execution_id)
+        if stored is None:
+            raise KeyError("unknown execution")
+        if stored != owner_id:
+            raise PermissionError("execution belongs to another user")
+
+    async def list_submissions(self, owner_id: str) -> list[dict[str, Any]]:
+        return await self._call("list_submissions", owner_id)
+
+    async def register_upload(self, **values: Any) -> None:
+        await self._call("register_upload", **values)
+
+    async def get_upload(self, upload_id: UUID, owner_id: str) -> dict[str, Any] | None:
+        return await self._call("get_upload", upload_id, owner_id)
+
+    async def complete_upload(self, upload_id: UUID, owner_id: str) -> None:
+        await self._call("complete_upload", upload_id, owner_id)
+
+    async def owns_source(self, owner_id: str, object_uri: str) -> bool:
+        return bool(await self._call("owns_source", owner_id, object_uri))
 
 
 class GoogleCloudRunDispatcher:
@@ -36,13 +87,11 @@ class GoogleCloudRunDispatcher:
         )
         response = AuthorizedSession(credentials).post(
             self._url,
-            json={
-                "overrides": {
-                    "containerOverrides": [{"args": args}],
-                    "taskCount": 1,
-                    "timeout": "3600s",
-                }
-            },
+            json={"overrides": {
+                "containerOverrides": [{"args": args}],
+                "taskCount": 1,
+                "timeout": "3600s",
+            }},
             timeout=30,
         )
         response.raise_for_status()
@@ -50,6 +99,13 @@ class GoogleCloudRunDispatcher:
         if not operation.get("name"):
             raise RuntimeError("Cloud Run returned no operation identity")
         return str(operation["name"])
+
+
+class UploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    file_name: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(default="application/pdf", pattern=r"^application/pdf$")
+    size_bytes: int = Field(ge=1, le=1_073_741_824)
 
 
 def _required(name: str) -> str:
@@ -67,6 +123,16 @@ def _default_dispatcher() -> Dispatcher:
     )
 
 
+def _iap_identity(request: Request) -> str:
+    value = request.headers.get("x-goog-authenticated-user-email", "")
+    prefix = "accounts.google.com:"
+    if not value.startswith(prefix) or "@" not in value:
+        raise HTTPException(
+            status_code=401, detail="authenticated Google account required"
+        )
+    return value[len(prefix):].strip().lower()
+
+
 def _canonical_request(request: EditorialInputRequest) -> tuple[dict[str, Any], bytes]:
     payload = request.model_dump(mode="json")
     data = json.dumps(
@@ -81,10 +147,7 @@ def _execution_id(request: EditorialInputRequest, data: bytes) -> UUID:
 
 class SubmissionService:
     def __init__(
-        self,
-        client: storage.Client,
-        bucket_name: str,
-        dispatcher: Dispatcher,
+        self, client: storage.Client, bucket_name: str, dispatcher: Dispatcher
     ) -> None:
         self._client = client
         self._bucket_name = bucket_name
@@ -152,7 +215,7 @@ class SubmissionService:
         return accepted
 
     def dispatch_action(self, execution_id: UUID, action: str) -> dict[str, Any]:
-        if action not in {"resume-plan", "approve-axis"}:
+        if action not in {"resume-plan", "approve-axis", "approve-project"}:
             raise ValueError("unsupported product action")
         blob = self._client.bucket(self._bucket_name).blob(
             f"hefesto-product/executions/{execution_id}/{action}-dispatch.json"
@@ -171,12 +234,16 @@ class SubmissionService:
             )
         except PreconditionFailed:
             existing = json.loads(blob.download_as_bytes())
-            if existing.get("status") != "failed":
+            created_at = datetime.fromisoformat(existing["created_at"])
+            still_active = datetime.now(UTC) - created_at < timedelta(minutes=70)
+            if existing.get("status") == "completed" or (
+                existing.get("status") in {"dispatching", "queued"} and still_active
+            ):
                 return existing
         try:
-            operation = self._dispatcher.run(
-                [action, f"--execution-run-id={execution_id}"]
-            )
+            operation = self._dispatcher.run([
+                action, f"--execution-run-id={execution_id}"
+            ])
         except Exception as error:
             failed = {
                 **claim,
@@ -184,10 +251,16 @@ class SubmissionService:
                 "error_class": type(error).__name__,
                 "error_message": str(error)[:2000],
             }
-            blob.upload_from_string(json.dumps(failed).encode(), content_type="application/json")
+            blob.upload_from_string(
+                json.dumps(failed).encode(), content_type="application/json"
+            )
             raise
-        accepted = {**claim, "status": "queued", "cloud_run_operation": operation}
-        blob.upload_from_string(json.dumps(accepted).encode(), content_type="application/json")
+        accepted = {
+            **claim, "status": "queued", "cloud_run_operation": operation
+        }
+        blob.upload_from_string(
+            json.dumps(accepted).encode(), content_type="application/json"
+        )
         return accepted
 
     def dispatch_record(self, execution_id: UUID) -> dict[str, Any] | None:
@@ -206,21 +279,25 @@ async def _product_receipt(execution_id: UUID) -> dict[str, Any] | None:
     try:
         run = await repository.get_run(execution_id)
         if run is None:
-            return None
+            return await repository.product_receipt(execution_id)
         return {
             "status": run.state.value,
             "project_id": str(run.project_id),
             "execution_run_id": str(run.execution_run_id),
             "understanding": (
-                run.understanding.model_dump(mode="json") if run.understanding else None
+                run.understanding.model_dump(mode="json")
+                if run.understanding else None
             ),
-            "narrative_axis": run.axis.model_dump(mode="json") if run.axis else None,
+            "narrative_axis": (
+                run.axis.model_dump(mode="json") if run.axis else None
+            ),
             "editorial_project": (
                 run.editorial_project.model_dump(mode="json")
                 if run.editorial_project else None
             ),
             "error_class": run.error_class,
             "error_message": run.error_message,
+            "stages": await repository.stage_report(execution_id),
             "usage": await repository.usage_report(execution_id),
         }
     finally:
@@ -228,6 +305,7 @@ async def _product_receipt(execution_id: UUID) -> dict[str, Any] | None:
 
 
 ReceiptReader = Callable[[UUID], Any]
+IdentityReader = Callable[[Request], str]
 
 
 def create_app(
@@ -236,8 +314,15 @@ def create_app(
     dispatcher: Dispatcher | None = None,
     receipt_reader: ReceiptReader = _product_receipt,
     bucket_name: str | None = None,
+    access_store: AccessStore | None = None,
+    identity_reader: IdentityReader = _iap_identity,
 ) -> FastAPI:
-    app = FastAPI(title="Hefesto Editorial API", version="1.2.0")
+    app = FastAPI(title="Hefesto Editorial API", version="2.0.0")
+    access = access_store or PostgresAccessStore()
+    web_root = Path(__file__).resolve().parent.parent / "web"
+    app.mount(
+        "/assets", StaticFiles(directory=web_root / "assets"), name="assets"
+    )
 
     def service() -> SubmissionService:
         return SubmissionService(
@@ -246,73 +331,301 @@ def create_app(
             dispatcher or _default_dispatcher(),
         )
 
+    def owner(request: Request) -> str:
+        return identity_reader(request)
+
+    async def owned(execution_id: UUID, request: Request) -> str:
+        owner_id = owner(request)
+        try:
+            await access.assert_owner(execution_id, owner_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="unknown execution") from error
+        except PermissionError as error:
+            raise HTTPException(
+                status_code=403, detail="execution belongs to another user"
+            ) from error
+        return owner_id
+
+    @app.get("/", include_in_schema=False)
+    async def product() -> FileResponse:
+        return FileResponse(web_root / "index.html")
+
     @app.get("/healthz")
     async def health() -> dict[str, str]:
         return {"status": "ready", "service": "hefesto-editorial-api"}
 
-    @app.post("/v1/plans", status_code=status.HTTP_202_ACCEPTED)
-    async def submit_plan(request: EditorialInputRequest, response: Response) -> dict[str, Any]:
+    @app.get("/v1/me")
+    async def me(request: Request) -> dict[str, str]:
+        return {"email": owner(request)}
+
+    @app.get("/v1/plans")
+    async def plans(request: Request) -> dict[str, Any]:
+        return {"plans": await access.list_submissions(owner(request))}
+
+    @app.post("/v1/uploads", status_code=status.HTTP_201_CREATED)
+    async def begin_upload(
+        upload: UploadRequest, request: Request
+    ) -> dict[str, Any]:
+        owner_id = owner(request)
+        safe_name = re.sub(
+            r"[^A-Za-z0-9._-]+", "-", Path(upload.file_name).name
+        ).strip(".-") or "source.pdf"
+        upload_id = uuid4()
+        owner_key = sha256(owner_id.encode()).hexdigest()[:24]
+        object_name = (
+            f"hefesto-product/users/{owner_key}/uploads/{upload_id}/{safe_name}"
+        )
+        bucket_value = bucket_name or _required("HEFESTO_GCS_BUCKET")
+        storage_client = client or storage.Client(
+            project=_required("GOOGLE_CLOUD_PROJECT")
+        )
+        blob = storage_client.bucket(bucket_value).blob(object_name)
         try:
-            result = await asyncio.to_thread(service().submit, request)
+            session_url = await asyncio.to_thread(
+                blob.create_resumable_upload_session,
+                content_type=upload.content_type,
+                size=upload.size_bytes,
+                timeout=30,
+            )
+            await access.register_upload(
+                upload_id=upload_id,
+                owner_id=owner_id,
+                object_uri=f"gs://{bucket_value}/{object_name}",
+                file_name=upload.file_name,
+                content_type=upload.content_type,
+                size_bytes=upload.size_bytes,
+                upload_session_url=session_url,
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=503,
+                detail=f"upload initialization failed: {error}",
+            ) from error
+        return {"upload_id": str(upload_id), "chunk_size": 8 * 1024 * 1024}
+
+    @app.put("/v1/uploads/{upload_id}", status_code=204)
+    async def upload_chunk(upload_id: UUID, request: Request) -> Response:
+        record = await access.get_upload(upload_id, owner(request))
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown upload")
+        if (
+            record["status"] != "uploading"
+            or not record.get("upload_session_url")
+        ):
+            raise HTTPException(
+                status_code=409, detail="upload is not accepting data"
+            )
+        content_range = request.headers.get("content-range", "")
+        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
+        body = await request.body()
+        if not match or len(body) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="invalid upload chunk")
+        start, end, total = map(int, match.groups())
+        if (
+            end - start + 1 != len(body)
+            or total != record["size_bytes"]
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="upload chunk range does not match content",
+            )
+        try:
+            upstream = await asyncio.to_thread(
+                requests.put,
+                record["upload_session_url"],
+                data=body,
+                headers={
+                    "Content-Length": str(len(body)),
+                    "Content-Range": content_range,
+                },
+                timeout=60,
+            )
+        except requests.RequestException as error:
+            raise HTTPException(
+                status_code=503,
+                detail=f"upload transport failed: {error}",
+            ) from error
+        if upstream.status_code not in {200, 201, 308}:
+            raise HTTPException(
+                status_code=502,
+                detail=f"storage rejected upload chunk ({upstream.status_code})",
+            )
+        return Response(status_code=204)
+
+    @app.post("/v1/uploads/{upload_id}/complete")
+    async def complete_upload(
+        upload_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        owner_id = owner(request)
+        record = await access.get_upload(upload_id, owner_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="unknown upload")
+        bucket, name = parse_gs_uri(record["object_uri"])
+        blob = (
+            client or storage.Client(project=_required("GOOGLE_CLOUD_PROJECT"))
+        ).bucket(bucket).blob(name)
+        try:
+            await asyncio.to_thread(blob.reload)
+        except NotFound as error:
+            raise HTTPException(
+                status_code=409, detail="upload has not completed"
+            ) from error
+        if int(blob.size or 0) != record["size_bytes"]:
+            raise HTTPException(
+                status_code=409,
+                detail="stored file size does not match upload",
+            )
+        await access.complete_upload(upload_id, owner_id)
+        return {
+            "upload_id": str(upload_id),
+            "status": "stored",
+            "uri": record["object_uri"],
+            "title": record["file_name"],
+        }
+
+    @app.post("/v1/plans", status_code=status.HTTP_202_ACCEPTED)
+    async def submit_plan(
+        editorial_request: EditorialInputRequest,
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        owner_id = owner(request)
+        for source in editorial_request.sources:
+            if source.uri.startswith("gs://") and not await access.owns_source(
+                owner_id, source.uri
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="a stored source does not belong to this user",
+                )
+        payload, data = _canonical_request(editorial_request)
+        execution_id = _execution_id(editorial_request, data)
+        await access.register_submission(
+            execution_id, editorial_request.project_id, owner_id, payload
+        )
+        try:
+            result = await asyncio.to_thread(
+                service().submit, editorial_request
+            )
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except Exception as error:
-            raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
+            raise HTTPException(
+                status_code=503, detail=f"dispatch failed: {error}"
+            ) from error
         if result["status"] == "failed":
             raise HTTPException(status_code=503, detail=result)
-        response.headers["Location"] = f"/v1/plans/{result['execution_run_id']}"
+        response.headers["Location"] = (
+            f"/v1/plans/{result['execution_run_id']}"
+        )
         return result
 
     @app.get("/v1/plans/{execution_id}")
-    async def get_plan(execution_id: UUID) -> dict[str, Any]:
+    async def get_plan(
+        execution_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        await owned(execution_id, request)
         receipt = await receipt_reader(execution_id)
         if receipt is not None:
             return receipt
-        dispatch = await asyncio.to_thread(service().dispatch_record, execution_id)
+        dispatch = await asyncio.to_thread(
+            service().dispatch_record, execution_id
+        )
         if dispatch is None:
             raise HTTPException(status_code=404, detail="unknown execution")
         return dispatch
 
-    async def required_receipt(execution_id: UUID) -> dict[str, Any]:
+    async def required_receipt(
+        execution_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        await owned(execution_id, request)
         receipt = await receipt_reader(execution_id)
         if receipt is None:
-            raise HTTPException(status_code=404, detail="unknown product execution")
+            raise HTTPException(
+                status_code=404, detail="unknown product execution"
+            )
         return receipt
 
-    @app.post("/v1/plans/{execution_id}/resume", status_code=status.HTTP_202_ACCEPTED)
-    async def resume_plan(execution_id: UUID) -> dict[str, Any]:
-        receipt = await required_receipt(execution_id)
-        if receipt["status"] not in {"failed", "digesting", "source_structure_ready"}:
+    @app.post(
+        "/v1/plans/{execution_id}/resume",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def resume_plan(
+        execution_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
+        if receipt["status"] not in {
+            "failed", "digesting", "source_structure_ready"
+        }:
             raise HTTPException(
                 status_code=409,
-                detail=f"execution in {receipt['status']} does not require digestion resume",
+                detail=(
+                    f"execution in {receipt['status']} "
+                    "does not require digestion resume"
+                ),
             )
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "resume-plan"
             )
         except Exception as error:
-            raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
+            raise HTTPException(
+                status_code=503, detail=f"dispatch failed: {error}"
+            ) from error
 
     @app.post(
         "/v1/plans/{execution_id}/approve-axis",
         status_code=status.HTTP_202_ACCEPTED,
     )
-    async def approve_axis(execution_id: UUID) -> dict[str, Any]:
-        receipt = await required_receipt(execution_id)
+    async def approve_axis(
+        execution_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
         if receipt["status"] == "project_proposed":
             return receipt
         if receipt["status"] != "axis_proposed":
             raise HTTPException(
                 status_code=409,
-                detail=f"execution in {receipt['status']} has no proposed Axis to approve",
+                detail=(
+                    f"execution in {receipt['status']} "
+                    "has no proposed Axis to approve"
+                ),
             )
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "approve-axis"
             )
         except Exception as error:
-            raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
+            raise HTTPException(
+                status_code=503, detail=f"dispatch failed: {error}"
+            ) from error
+
+    @app.post(
+        "/v1/plans/{execution_id}/approve-project",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def approve_project(
+        execution_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
+        if receipt["status"] == "project_approved":
+            return receipt
+        if receipt["status"] != "project_proposed":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"execution in {receipt['status']} "
+                    "has no proposed Editorial Project to approve"
+                ),
+            )
+        try:
+            return await asyncio.to_thread(
+                service().dispatch_action, execution_id, "approve-project"
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=503, detail=f"dispatch failed: {error}"
+            ) from error
 
     return app
 

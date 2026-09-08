@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from base64 import b64encode
 import json
 from uuid import uuid4
 
@@ -156,10 +155,11 @@ def test_real_text_pdf_is_extracted_into_semantic_layout_blocks() -> None:
     ]
 
 
-def test_input_manifest_can_travel_as_small_base64_json() -> None:
+def test_input_request_is_loaded_from_product_storage() -> None:
     source = input_request()
-    encoded = b64encode(source.model_dump_json().encode()).decode()
-    loaded = load_input_request(Storage(), encoded=encoded)
+    storage = Storage()
+    storage.buckets.setdefault("product", {})["input.json"] = source.model_dump_json().encode()
+    loaded = load_input_request(storage, uri="gs://product/input.json")
     assert loaded == source
 
 
@@ -180,10 +180,10 @@ def test_non_pdf_fails_before_model_work() -> None:
 
 def test_cli_is_product_generic_and_has_no_test_variant() -> None:
     root = parser()
-    assert root.parse_args(["plan", "--request-base64", "e30="]).command == "plan"
+    assert root.parse_args(["plan", "--request", "gs://product/input.json"]).command == "plan"
     execution_id = uuid4()
     assert root.parse_args([
-        "plan", "--request-base64", "e30=", "--execution-run-id", str(execution_id)
+        "plan", "--request", "gs://product/input.json", "--execution-run-id", str(execution_id)
     ]).execution_run_id == execution_id
     with pytest.raises(SystemExit):
         root.parse_args(["run-proof", "--variant", "A"])

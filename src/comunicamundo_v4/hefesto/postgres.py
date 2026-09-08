@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 from hashlib import sha256
+import json
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 from uuid import UUID
 
 import psycopg
@@ -63,6 +64,165 @@ class ProductRepository:
                 await cursor.execute("SELECT current_database(), 1")
                 database, value = await cursor.fetchone()
         return {"database": database, "ready": value == 1}
+
+    async def register_submission(
+        self,
+        execution_run_id: UUID,
+        project_id: UUID,
+        owner_id: str,
+        request_payload: dict[str, Any],
+    ) -> None:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """INSERT INTO hefesto_product.submissions
+                   (execution_run_id,project_id,owner_id,request_payload)
+                   VALUES (%s,%s,%s,%s::jsonb)
+                   ON CONFLICT(execution_run_id) DO UPDATE SET updated_at=now()
+                   RETURNING owner_id""",
+                (execution_run_id, project_id, owner_id, json.dumps(request_payload)),
+            )
+            stored_owner = (await row.fetchone())[0]
+            if stored_owner != owner_id:
+                raise PermissionError("execution belongs to another user")
+
+    async def submission_owner(self, execution_run_id: UUID) -> str | None:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                "SELECT owner_id FROM hefesto_product.submissions WHERE execution_run_id=%s",
+                (execution_run_id,),
+            )
+            value = await row.fetchone()
+        return str(value[0]) if value else None
+
+    async def list_submissions(self, owner_id: str) -> list[dict[str, Any]]:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT execution_run_id,project_id,request_payload,created_at,updated_at
+                   FROM hefesto_product.submissions WHERE owner_id=%s
+                   ORDER BY created_at DESC LIMIT 100""",
+                (owner_id,),
+            )
+            values = await rows.fetchall()
+        return [
+            {
+                "execution_run_id": str(item[0]),
+                "project_id": str(item[1]),
+                "request": item[2],
+                "created_at": item[3].isoformat(),
+                "updated_at": item[4].isoformat(),
+            }
+            for item in values
+        ]
+
+    async def record_product_receipt(
+        self, execution_run_id: UUID, payload: dict[str, object]
+    ) -> None:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """UPDATE hefesto_product.submissions
+                   SET receipt_payload=%s::jsonb,updated_at=now()
+                   WHERE execution_run_id=%s RETURNING execution_run_id""",
+                (json.dumps(payload), execution_run_id),
+            )
+            if await row.fetchone() is None:
+                raise KeyError("unknown execution")
+
+    async def product_receipt(
+        self, execution_run_id: UUID
+    ) -> dict[str, object] | None:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """SELECT receipt_payload FROM hefesto_product.submissions
+                   WHERE execution_run_id=%s""",
+                (execution_run_id,),
+            )
+            value = await row.fetchone()
+        return dict(value[0]) if value and value[0] is not None else None
+
+    async def register_upload(
+        self,
+        *,
+        upload_id: UUID,
+        owner_id: str,
+        object_uri: str,
+        file_name: str,
+        content_type: str,
+        size_bytes: int,
+        upload_session_url: str,
+    ) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """INSERT INTO hefesto_product.uploads
+                   (upload_id,owner_id,object_uri,file_name,content_type,size_bytes,
+                    upload_session_url,status)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,'uploading')""",
+                (upload_id, owner_id, object_uri, file_name, content_type,
+                 size_bytes, upload_session_url),
+            )
+
+    async def get_upload(self, upload_id: UUID, owner_id: str) -> dict[str, Any] | None:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """SELECT object_uri,file_name,content_type,size_bytes,upload_session_url,status
+                   FROM hefesto_product.uploads WHERE upload_id=%s AND owner_id=%s""",
+                (upload_id, owner_id),
+            )
+            value = await row.fetchone()
+        if not value:
+            return None
+        return {
+            "upload_id": str(upload_id), "object_uri": value[0], "file_name": value[1],
+            "content_type": value[2], "size_bytes": value[3],
+            "upload_session_url": value[4], "status": value[5],
+        }
+
+    async def complete_upload(self, upload_id: UUID, owner_id: str) -> None:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """UPDATE hefesto_product.uploads
+                   SET status='stored',upload_session_url=NULL,updated_at=now()
+                   WHERE upload_id=%s AND owner_id=%s RETURNING upload_id""",
+                (upload_id, owner_id),
+            )
+            if await row.fetchone() is None:
+                raise KeyError("unknown upload")
+
+    async def owns_source(self, owner_id: str, object_uri: str) -> bool:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """SELECT 1 FROM hefesto_product.uploads
+                   WHERE owner_id=%s AND object_uri=%s AND status='stored'""",
+                (owner_id, object_uri),
+            )
+            return await row.fetchone() is not None
+
+    async def record_stages(
+        self, execution_run_id: UUID, stages: Sequence[dict[str, object]]
+    ) -> None:
+        async with self._pool.connection() as connection:
+            for stage in stages:
+                await connection.execute(
+                    """INSERT INTO hefesto_product.stage_receipts
+                       (execution_run_id,stage,status,duration_ms,payload)
+                       VALUES (%s,%s,%s,%s,%s::jsonb)
+                       ON CONFLICT(execution_run_id,stage) DO UPDATE SET
+                         status=excluded.status,duration_ms=excluded.duration_ms,
+                         payload=excluded.payload,updated_at=now()""",
+                    (
+                        execution_run_id, str(stage["stage"]),
+                        str(stage.get("status", "completed")),
+                        int(stage.get("duration_ms", 0)), json.dumps(stage),
+                    ),
+                )
+
+    async def stage_report(self, execution_run_id: UUID) -> list[dict[str, object]]:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT payload FROM hefesto_product.stage_receipts
+                   WHERE execution_run_id=%s ORDER BY updated_at,stage""",
+                (execution_run_id,),
+            )
+            return [dict(item[0]) for item in await rows.fetchall()]
 
     async def save_run(self, run: ProductRun) -> None:
         payload = run.model_dump_json()

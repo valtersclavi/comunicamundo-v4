@@ -25,6 +25,8 @@ class MemoryRepository:
         self.structures: dict[UUID, list[Paragraph]] = {}
         self.saved_notes: dict[UUID, dict[str, ParagraphNote]] = {}
         self.usage: dict[UUID, list[CallUsage]] = {}
+        self.stages: dict[UUID, list[dict[str, object]]] = {}
+        self.receipts: dict[UUID, dict[str, object]] = {}
 
     async def save_run(self, run: ProductRun) -> None:
         self.runs[run.execution_run_id] = run
@@ -49,6 +51,17 @@ class MemoryRepository:
     async def usage_report(self, execution_run_id: UUID) -> dict[str, object]:
         calls = self.usage.get(execution_run_id, [])
         return {"call_count": len(calls), "total_tokens": sum(item.total_tokens for item in calls)}
+
+    async def record_stages(self, execution_run_id: UUID, stages: Sequence[dict[str, object]]) -> None:
+        known = {item["stage"]: item for item in self.stages.get(execution_run_id, [])}
+        known.update({item["stage"]: dict(item) for item in stages})
+        self.stages[execution_run_id] = list(known.values())
+
+    async def stage_report(self, execution_run_id: UUID) -> list[dict[str, object]]:
+        return self.stages.get(execution_run_id, [])
+
+    async def record_product_receipt(self, execution_run_id: UUID, payload: dict[str, object]) -> None:
+        self.receipts[execution_run_id] = payload
 
 
 class FakeGateway:

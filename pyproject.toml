@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comunicamundo-v4"
-version = "1.2.0"
-description = "Hefesto paragraph-first editorial intelligence"
+version = "2.0.0"
+description = "Hefesto editorial planning product"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi==0.116.1",
@@ -27,6 +27,9 @@ dev = ["pytest==8.4.2", "pytest-asyncio==1.1.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+comunicamundo_v4 = ["web/*.html", "web/assets/*.css", "web/assets/*.js"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

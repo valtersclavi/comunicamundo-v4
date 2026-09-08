@@ -156,3 +156,19 @@ async def test_axis_is_a_real_human_gate() -> None:
     assert proposed.state is RunState.AXIS_PROPOSED
     assert proposed.axis is not None and not proposed.axis.approved
     assert proposed.editorial_project is None
+
+
+@pytest.mark.asyncio
+async def test_editorial_project_is_a_real_human_gate() -> None:
+    repository = MemoryRepository()
+    hefesto = Hefesto(repository, FakeGateway())
+    run = await hefesto.digest(request())
+    run = await hefesto.propose_axis(run.execution_run_id)
+    proposed = await hefesto.approve_axis_and_propose_project(run.execution_run_id)
+    assert proposed.state is RunState.PROJECT_PROPOSED
+    assert proposed.editorial_project is not None
+    assert not proposed.editorial_project.approved
+    approved = await hefesto.approve_project(run.execution_run_id)
+    assert approved.state is RunState.PROJECT_APPROVED
+    assert approved.editorial_project is not None
+    assert approved.editorial_project.approved

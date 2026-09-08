@@ -1,62 +1,33 @@
-# ComunicAmundo V4 — Hefesto
+# Hefesto
 
-Hefesto is a generic, paragraph-first editorial production system. It accepts a brief and one or more PDFs, normalizes and records their source structure without using an LLM, digests each paragraph once, synthesizes the corpus once, and stops at explicit human gates for the Narrative Axis and Editorial Project.
+Hefesto é um produto de planejamento editorial orientado pelas fontes e pela intenção do usuário.
 
-The canonical architecture is documented in `docs/decisions/2026-09-07-hefesto-product-architecture.md`.
+O serviço web autenticado é a única entrada de uso editorial. Nele, o usuário:
 
-## Product input
+1. envia PDFs e/ou informa URLs públicas;
+2. define tema, abordagem, público, produto, idioma e duração;
+3. acompanha ingestão, estruturação, digestão e uso de modelo;
+4. lê e aprova o Eixo Narrativo;
+5. recebe o Projeto Editorial.
 
-Every editorial project enters through the same JSON contract. Tests, subjects, and individual PDFs never require product code.
+O processamento é assíncrono e persistido. Uma atualização da página não perde a execução. Cada usuário só acessa seus próprios uploads e planejamentos. Falhas mostram a etapa e o erro real, e trabalhos retomáveis podem ser continuados sem repetir trabalho concluído.
 
-```json
-{
-  "project_id": "2cf1cd94-51f6-4f78-a98b-c7e04855ad67",
-  "brief": {
-    "theme": "The subject the user wants to publish",
-    "approach": "The user's editorial intention",
-    "duration_minutes": 10,
-    "output_language": "pt-BR",
-    "audience": "The intended audience",
-    "product": "article"
-  },
-  "sources": [
-    {
-      "uri": "gs://an-upload-bucket/source.pdf",
-      "title": "Optional source title",
-      "language": "en"
-    },
-    {
-      "uri": "https://public.example/report.pdf",
-      "language": "pt-BR"
-    }
-  ]
-}
-```
+## Arquitetura
 
-`ingest` downloads each PDF, validates it, stores an immutable original, extracts layout-aware text, creates complete paragraphs and sentence addresses, and persists that structure in PostgreSQL. It makes zero model calls. `plan` performs the same input stage and continues through digestion and the proposed Narrative Axis. `resume-plan` resumes persisted work; `approve-axis` is the explicit action that proposes the Editorial Project.
+- Cloud Run Service: interface web e API autenticadas por Identity-Aware Proxy.
+- Cloud Run Job: processamento editorial de longa duração.
+- PostgreSQL: estado canônico, propriedade, estrutura das fontes, artefatos, etapas e consumo.
+- Cloud Storage: PDFs, solicitações e recibos imutáveis.
+- Vertex AI: digestão editorial, entendimento, Eixo Narrativo e Projeto Editorial.
 
-Every operation emits a durable receipt with state, error details, stage timings, and exact provider usage when model calls occur.
+O deploy ocorre em `main`. O workflow testa o contrato completo, constrói uma única imagem, aplica migrações, implanta Job e aplicação web, configura autenticação e publica o recibo na issue canônica.
 
-## Editorial API
-
-The authenticated Cloud Run service `hefesto-v4-api` is the product entry point. A client submits the same JSON contract directly; the API persists it immutably, assigns a stable execution identity, dispatches the canonical Job, and returns HTTP 202 without holding an editorial run open.
-
-```http
-POST /v1/plans
-GET  /v1/plans/{execution_run_id}
-POST /v1/plans/{execution_run_id}/resume
-POST /v1/plans/{execution_run_id}/approve-axis
-GET  /healthz
-```
-
-The machine-readable API contract is available at `/openapi.json` on the service.
-
-Submitting an identical manifest again returns the existing dispatch instead of starting another paid run. The API remains private under Cloud Run IAM; callers use a Google-signed identity token. It never accepts an unauthenticated request that can trigger model spend.
+## Desenvolvimento
 
 ```bash
-comunicamundo-v4-worker ingest --request gs://bucket/project-input.json
-comunicamundo-v4-worker plan --request gs://bucket/project-input.json
-comunicamundo-v4-worker resume-plan --execution-run-id UUID
-comunicamundo-v4-worker approve-axis --execution-run-id UUID
-comunicamundo-v4-worker inspect --execution-run-id UUID
+python -m pip install -e '.[dev]'
+pytest
+uvicorn comunicamundo_v4.hefesto.api:app --reload
 ```
+
+Em desenvolvimento, a identidade deve ser injetada pelo ambiente de teste. Em produção, a aplicação aceita somente a identidade assinada pelo Identity-Aware Proxy.

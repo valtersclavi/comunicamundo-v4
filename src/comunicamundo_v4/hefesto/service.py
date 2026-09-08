@@ -39,6 +39,9 @@ class Repository(Protocol):
     async def notes(self, execution_run_id: UUID) -> list[ParagraphNote]: ...
     async def record_usage(self, execution_run_id: UUID, project_id: UUID, usage: CallUsage) -> None: ...
     async def usage_report(self, execution_run_id: UUID) -> dict[str, object]: ...
+    async def record_stages(self, execution_run_id: UUID, stages: Sequence[dict[str, object]]) -> None: ...
+    async def stage_report(self, execution_run_id: UUID) -> list[dict[str, object]]: ...
+    async def record_product_receipt(self, execution_run_id: UUID, payload: dict[str, object]) -> None: ...
 
 
 class Hefesto:
@@ -222,8 +225,36 @@ class Hefesto:
             "editorial_project": run.editorial_project.model_dump(mode="json") if run.editorial_project else None,
             "error_class": run.error_class,
             "error_message": run.error_message,
+            "stages": await self._repository.stage_report(execution_run_id),
             "usage": await self._repository.usage_report(execution_run_id),
         }
+
+    async def approve_project(self, execution_run_id: UUID) -> ProductRun:
+        run = await self._required_run(execution_run_id)
+        if run.state is RunState.PROJECT_APPROVED:
+            return run
+        if run.state is not RunState.PROJECT_PROPOSED or run.editorial_project is None:
+            raise ValueError("Editorial Project is not awaiting approval")
+        project = run.editorial_project.model_copy(update={"approved": True})
+        run = run.model_copy(
+            update={
+                "state": RunState.PROJECT_APPROVED,
+                "editorial_project": project,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        await self._repository.save_run(run)
+        return run
+
+    async def record_stages(
+        self, execution_run_id: UUID, stages: Sequence[dict[str, object]]
+    ) -> None:
+        await self._repository.record_stages(execution_run_id, stages)
+
+    async def record_product_receipt(
+        self, execution_run_id: UUID, payload: dict[str, object]
+    ) -> None:
+        await self._repository.record_product_receipt(execution_run_id, payload)
 
     async def _run_paragraphs(
         self, run: ProductRun, paragraphs: Sequence[Paragraph]

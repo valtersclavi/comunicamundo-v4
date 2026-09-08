@@ -51,8 +51,7 @@ async def plan(args: argparse.Namespace) -> None:
     client = storage_client()
     input_request = load_input_request(
         client,
-        uri=getattr(args, "request", None),
-        encoded=getattr(args, "request_base64", None),
+        uri=args.request,
     )
     execution_id = args.execution_run_id or uuid4()
     bucket_name = required("HEFESTO_GCS_BUCKET")
@@ -83,6 +82,12 @@ async def plan(args: argparse.Namespace) -> None:
             client, bucket_name=bucket_name,
             execution_run_id=execution_id, payload=receipt,
         )
+        repository = ProductRepository(required("HEFESTO_POSTGRES_URL"))
+        await repository.open()
+        try:
+            await repository.record_product_receipt(execution_id, receipt)
+        finally:
+            await repository.close()
         print_receipt(receipt, uri)
         raise
     stages.append({
@@ -102,6 +107,7 @@ async def plan(args: argparse.Namespace) -> None:
             "duration_ms": int((perf_counter() - started) * 1000),
             "model_invocations": 0,
         })
+        await hefesto.record_stages(execution_id, stages)
         await _continue_to_axis(
             hefesto, client, execution_id, stages,
             ingestion=ingestion,
@@ -115,7 +121,34 @@ async def resume_plan(execution_id: UUID) -> None:
     repository, hefesto = await services()
     try:
         stages: list[dict[str, object]] = []
-        await _continue_to_axis(hefesto, client, execution_id, stages)
+        current = await repository.get_run(execution_id)
+        if (
+            current is not None
+            and current.axis is not None
+            and current.axis.approved
+            and current.editorial_project is None
+        ):
+            started = perf_counter()
+            try:
+                await hefesto.approve_axis_and_propose_project(execution_id)
+                stages.append({
+                    "stage": "editorial_project",
+                    "duration_ms": int((perf_counter() - started) * 1000),
+                })
+            except Exception:
+                stages.append({
+                    "stage": "editorial_project", "status": "failed",
+                    "duration_ms": int((perf_counter() - started) * 1000),
+                })
+                await _persist_product_receipt(
+                    hefesto, client, execution_id, stages
+                )
+                raise
+            await _persist_product_receipt(
+                hefesto, client, execution_id, stages
+            )
+        else:
+            await _continue_to_axis(hefesto, client, execution_id, stages)
     finally:
         await repository.close()
 
@@ -139,12 +172,14 @@ async def _continue_to_axis(
             "stage": active_stage,
             "duration_ms": int((perf_counter() - started) * 1000),
         })
+        await hefesto.record_stages(execution_id, stages)
         active_stage, started = "narrative_axis", perf_counter()
         await hefesto.propose_axis(current.execution_run_id)
         stages.append({
             "stage": active_stage,
             "duration_ms": int((perf_counter() - started) * 1000),
         })
+        await hefesto.record_stages(execution_id, stages)
     except Exception:
         stages.append({
             "stage": active_stage, "status": "failed",
@@ -189,6 +224,50 @@ async def approve_axis(execution_id: UUID) -> None:
         await repository.close()
 
 
+async def approve_project(execution_id: UUID) -> None:
+    client = storage_client()
+    repository, hefesto = await services()
+    try:
+        await hefesto.approve_project(execution_id)
+        await _persist_product_receipt(hefesto, client, execution_id, [])
+    finally:
+        await repository.close()
+
+
+def mark_action_dispatch(
+    client: storage.Client,
+    execution_id: UUID,
+    action: str,
+    status: str,
+    error: Exception | None = None,
+) -> None:
+    blob = client.bucket(required("HEFESTO_GCS_BUCKET")).blob(
+        f"hefesto-product/executions/{execution_id}/{action}-dispatch.json"
+    )
+    try:
+        current = json.loads(blob.download_as_bytes())
+    except Exception:
+        current = {
+            "execution_run_id": str(execution_id),
+            "action": action,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+    payload = {
+        **current,
+        "status": status,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    if error is not None:
+        payload.update({
+            "error_class": type(error).__name__,
+            "error_message": str(error)[:2000],
+        })
+    blob.upload_from_string(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(),
+        content_type="application/json",
+    )
+
+
 async def _persist_product_receipt(
     hefesto: Hefesto,
     client: storage.Client,
@@ -197,6 +276,7 @@ async def _persist_product_receipt(
     *,
     ingestion: IngestionResult | None = None,
 ) -> None:
+    await hefesto.record_stages(execution_id, stages)
     receipt = {
         **(await hefesto.receipt(execution_id)),
         "input": (
@@ -210,9 +290,9 @@ async def _persist_product_receipt(
             }
             if ingestion is not None else None
         ),
-        "stages": stages,
         "generated_at": datetime.now(UTC).isoformat(),
     }
+    await hefesto.record_product_receipt(execution_id, receipt)
     uri = persist_receipt(
         client,
         bucket_name=required("HEFESTO_GCS_BUCKET"),
@@ -252,7 +332,7 @@ async def run(args: argparse.Namespace) -> None:
     if args.command == "ingest":
         client = storage_client()
         input_request = load_input_request(
-            client, uri=args.request, encoded=args.request_base64
+            client, uri=args.request
         )
         result = await asyncio.to_thread(
             ingest, input_request, client=client,
@@ -289,10 +369,40 @@ async def run(args: argparse.Namespace) -> None:
         await plan(args)
         return
     if args.command == "resume-plan":
-        await resume_plan(args.execution_run_id)
+        try:
+            await resume_plan(args.execution_run_id)
+        except Exception as error:
+            mark_action_dispatch(
+                storage_client(), args.execution_run_id, args.command, "failed", error
+            )
+            raise
+        mark_action_dispatch(
+            storage_client(), args.execution_run_id, args.command, "completed"
+        )
         return
     if args.command == "approve-axis":
-        await approve_axis(args.execution_run_id)
+        try:
+            await approve_axis(args.execution_run_id)
+        except Exception as error:
+            mark_action_dispatch(
+                storage_client(), args.execution_run_id, args.command, "failed", error
+            )
+            raise
+        mark_action_dispatch(
+            storage_client(), args.execution_run_id, args.command, "completed"
+        )
+        return
+    if args.command == "approve-project":
+        try:
+            await approve_project(args.execution_run_id)
+        except Exception as error:
+            mark_action_dispatch(
+                storage_client(), args.execution_run_id, args.command, "failed", error
+            )
+            raise
+        mark_action_dispatch(
+            storage_client(), args.execution_run_id, args.command, "completed"
+        )
         return
     repository, hefesto = await services()
     client = storage_client()
@@ -311,9 +421,7 @@ async def run(args: argparse.Namespace) -> None:
 
 
 def _input_transport(command: argparse.ArgumentParser) -> None:
-    transport = command.add_mutually_exclusive_group(required=True)
-    transport.add_argument("--request")
-    transport.add_argument("--request-base64")
+    command.add_argument("--request", required=True)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -330,6 +438,8 @@ def parser() -> argparse.ArgumentParser:
     resume.add_argument("--execution-run-id", type=UUID, required=True)
     approve = commands.add_parser("approve-axis")
     approve.add_argument("--execution-run-id", type=UUID, required=True)
+    approve_project_parser = commands.add_parser("approve-project")
+    approve_project_parser.add_argument("--execution-run-id", type=UUID, required=True)
     inspect = commands.add_parser("inspect")
     inspect.add_argument("--execution-run-id", type=UUID, required=True)
     return root
