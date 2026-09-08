@@ -49,6 +49,8 @@ POST /v1/plans/{execution_run_id}/approve-axis
 GET  /healthz
 ```
 
+The machine-readable API contract is available at `/openapi.json` on the service.
+
 Submitting an identical manifest again returns the existing dispatch instead of starting another paid run. The API remains private under Cloud Run IAM; callers use a Google-signed identity token. It never accepts an unauthenticated request that can trigger model spend.
 
 ```bash
