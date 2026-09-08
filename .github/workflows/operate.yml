@@ -11,6 +11,9 @@ on:
         description: Required only for inspect
         required: false
         type: string
+  workflow_run:
+    workflows: [main]
+    types: [completed]
 permissions:
   contents: read
   id-token: write
@@ -22,6 +25,10 @@ env:
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
 jobs:
   operate:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       contains(github.event.workflow_run.head_commit.message, '[test-a]'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -34,7 +41,7 @@ jobs:
       - name: Execute
         run: |
           set -euo pipefail
-          if [[ "${{ inputs.operation }}" == "test-a" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_run" || "${{ inputs.operation }}" == "test-a" ]]; then
             args="run-proof,--variant=A"
           else
             test -n "${{ inputs.execution_run_id }}"
