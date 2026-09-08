@@ -11,7 +11,7 @@ permissions:
   issues: write
 concurrency:
   group: comunicamundo-v4-main
-  cancel-in-progress: false
+  cancel-in-progress: true
 env:
   PROJECT_ID: comunicamundo-v4
   REGION: us-central1
