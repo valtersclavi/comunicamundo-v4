@@ -25,6 +25,14 @@ def required(name: str) -> str:
     return value
 
 
+def print_receipt(receipt: dict[str, object], uri: str) -> None:
+    compact = {**receipt, "receipt_uri": uri}
+    usage = compact.get("usage")
+    if isinstance(usage, dict):
+        compact["usage"] = {key: value for key, value in usage.items() if key != "calls"}
+    print(json.dumps(compact, ensure_ascii=False), flush=True)
+
+
 async def services() -> tuple[ProductRepository, Hefesto, storage.Client]:
     project = required("GOOGLE_CLOUD_PROJECT")
     repository = ProductRepository(required("HEFESTO_POSTGRES_URL"))
@@ -93,7 +101,7 @@ async def run(args: argparse.Namespace) -> None:
                     client, bucket_name=required("HEFESTO_GCS_BUCKET"),
                     execution_run_id=execution_id, payload=receipt,
                 )
-                print(json.dumps({**receipt, "receipt_uri": uri}, ensure_ascii=False), flush=True)
+                print_receipt(receipt, uri)
                 raise
             receipt = {
                 **(await hefesto.receipt(execution_id)),
@@ -105,7 +113,7 @@ async def run(args: argparse.Namespace) -> None:
                 client, bucket_name=required("HEFESTO_GCS_BUCKET"),
                 execution_run_id=execution_id, payload=receipt,
             )
-            print(json.dumps({**receipt, "receipt_uri": uri}, ensure_ascii=False), flush=True)
+            print_receipt(receipt, uri)
             return
         if args.command == "run-proof":
             request, request_uri = await asyncio.to_thread(
@@ -139,7 +147,7 @@ async def run(args: argparse.Namespace) -> None:
                     client, bucket_name=required("HEFESTO_GCS_BUCKET"),
                     execution_run_id=execution_id, payload=receipt,
                 )
-                print(json.dumps({**receipt, "receipt_uri": uri}, ensure_ascii=False), flush=True)
+                print_receipt(receipt, uri)
                 raise
             receipt = {
                 **(await hefesto.receipt(execution_id)),
@@ -151,7 +159,7 @@ async def run(args: argparse.Namespace) -> None:
                 client, bucket_name=required("HEFESTO_GCS_BUCKET"),
                 execution_run_id=execution_id, payload=receipt,
             )
-            print(json.dumps({**receipt, "receipt_uri": uri}, ensure_ascii=False), flush=True)
+            print_receipt(receipt, uri)
             return
         raise ValueError(f"unsupported command {args.command}")
     finally:

@@ -20,7 +20,7 @@ class StrictModel(BaseModel):
 class EditorialBrief(StrictModel):
     theme: str = Field(min_length=1)
     approach: str = Field(min_length=1)
-    duration_minutes: int = Field(gt=0)
+    duration_minutes: int = Field(ge=1)
     output_language: str = Field(min_length=2)
     audience: str = Field(min_length=1)
     product: str = Field(min_length=1)
@@ -110,13 +110,13 @@ class EditorialSubject(StrictModel):
     title: str = Field(min_length=1)
     editorial_role: str = Field(min_length=1)
     depth: str = Field(min_length=1)
-    allocated_minutes: float = Field(gt=0)
+    allocated_minutes: float = Field(ge=0.01)
 
 
 class EditorialProjectProposal(StrictModel):
     working_title: str = Field(min_length=1)
     editorial_promise: str = Field(min_length=1)
-    duration_minutes: int = Field(gt=0)
+    duration_minutes: int = Field(ge=1)
     source_supported_subjects: list[EditorialSubject] = Field(min_length=1)
     model_knowledge_suggestions: list[str] = Field(default_factory=list)
     source_enrichment_opportunities: list[str] = Field(default_factory=list)

@@ -4,7 +4,13 @@ from uuid import uuid4
 
 import pytest
 
-from comunicamundo_v4.hefesto.contracts import EditorialBrief, NormalizedSource, PlanningRequest, RunState
+from comunicamundo_v4.hefesto.contracts import (
+    EditorialBrief,
+    EditorialProjectProposal,
+    NormalizedSource,
+    PlanningRequest,
+    RunState,
+)
 from comunicamundo_v4.hefesto.segmentation import segment_sources
 from comunicamundo_v4.hefesto.prompts import paragraph_prompt
 from comunicamundo_v4.hefesto.service import Hefesto
@@ -48,6 +54,13 @@ def test_paragraph_is_comprehension_unit_and_sentence_is_evidence_address() -> N
     assert paragraphs[0].paragraph_id not in prompt
     assert "paragraph_number" not in prompt
     assert "sentence_id" not in prompt
+
+
+def test_provider_schema_uses_supported_inclusive_minimums() -> None:
+    schema = EditorialProjectProposal.model_json_schema()
+    serialized = str(schema)
+    assert "exclusiveMinimum" not in serialized
+    assert "'minimum': 1" in serialized
 
 
 @pytest.mark.asyncio
