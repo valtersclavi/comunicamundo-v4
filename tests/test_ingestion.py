@@ -181,6 +181,10 @@ def test_non_pdf_fails_before_model_work() -> None:
 def test_cli_is_product_generic_and_has_no_test_variant() -> None:
     root = parser()
     assert root.parse_args(["plan", "--request-base64", "e30="]).command == "plan"
+    execution_id = uuid4()
+    assert root.parse_args([
+        "plan", "--request-base64", "e30=", "--execution-run-id", str(execution_id)
+    ]).execution_run_id == execution_id
     with pytest.raises(SystemExit):
         root.parse_args(["run-proof", "--variant", "A"])
     with pytest.raises(SystemExit):

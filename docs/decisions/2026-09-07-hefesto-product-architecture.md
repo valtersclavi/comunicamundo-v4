@@ -8,6 +8,8 @@ This document replaces the graph, dossier, reducer, evidence-matrix, and multi-a
 
 `PDF references + user brief -> deterministic ingestion -> relational source structure -> paragraph digestion -> editorial understanding -> Narrative Axis -> human approval -> Editorial Project -> human approval -> production`
 
+The authenticated Editorial API is the product front door. It accepts the input contract, persists it immutably, derives an idempotent execution identity, dispatches the long-running canonical Cloud Run Job, and returns immediately. GitHub Actions is deployment and emergency-operation infrastructure; it is not an end-user ingestion mechanism.
+
 There is one generic input contract for every editorial project: a brief plus one or more `gs://` or public `https://` PDF references. Test names, source names, subjects, and file-specific download procedures never belong in product code.
 
 Ingestion is a zero-model product stage. It validates each PDF, preserves an immutable original, extracts layout-aware text, normalizes complete paragraphs, derives sentence addresses, persists the source structure in PostgreSQL, and emits a receipt before any paid call. A PDF without extractable text fails explicitly as requiring OCR; it is never silently treated as an empty source.
@@ -42,6 +44,8 @@ Requested duration is editorial capacity. It governs selection and depth in the 
 13. Hashes, UUIDs, ordinals, and source relations are code-owned. The model never has to reproduce identifiers or coordinates.
 14. Input normalization and relational source persistence complete before the first model call and report zero model invocations.
 15. Test cases are consumers of the public input contract. They cannot add workflows, source lists, or branches to the product implementation.
+16. Repeating an identical API submission cannot intentionally create another paid execution; dispatch identity is derived from the complete canonical request.
+17. The API is authenticated and asynchronous. It never keeps an HTTP request open for editorial processing and never exposes an unauthenticated endpoint capable of spending model tokens.
 
 ## Model contracts
 

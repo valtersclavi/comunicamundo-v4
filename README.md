@@ -37,6 +37,20 @@ Every editorial project enters through the same JSON contract. Tests, subjects, 
 
 Every operation emits a durable receipt with state, error details, stage timings, and exact provider usage when model calls occur.
 
+## Editorial API
+
+The authenticated Cloud Run service `hefesto-v4-api` is the product entry point. A client submits the same JSON contract directly; the API persists it immutably, assigns a stable execution identity, dispatches the canonical Job, and returns HTTP 202 without holding an editorial run open.
+
+```http
+POST /v1/plans
+GET  /v1/plans/{execution_run_id}
+POST /v1/plans/{execution_run_id}/resume
+POST /v1/plans/{execution_run_id}/approve-axis
+GET  /healthz
+```
+
+Submitting an identical manifest again returns the existing dispatch instead of starting another paid run. The API remains private under Cloud Run IAM; callers use a Google-signed identity token. It never accepts an unauthenticated request that can trigger model spend.
+
 ```bash
 comunicamundo-v4-worker ingest --request gs://bucket/project-input.json
 comunicamundo-v4-worker plan --request gs://bucket/project-input.json

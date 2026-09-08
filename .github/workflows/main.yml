@@ -14,6 +14,7 @@ env:
   REGION: us-central1
   REPOSITORY: comunicamundo-v4
   JOB_NAME: hefesto-v4-rebuild
+  API_NAME: hefesto-v4-api
   BUCKET: comunicamundo-v4-hefesto-30524898837
   WIF_PROVIDER: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
@@ -66,6 +67,32 @@ jobs:
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET}" \
             --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" \
             --quiet
+      - name: Authorize and deploy product API
+        run: |
+          set -euo pipefail
+          gcloud run jobs add-iam-policy-binding "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --member="serviceAccount:${RUNTIME_SA}" \
+            --role="roles/run.jobsExecutorWithOverrides" --quiet
+          gcloud run deploy "${API_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --image="${PINNED_IMAGE}" --service-account="${RUNTIME_SA}" \
+            --command=uvicorn \
+            --args="comunicamundo_v4.hefesto.api:app,--host,0.0.0.0,--port,8080" \
+            --cpu=1 --memory=1Gi --min=0 --max=10 --concurrency=40 --timeout=60 \
+            --no-allow-unauthenticated \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},HEFESTO_JOB_NAME=${JOB_NAME}" \
+            --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest" \
+            --quiet
+          gcloud run services add-iam-policy-binding "${API_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --member="serviceAccount:${DEPLOYER_SA}" \
+            --role="roles/run.invoker" --quiet
+          api_url="$(gcloud run services describe "${API_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --format='value(status.url)')"
+          test -n "${api_url}"
+          echo "HEFESTO_API_URL=${api_url}" >> "${GITHUB_ENV}"
       - name: Migrate PostgreSQL
         run: |
           set -euo pipefail

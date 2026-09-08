@@ -54,7 +54,7 @@ async def plan(args: argparse.Namespace) -> None:
         uri=getattr(args, "request", None),
         encoded=getattr(args, "request_base64", None),
     )
-    execution_id = uuid4()
+    execution_id = args.execution_run_id or uuid4()
     bucket_name = required("HEFESTO_GCS_BUCKET")
     stages: list[dict[str, object]] = []
     started = perf_counter()
@@ -325,6 +325,7 @@ def parser() -> argparse.ArgumentParser:
     _input_transport(ingestion)
     planning = commands.add_parser("plan")
     _input_transport(planning)
+    planning.add_argument("--execution-run-id", type=UUID)
     resume = commands.add_parser("resume-plan")
     resume.add_argument("--execution-run-id", type=UUID, required=True)
     approve = commands.add_parser("approve-axis")
