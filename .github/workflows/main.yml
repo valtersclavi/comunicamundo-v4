@@ -90,11 +90,9 @@ jobs:
           test -n "${migration}${check}"
           echo "MIGRATION_EXECUTION=${migration}" >> "${GITHUB_ENV}"
           echo "DATABASE_CHECK_EXECUTION=${check}" >> "${GITHUB_ENV}"
-      - name: Authorize and deploy product API
+      - name: Deploy product API
         run: |
           set -euo pipefail
-          project_number="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
-          iap_service_agent="service-${project_number}@gcp-sa-iap.iam.gserviceaccount.com"
           gcloud run jobs add-iam-policy-binding "${JOB_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
             --member="serviceAccount:${RUNTIME_SA}" \
@@ -105,20 +103,10 @@ jobs:
             --command=uvicorn \
             --args="comunicamundo_v4.hefesto.api:app,--host,0.0.0.0,--port,8080" \
             --cpu=1 --memory=1Gi --min=0 --max=10 --concurrency=40 --timeout=60 \
-            --no-allow-unauthenticated \
+            --allow-unauthenticated --no-iap \
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},HEFESTO_JOB_NAME=${JOB_NAME}" \
             --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest" \
             --quiet
-          gcloud run services add-iam-policy-binding "${API_NAME}" \
-            --project="${PROJECT_ID}" --region="${REGION}" \
-            --member="serviceAccount:${DEPLOYER_SA}" \
-            --role="roles/run.invoker" --quiet
-          gcloud run services add-iam-policy-binding "${API_NAME}" \
-            --project="${PROJECT_ID}" --region="${REGION}" \
-            --member="serviceAccount:${iap_service_agent}" \
-            --role="roles/run.invoker" --quiet
-          gcloud run services update "${API_NAME}" \
-            --project="${PROJECT_ID}" --region="${REGION}" --iap --quiet
           api_url="$(gcloud run services describe "${API_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
             --format='value(status.url)')"

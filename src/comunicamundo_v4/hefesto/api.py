@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
+from hashlib import pbkdf2_hmac, sha256
+import hmac
+import inspect
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 from typing import Any, Callable, Protocol
 from uuid import UUID, uuid4, uuid5
 
@@ -37,6 +40,13 @@ class AccessStore(Protocol):
     async def get_upload(self, upload_id: UUID, owner_id: str) -> dict[str, Any] | None: ...
     async def complete_upload(self, upload_id: UUID, owner_id: str) -> None: ...
     async def owns_source(self, owner_id: str, object_uri: str) -> bool: ...
+
+
+class AuthStore(Protocol):
+    async def authenticate(self, username: str, password: str) -> bool: ...
+    async def create_session(self, owner_id: str) -> str: ...
+    async def session_owner(self, token: str) -> str | None: ...
+    async def delete_session(self, token: str) -> None: ...
 
 
 class PostgresAccessStore:
@@ -74,6 +84,56 @@ class PostgresAccessStore:
         return bool(await self._call("owns_source", owner_id, object_uri))
 
 
+class PostgresAuthStore:
+    async def _call(self, method: str, *args: Any) -> Any:
+        repository = ProductRepository(_required("HEFESTO_POSTGRES_URL"))
+        await repository.open()
+        try:
+            return await getattr(repository, method)(*args)
+        finally:
+            await repository.close()
+
+    async def authenticate(self, username: str, password: str) -> bool:
+        credential = await self._call("auth_credential", username.strip().lower())
+        if credential is None:
+            await asyncio.to_thread(
+                pbkdf2_hmac, "sha256", password.encode(), b"invalid-credential", 600_000
+            )
+            return False
+        locked_until = credential["locked_until"]
+        if locked_until is not None and locked_until > datetime.now(UTC):
+            return False
+        candidate = await asyncio.to_thread(
+            pbkdf2_hmac,
+            "sha256",
+            password.encode(),
+            credential["salt"],
+            600_000,
+        )
+        valid = hmac.compare_digest(candidate, credential["password_hash"])
+        await self._call("record_auth_result", credential["username"], valid)
+        return valid
+
+    async def create_session(self, owner_id: str) -> str:
+        token = secrets.token_urlsafe(48)
+        await self._call(
+            "create_session",
+            owner_id,
+            sha256(token.encode()).hexdigest(),
+            datetime.now(UTC) + timedelta(days=7),
+        )
+        return token
+
+    async def session_owner(self, token: str) -> str | None:
+        if not token:
+            return None
+        return await self._call("session_owner", sha256(token.encode()).hexdigest())
+
+    async def delete_session(self, token: str) -> None:
+        if token:
+            await self._call("delete_session", sha256(token.encode()).hexdigest())
+
+
 class GoogleCloudRunDispatcher:
     def __init__(self, project: str, location: str, job: str) -> None:
         self._url = (
@@ -108,6 +168,12 @@ class UploadRequest(BaseModel):
     size_bytes: int = Field(ge=1, le=1_073_741_824)
 
 
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
 def _required(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -121,16 +187,6 @@ def _default_dispatcher() -> Dispatcher:
         os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
         os.environ.get("HEFESTO_JOB_NAME", "hefesto-v4-rebuild"),
     )
-
-
-def _iap_identity(request: Request) -> str:
-    value = request.headers.get("x-goog-authenticated-user-email", "")
-    prefix = "accounts.google.com:"
-    if not value.startswith(prefix) or "@" not in value:
-        raise HTTPException(
-            status_code=401, detail="authenticated Google account required"
-        )
-    return value[len(prefix):].strip().lower()
 
 
 def _canonical_request(request: EditorialInputRequest) -> tuple[dict[str, Any], bytes]:
@@ -305,7 +361,7 @@ async def _product_receipt(execution_id: UUID) -> dict[str, Any] | None:
 
 
 ReceiptReader = Callable[[UUID], Any]
-IdentityReader = Callable[[Request], str]
+IdentityReader = Callable[[Request], Any]
 
 
 def create_app(
@@ -315,10 +371,12 @@ def create_app(
     receipt_reader: ReceiptReader = _product_receipt,
     bucket_name: str | None = None,
     access_store: AccessStore | None = None,
-    identity_reader: IdentityReader = _iap_identity,
+    auth_store: AuthStore | None = None,
+    identity_reader: IdentityReader | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Hefesto Editorial API", version="2.0.0")
     access = access_store or PostgresAccessStore()
+    authentication = auth_store or PostgresAuthStore()
     web_root = Path(__file__).resolve().parent.parent / "web"
     app.mount(
         "/assets", StaticFiles(directory=web_root / "assets"), name="assets"
@@ -331,11 +389,19 @@ def create_app(
             dispatcher or _default_dispatcher(),
         )
 
-    def owner(request: Request) -> str:
-        return identity_reader(request)
+    async def owner(request: Request) -> str:
+        if identity_reader is not None:
+            value = identity_reader(request)
+            return await value if inspect.isawaitable(value) else value
+        owner_id = await authentication.session_owner(
+            request.cookies.get("hefesto_session", "")
+        )
+        if owner_id is None:
+            raise HTTPException(status_code=401, detail="login required")
+        return owner_id
 
     async def owned(execution_id: UUID, request: Request) -> str:
-        owner_id = owner(request)
+        owner_id = await owner(request)
         try:
             await access.assert_owner(execution_id, owner_id)
         except KeyError as error:
@@ -354,19 +420,44 @@ def create_app(
     async def health() -> dict[str, str]:
         return {"status": "ready", "service": "hefesto-editorial-api"}
 
+    @app.post("/v1/login")
+    async def login(credentials: LoginRequest, response: Response) -> dict[str, str]:
+        if not await authentication.authenticate(
+            credentials.username, credentials.password
+        ):
+            raise HTTPException(status_code=401, detail="usuário ou senha incorretos")
+        token = await authentication.create_session("hefesto-team")
+        response.set_cookie(
+            "hefesto_session", token, max_age=7 * 24 * 60 * 60,
+            secure=True, httponly=True, samesite="strict", path="/",
+        )
+        return {"username": credentials.username.strip().lower()}
+
+    @app.post("/v1/logout", status_code=204)
+    async def logout(request: Request, response: Response) -> Response:
+        await authentication.delete_session(
+            request.cookies.get("hefesto_session", "")
+        )
+        response.delete_cookie(
+            "hefesto_session", path="/", secure=True, httponly=True,
+            samesite="strict",
+        )
+        response.status_code = status.HTTP_204_NO_CONTENT
+        return response
+
     @app.get("/v1/me")
     async def me(request: Request) -> dict[str, str]:
-        return {"email": owner(request)}
+        return {"username": await owner(request)}
 
     @app.get("/v1/plans")
     async def plans(request: Request) -> dict[str, Any]:
-        return {"plans": await access.list_submissions(owner(request))}
+        return {"plans": await access.list_submissions(await owner(request))}
 
     @app.post("/v1/uploads", status_code=status.HTTP_201_CREATED)
     async def begin_upload(
         upload: UploadRequest, request: Request
     ) -> dict[str, Any]:
-        owner_id = owner(request)
+        owner_id = await owner(request)
         safe_name = re.sub(
             r"[^A-Za-z0-9._-]+", "-", Path(upload.file_name).name
         ).strip(".-") or "source.pdf"
@@ -405,7 +496,7 @@ def create_app(
 
     @app.put("/v1/uploads/{upload_id}", status_code=204)
     async def upload_chunk(upload_id: UUID, request: Request) -> Response:
-        record = await access.get_upload(upload_id, owner(request))
+        record = await access.get_upload(upload_id, await owner(request))
         if record is None:
             raise HTTPException(status_code=404, detail="unknown upload")
         if (
@@ -456,7 +547,7 @@ def create_app(
     async def complete_upload(
         upload_id: UUID, request: Request
     ) -> dict[str, Any]:
-        owner_id = owner(request)
+        owner_id = await owner(request)
         record = await access.get_upload(upload_id, owner_id)
         if record is None:
             raise HTTPException(status_code=404, detail="unknown upload")
@@ -489,7 +580,7 @@ def create_app(
         request: Request,
         response: Response,
     ) -> dict[str, Any]:
-        owner_id = owner(request)
+        owner_id = await owner(request)
         for source in editorial_request.sources:
             if source.uri.startswith("gs://") and not await access.owns_source(
                 owner_id, source.uri

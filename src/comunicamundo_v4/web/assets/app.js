@@ -20,6 +20,30 @@ async function api(path, options = {}) {
   return response.status === 204 ? null : response.json();
 }
 
+function showLogin() {
+  clearTimeout(state.timer);
+  $("#login-screen").hidden = false;
+  $("#login-password").value = "";
+}
+
+async function login(event) {
+  event.preventDefault(); clearError($("#login-error"));
+  const button = $("#login-button"); button.disabled = true; button.textContent = "Entrando…";
+  try {
+    await api("/v1/login", { method: "POST", body: JSON.stringify({ username: $("#login-username").value, password: $("#login-password").value }) });
+    const me = await api("/v1/me");
+    $("#identity").textContent = me.username;
+    $("#login-screen").hidden = true;
+    await loadHistory();
+  } catch (error) { showError($("#login-error"), error); }
+  finally { button.disabled = false; button.textContent = "Entrar"; }
+}
+
+async function logout() {
+  try { await api("/v1/logout", { method: "POST" }); } catch (_) {}
+  showLogin();
+}
+
 function showError(element, error) { element.textContent = error instanceof Error ? error.message : String(error); element.hidden = false; }
 function clearError(element) { element.hidden = true; element.textContent = ""; }
 function bytes(value) { if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`; return `${(value / 1024 / 1024).toFixed(1)} MB`; }
@@ -164,7 +188,8 @@ function newPlan() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  try { const me = await api("/v1/me"); $("#identity").textContent = me.email; } catch (_) { $("#identity").textContent = "Sessão indisponível"; }
+  $("#login-form").addEventListener("submit", login);
+  $("#logout").addEventListener("click", logout);
   $("#plan-form").addEventListener("submit", submitPlan);
   $("#files").addEventListener("change", (event) => addFiles(event.target.files));
   $("#file-list").addEventListener("click", (event) => { const index = event.target.dataset.remove; if (index !== undefined) { state.files.splice(Number(index), 1); renderFiles(); } });
@@ -177,5 +202,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#approve-project").addEventListener("click", () => runAction("approve-project", $("#approve-project"), "Aprovando…", "project_proposed"));
   $("#new-plan").addEventListener("click", newPlan); $("#back-to-form").addEventListener("click", newPlan);
   $("#history").addEventListener("click", (event) => { const item = event.target.closest(".history-item"); if (item) openExecution(item.dataset.id, item.dataset.title); });
-  await loadHistory();
+  try {
+    const me = await api("/v1/me");
+    $("#identity").textContent = me.username;
+    $("#login-screen").hidden = true;
+    await loadHistory();
+  } catch (_) { showLogin(); }
 });

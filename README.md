@@ -2,7 +2,7 @@
 
 Hefesto é um produto de planejamento editorial orientado pelas fontes e pela intenção do usuário.
 
-O serviço web autenticado é a única entrada de uso editorial. Nele, o usuário:
+O serviço web com login é a única entrada de uso editorial. Nele, o usuário:
 
 1. envia PDFs e/ou informa URLs públicas;
 2. define tema, abordagem, público, produto, idioma e duração;
@@ -14,7 +14,7 @@ O processamento é assíncrono e persistido. Uma atualização da página não p
 
 ## Arquitetura
 
-- Cloud Run Service: interface web e API autenticadas por Identity-Aware Proxy.
+- Cloud Run Service: tela de login, interface web e API protegida por sessão.
 - Cloud Run Job: processamento editorial de longa duração.
 - PostgreSQL: estado canônico, propriedade, estrutura das fontes, artefatos, etapas e consumo.
 - Cloud Storage: PDFs, solicitações e recibos imutáveis.
@@ -30,4 +30,4 @@ pytest
 uvicorn comunicamundo_v4.hefesto.api:app --reload
 ```
 
-Em desenvolvimento, a identidade deve ser injetada pelo ambiente de teste. Em produção, a aplicação aceita somente a identidade assinada pelo Identity-Aware Proxy.
+Em produção, somente a página inicial e o endpoint de login são públicos. Uploads, planejamentos, aprovações e histórico exigem uma sessão válida armazenada no PostgreSQL. A senha não é armazenada em texto aberto, e dez tentativas inválidas bloqueiam novas tentativas por quinze minutos.

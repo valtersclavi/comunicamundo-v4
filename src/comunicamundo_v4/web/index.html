@@ -8,12 +8,23 @@
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
+  <section id="login-screen" class="login-screen">
+    <form id="login-form" class="login-card">
+      <span class="brand-mark" aria-hidden="true">H</span>
+      <p class="eyebrow">Acesso à equipe</p>
+      <h1>Entrar no Hefesto</h1>
+      <label class="field"><span>Usuário</span><input id="login-username" autocomplete="username" required autofocus></label>
+      <label class="field"><span>Senha</span><input id="login-password" type="password" autocomplete="current-password" required></label>
+      <div id="login-error" class="notice error" role="alert" hidden></div>
+      <button id="login-button" class="primary-button" type="submit">Entrar</button>
+    </form>
+  </section>
   <header class="topbar">
     <a class="brand" href="/" aria-label="Hefesto — início">
       <span class="brand-mark" aria-hidden="true">H</span>
       <span>Hefesto</span>
     </a>
-    <div class="identity"><span class="status-dot"></span><span id="identity">Conta Google</span></div>
+    <div class="identity"><span class="status-dot"></span><span id="identity">Equipe Hefesto</span><button id="logout" class="logout-button" type="button">Sair</button></div>
   </header>
 
   <main class="shell">

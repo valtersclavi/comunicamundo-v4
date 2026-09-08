@@ -4,7 +4,7 @@ Status: canônica.
 
 ## Percurso do usuário
 
-`login Google → briefing + fontes → acompanhamento → Eixo Narrativo → aprovação humana → Projeto Editorial`
+`login da equipe → briefing + fontes → acompanhamento → Eixo Narrativo → aprovação humana → Projeto Editorial`
 
 A aplicação web e a API são entregues pelo mesmo Cloud Run Service. Isso mantém autenticação, interface e operações no mesmo domínio. O navegador envia PDFs em partes para a API; a API controla uma sessão retomável no Cloud Storage, sem limite prático de uma requisição HTTP única. URLs públicas também são aceitas.
 
@@ -46,5 +46,5 @@ Entrada: Eixo aprovado, briefing e entendimento. Saída: título de trabalho, pr
 - Toda chamada paga registra tokens de entrada, cache, saída, raciocínio, total, latência, resultado, erro e custo tarifado.
 - Toda etapa registra duração, estado e artefatos produzidos.
 - Falhas são persistidas e exibidas ao usuário com a causa real.
-- Nenhum endpoint capaz de iniciar processamento aceita acesso não autenticado.
+- Nenhum endpoint capaz de ler dados ou iniciar processamento aceita acesso sem sessão.
 - A interface, a API e o Job usam o mesmo contrato genérico para qualquer tema ou conjunto de fontes.

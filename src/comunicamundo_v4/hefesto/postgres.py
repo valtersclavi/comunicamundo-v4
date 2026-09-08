@@ -65,6 +65,68 @@ class ProductRepository:
                 database, value = await cursor.fetchone()
         return {"database": database, "ready": value == 1}
 
+    async def auth_credential(self, username: str) -> dict[str, Any] | None:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """SELECT username,password_salt,password_hash,failed_attempts,locked_until
+                   FROM hefesto_product.app_credential WHERE username=%s""",
+                (username,),
+            )
+            value = await row.fetchone()
+        if not value:
+            return None
+        return {
+            "username": value[0], "salt": bytes(value[1]), "password_hash": bytes(value[2]),
+            "failed_attempts": value[3], "locked_until": value[4],
+        }
+
+    async def record_auth_result(self, username: str, success: bool) -> None:
+        async with self._pool.connection() as connection:
+            if success:
+                await connection.execute(
+                    """UPDATE hefesto_product.app_credential
+                       SET failed_attempts=0,locked_until=NULL,updated_at=now()
+                       WHERE username=%s""",
+                    (username,),
+                )
+            else:
+                await connection.execute(
+                    """UPDATE hefesto_product.app_credential SET
+                       failed_attempts=failed_attempts+1,
+                       locked_until=CASE WHEN failed_attempts+1 >= 10
+                         THEN now()+interval '15 minutes' ELSE locked_until END,
+                       updated_at=now() WHERE username=%s""",
+                    (username,),
+                )
+
+    async def create_session(self, owner_id: str, token_hash: str, expires_at: Any) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """INSERT INTO hefesto_product.app_sessions(token_hash,owner_id,expires_at)
+                   VALUES (%s,%s,%s)""",
+                (token_hash, owner_id, expires_at),
+            )
+
+    async def session_owner(self, token_hash: str) -> str | None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                "DELETE FROM hefesto_product.app_sessions WHERE expires_at <= now()"
+            )
+            row = await connection.execute(
+                """SELECT owner_id FROM hefesto_product.app_sessions
+                   WHERE token_hash=%s AND expires_at > now()""",
+                (token_hash,),
+            )
+            value = await row.fetchone()
+        return str(value[0]) if value else None
+
+    async def delete_session(self, token_hash: str) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                "DELETE FROM hefesto_product.app_sessions WHERE token_hash=%s",
+                (token_hash,),
+            )
+
     async def register_submission(
         self,
         execution_run_id: UUID,

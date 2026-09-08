@@ -97,6 +97,24 @@ class Access:
         return any(item["owner_id"] == owner_id and item["status"] == "stored" and item["object_uri"] == object_uri for item in self.uploads.values())
 
 
+class Auth:
+    def __init__(self) -> None:
+        self.tokens: dict[str, str] = {}
+
+    async def authenticate(self, username: str, password: str) -> bool:
+        return username == "hefesto" and password == "correct-password"
+
+    async def create_session(self, owner_id: str) -> str:
+        self.tokens["test-session"] = owner_id
+        return "test-session"
+
+    async def session_owner(self, token: str):
+        return self.tokens.get(token)
+
+    async def delete_session(self, token: str) -> None:
+        self.tokens.pop(token, None)
+
+
 class Response:
     def raise_for_status(self) -> None:
         return None
@@ -265,6 +283,31 @@ def test_product_interface_is_the_root_entrypoint() -> None:
     assert response.status_code == 200
     assert "Transforme fontes" in response.text
     assert "/assets/app.js" in response.text
+
+
+def test_shared_login_protects_product_operations_with_server_session() -> None:
+    auth = Auth()
+    api = TestClient(
+        create_app(
+            client=Storage(), bucket_name="product", dispatcher=Dispatcher(),
+            access_store=Access(), auth_store=auth,
+        ),
+        base_url="https://hefesto.example",
+    )
+    assert api.get("/").status_code == 200
+    assert api.get("/v1/me").status_code == 401
+    assert api.post(
+        "/v1/login", json={"username": "hefesto", "password": "wrong"}
+    ).status_code == 401
+    logged_in = api.post(
+        "/v1/login", json={"username": "hefesto", "password": "correct-password"}
+    )
+    assert logged_in.status_code == 200
+    assert "HttpOnly" in logged_in.headers["set-cookie"]
+    assert "Secure" in logged_in.headers["set-cookie"]
+    assert api.get("/v1/me").json() == {"username": "hefesto-team"}
+    assert api.post("/v1/logout").status_code == 204
+    assert api.get("/v1/me").status_code == 401
 
 
 def test_execution_access_is_scoped_to_authenticated_user() -> None:
