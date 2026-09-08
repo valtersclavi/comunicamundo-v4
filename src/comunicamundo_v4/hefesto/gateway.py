@@ -36,9 +36,16 @@ class ModelGateway(Protocol):
 
 
 class ModelCallError(RuntimeError):
-    def __init__(self, message: str, usage: CallUsage | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        usage: CallUsage | None = None,
+        *,
+        retryable: bool = False,
+    ) -> None:
         super().__init__(message)
         self.usage = usage
+        self.retryable = retryable
 
 
 class VertexGateway:
@@ -77,7 +84,24 @@ class VertexGateway:
                 config=config,
             )
         except Exception as error:
-            raise ModelCallError(f"provider call failed: {error}") from error
+            latency = max(0, int((perf_counter() - started) * 1000))
+            message = f"provider call failed: {error}"
+            retryable = any(
+                marker in message.upper()
+                for marker in ("429", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE_EXCEEDED", "500", "502", "503", "504")
+            )
+            usage = CallUsage(
+                task_type=task_type,
+                prompt_tokens=0,
+                output_tokens=0,
+                reasoning_tokens=0,
+                total_tokens=0,
+                latency_ms=latency,
+                rated_cost_usd="0.000000000",
+                status="failed",
+                error_message=message[:2000],
+            )
+            raise ModelCallError(message, usage, retryable=retryable) from error
         latency = max(0, int((perf_counter() - started) * 1000))
         usage = _usage(task_type, response, latency)
         finish_reason = _finish_reason(response)

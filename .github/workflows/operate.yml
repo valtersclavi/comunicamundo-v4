@@ -6,7 +6,7 @@ on:
         description: Operation
         required: true
         type: choice
-        options: [test-a, inspect]
+        options: [test-a, resume, inspect]
       execution_run_id:
         description: Required only for inspect
         required: false
@@ -28,7 +28,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       contains(github.event.workflow_run.head_commit.message, '[test-a]'))
+       (contains(github.event.workflow_run.head_commit.message, '[test-a]') ||
+        contains(github.event.workflow_run.head_commit.message, '[resume]')))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -39,9 +40,18 @@ jobs:
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
       - name: Execute
+        env:
+          TRIGGER_MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_run" || "${{ inputs.operation }}" == "test-a" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_run" && "${TRIGGER_MESSAGE}" == *"[resume]"* ]]; then
+            execution_run_id="$(sed -n 's/^Resume Hefesto \([0-9a-f-]*\) \[resume\]$/\1/p' <<< "${TRIGGER_MESSAGE}")"
+            [[ "${execution_run_id}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+            args="resume-proof,--execution-run-id=${execution_run_id}"
+          elif [[ "${{ inputs.operation }}" == "resume" ]]; then
+            test -n "${{ inputs.execution_run_id }}"
+            args="resume-proof,--execution-run-id=${{ inputs.execution_run_id }}"
+          elif [[ "${{ github.event_name }}" == "workflow_run" || "${{ inputs.operation }}" == "test-a" ]]; then
             args="run-proof,--variant=A"
           else
             test -n "${{ inputs.execution_run_id }}"

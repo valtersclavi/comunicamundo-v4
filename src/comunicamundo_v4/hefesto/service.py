@@ -47,7 +47,7 @@ class Hefesto:
         repository: Repository,
         gateway: ModelGateway,
         *,
-        concurrency: int = 20,
+        concurrency: int = 6,
     ) -> None:
         if concurrency <= 0:
             raise ValueError("concurrency must be positive")
@@ -247,7 +247,7 @@ class Hefesto:
         max_output_tokens: int,
         thinking_tokens: int,
     ) -> ModelResult[OutputT]:
-        for attempt in range(2):
+        for attempt in range(6):
             try:
                 result = await self._gateway.generate(
                     task_type=task_type,
@@ -265,7 +265,10 @@ class Hefesto:
                     await self._repository.record_usage(
                         run.execution_run_id, run.project_id, failed
                     )
-                if attempt == 0:
+                if error.retryable and attempt < 5:
+                    await asyncio.sleep(min(30, 2 ** (attempt + 1)))
+                    continue
+                if not error.retryable and attempt == 0:
                     continue
                 raise
             await self._repository.record_usage(

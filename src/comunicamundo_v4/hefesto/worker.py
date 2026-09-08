@@ -67,6 +67,46 @@ async def run(args: argparse.Namespace) -> None:
         if args.command == "inspect":
             print(json.dumps(await hefesto.receipt(args.execution_run_id), ensure_ascii=False))
             return
+        if args.command == "resume-proof":
+            execution_id = args.execution_run_id
+            stages: list[dict[str, object]] = []
+            active_stage = "digestion"
+            started = perf_counter()
+            try:
+                current = await hefesto.resume_digest(execution_id)
+                stages.append({"stage": active_stage, "duration_ms": int((perf_counter() - started) * 1000)})
+                active_stage, started = "narrative_axis", perf_counter()
+                current = await hefesto.propose_axis(execution_id)
+                stages.append({"stage": active_stage, "duration_ms": int((perf_counter() - started) * 1000)})
+                active_stage, started = "editorial_project", perf_counter()
+                await hefesto.approve_axis_and_propose_project(execution_id)
+                stages.append({"stage": active_stage, "duration_ms": int((perf_counter() - started) * 1000)})
+            except Exception:
+                stages.append({"stage": active_stage, "status": "failed", "duration_ms": int((perf_counter() - started) * 1000)})
+                receipt = {
+                    **(await hefesto.receipt(execution_id)),
+                    "proof": {"resumed": True},
+                    "stages": stages,
+                    "generated_at": datetime.now(UTC).isoformat(),
+                }
+                uri = persist_receipt(
+                    client, bucket_name=required("HEFESTO_GCS_BUCKET"),
+                    execution_run_id=execution_id, payload=receipt,
+                )
+                print(json.dumps({**receipt, "receipt_uri": uri}, ensure_ascii=False), flush=True)
+                raise
+            receipt = {
+                **(await hefesto.receipt(execution_id)),
+                "proof": {"resumed": True},
+                "stages": stages,
+                "generated_at": datetime.now(UTC).isoformat(),
+            }
+            uri = persist_receipt(
+                client, bucket_name=required("HEFESTO_GCS_BUCKET"),
+                execution_run_id=execution_id, payload=receipt,
+            )
+            print(json.dumps({**receipt, "receipt_uri": uri}, ensure_ascii=False), flush=True)
+            return
         if args.command == "run-proof":
             request, request_uri = await asyncio.to_thread(
                 stage_proof_request,
@@ -133,6 +173,8 @@ def parser() -> argparse.ArgumentParser:
     approve.add_argument("--execution-run-id", type=UUID, required=True)
     inspect = commands.add_parser("inspect")
     inspect.add_argument("--execution-run-id", type=UUID, required=True)
+    resume_proof = commands.add_parser("resume-proof")
+    resume_proof.add_argument("--execution-run-id", type=UUID, required=True)
     proof = commands.add_parser("run-proof")
     proof.add_argument("--variant", choices=("A",), required=True)
     return root

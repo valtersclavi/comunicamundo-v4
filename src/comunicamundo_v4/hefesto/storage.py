@@ -44,10 +44,9 @@ def persist_receipt(
     execution_run_id: UUID,
     payload: dict[str, Any],
 ) -> str:
-    return persist_json_immutable(
-        client,
-        bucket_name=bucket_name,
-        name=f"hefesto-product/executions/{execution_run_id}/receipt.json",
-        payload=payload,
+    name = f"hefesto-product/executions/{execution_run_id}/receipt.json"
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
+    client.bucket(bucket_name).blob(name).upload_from_string(
+        data, content_type="application/json"
     )
-
+    return f"gs://{bucket_name}/{name}"

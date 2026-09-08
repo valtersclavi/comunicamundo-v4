@@ -80,7 +80,7 @@ Output: working title, editorial promise, source-supported core subjects sized t
 
 ## Cost and complexity law
 
-Each paragraph is read successfully by the model once. A malformed or interrupted provider attempt may be repeated once, and every attempt is charged to the receipt. Downstream stages receive compact paragraph notes or the single understanding, never the complete source plus successive verbose rewrites. Increasing concurrency may reduce elapsed time; it cannot change call cardinality or add semantic layers.
+Each paragraph is read successfully by the model once. A malformed response may be repeated once. Transient provider errors such as quota pressure may use bounded exponential backoff; zero-token and paid attempts alike appear in the receipt. Completed paragraph notes are never reread on resume. Downstream stages receive compact paragraph notes or the single understanding, never the complete source plus successive verbose rewrites. Increasing concurrency may reduce elapsed time; it cannot change successful semantic cardinality or add layers.
 
 ## Acceptance proof
 
