@@ -57,7 +57,8 @@ jobs:
             sleep 1
           done
           jq -e '.status == "ready" and .service == "hefesto-editorial-api"' /tmp/health.json
-          curl --fail --silent http://127.0.0.1:8080/ | grep -q 'Transforme fontes'
+          curl --fail --silent http://127.0.0.1:8080/ >/tmp/product.html
+          grep -q 'Transforme fontes' /tmp/product.html
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.PROJECT_ID }}
