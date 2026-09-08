@@ -273,8 +273,20 @@ def create_app(
             raise HTTPException(status_code=404, detail="unknown execution")
         return dispatch
 
+    async def required_receipt(execution_id: UUID) -> dict[str, Any]:
+        receipt = await receipt_reader(execution_id)
+        if receipt is None:
+            raise HTTPException(status_code=404, detail="unknown product execution")
+        return receipt
+
     @app.post("/v1/plans/{execution_id}/resume", status_code=status.HTTP_202_ACCEPTED)
     async def resume_plan(execution_id: UUID) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id)
+        if receipt["status"] not in {"failed", "digesting", "source_structure_ready"}:
+            raise HTTPException(
+                status_code=409,
+                detail=f"execution in {receipt['status']} does not require digestion resume",
+            )
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "resume-plan"
@@ -287,6 +299,14 @@ def create_app(
         status_code=status.HTTP_202_ACCEPTED,
     )
     async def approve_axis(execution_id: UUID) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id)
+        if receipt["status"] == "project_proposed":
+            return receipt
+        if receipt["status"] != "axis_proposed":
+            raise HTTPException(
+                status_code=409,
+                detail=f"execution in {receipt['status']} has no proposed Axis to approve",
+            )
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "approve-axis"

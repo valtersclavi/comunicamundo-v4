@@ -79,16 +79,16 @@ def request() -> dict[str, object]:
     }
 
 
-def client(storage: Storage, dispatcher: Dispatcher) -> TestClient:
-    async def no_receipt(execution_id: UUID):
-        return None
+def client(storage: Storage, dispatcher: Dispatcher, receipt=None) -> TestClient:
+    async def receipt_reader(execution_id: UUID):
+        return receipt
 
     return TestClient(
         create_app(
             client=storage,
             bucket_name="product",
             dispatcher=dispatcher,
-            receipt_reader=no_receipt,
+            receipt_reader=receipt_reader,
         )
     )
 
@@ -168,7 +168,7 @@ def test_api_exposes_dispatch_state_before_product_run_exists() -> None:
 
 def test_api_dispatches_human_gate_as_separate_action() -> None:
     storage, dispatcher = Storage(), Dispatcher()
-    api = client(storage, dispatcher)
+    api = client(storage, dispatcher, receipt={"status": "axis_proposed"})
     submitted = api.post("/v1/plans", json=request()).json()
     execution_id = submitted["execution_run_id"]
     first = api.post(f"/v1/plans/{execution_id}/approve-axis")
@@ -179,6 +179,15 @@ def test_api_dispatches_human_gate_as_separate_action() -> None:
     assert dispatcher.calls[1] == [
         "approve-axis", f"--execution-run-id={execution_id}"
     ]
+
+
+def test_api_rejects_human_gate_before_axis_exists() -> None:
+    storage, dispatcher = Storage(), Dispatcher()
+    api = client(storage, dispatcher, receipt={"status": "understanding_ready"})
+    execution_id = uuid4()
+    response = api.post(f"/v1/plans/{execution_id}/approve-axis")
+    assert response.status_code == 409
+    assert dispatcher.calls == []
 
 
 def test_api_rejects_invalid_manifest_before_dispatch() -> None:
