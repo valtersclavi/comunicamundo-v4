@@ -1,5 +1,7 @@
 name: operate-hefesto
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       operation:
@@ -27,6 +29,8 @@ jobs:
   operate:
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       contains(github.event.head_commit.message, '[inspect]')) ||
       (github.event.workflow_run.conclusion == 'success' &&
        contains(github.event.workflow_run.head_commit.message, '[test-a]'))
     runs-on: ubuntu-latest
@@ -41,16 +45,29 @@ jobs:
       - name: Execute
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_run" || "${{ inputs.operation }}" == "test-a" ]]; then
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            message='${{ github.event.head_commit.message }}'
+            execution="$(sed -n 's/^Inspect Cloud Run \(hefesto-v4-rebuild-[a-z0-9]*\) \[inspect\]$/\1/p' <<< "${message}")"
+            test -n "${execution}"
+            status=0
+          elif [[ "${{ github.event_name }}" == "workflow_run" || "${{ inputs.operation }}" == "test-a" ]]; then
             args="run-proof,--variant=A"
+            set +e
+            execution="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args="${args}" --wait --format='value(metadata.name)')"
+            status=$?
+            set -e
           else
             test -n "${{ inputs.execution_run_id }}"
             args="inspect,--execution-run-id=${{ inputs.execution_run_id }}"
+            set +e
+            execution="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args="${args}" --wait --format='value(metadata.name)')"
+            status=$?
+            set -e
           fi
-          execution="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args="${args}" --wait --format='value(metadata.name)')"
           echo "Execution: ${execution}" >> "${GITHUB_STEP_SUMMARY}"
           filter="resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"${execution}\""
-          gcloud logging read "${filter}" --project="${PROJECT_ID}" --freshness=2h --order=asc --limit=100 --format='value(textPayload)' | tee /tmp/result.log
+          gcloud logging read "${filter}" --project="${PROJECT_ID}" --freshness=2h --order=asc --limit=1000 --format='value(textPayload)' | tee /tmp/result.log
           echo '```json' >> "${GITHUB_STEP_SUMMARY}"
           tail -1 /tmp/result.log >> "${GITHUB_STEP_SUMMARY}"
           echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status}"
