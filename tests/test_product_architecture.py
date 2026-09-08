@@ -64,6 +64,19 @@ def test_provider_schema_uses_supported_inclusive_minimums() -> None:
 
 
 @pytest.mark.asyncio
+async def test_prepare_persists_relational_structure_without_calling_the_model() -> None:
+    repository = MemoryRepository()
+    gateway = FakeGateway()
+    hefesto = Hefesto(repository, gateway)
+    run = await hefesto.prepare(request())
+    assert run.state is RunState.SOURCE_STRUCTURE_READY
+    assert gateway.calls == []
+    paragraphs = repository.structures[run.execution_run_id]
+    assert len(paragraphs) == 5
+    assert sum(len(item.sentences) for item in paragraphs) == 6
+
+
+@pytest.mark.asyncio
 async def test_brief_and_duration_guide_every_editorial_stage() -> None:
     repository = MemoryRepository()
     gateway = FakeGateway()

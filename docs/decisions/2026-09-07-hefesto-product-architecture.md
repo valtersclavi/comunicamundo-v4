@@ -6,7 +6,11 @@ This document replaces the graph, dossier, reducer, evidence-matrix, and multi-a
 
 ## Product flow
 
-`sources + user brief -> paragraph digestion -> editorial understanding -> Narrative Axis -> human approval -> Editorial Project -> human approval -> production`
+`PDF references + user brief -> deterministic ingestion -> relational source structure -> paragraph digestion -> editorial understanding -> Narrative Axis -> human approval -> Editorial Project -> human approval -> production`
+
+There is one generic input contract for every editorial project: a brief plus one or more `gs://` or public `https://` PDF references. Test names, source names, subjects, and file-specific download procedures never belong in product code.
+
+Ingestion is a zero-model product stage. It validates each PDF, preserves an immutable original, extracts layout-aware text, normalizes complete paragraphs, derives sentence addresses, persists the source structure in PostgreSQL, and emits a receipt before any paid call. A PDF without extractable text fails explicitly as requiring OCR; it is never silently treated as an empty source.
 
 The brief is present before digestion. It carries the user's intention, audience, product, output language, and requested duration. It may guide attention and relevance, but it may not change what a source says or authorize unsupported claims.
 
@@ -36,6 +40,8 @@ Requested duration is editorial capacity. It governs selection and depth in the 
 11. No renderer or production work occurs before Project approval.
 12. Every paid call is recorded with provider-reported usage, latency, outcome, and rated cost. Completed work is resumable by deterministic identity.
 13. Hashes, UUIDs, ordinals, and source relations are code-owned. The model never has to reproduce identifiers or coordinates.
+14. Input normalization and relational source persistence complete before the first model call and report zero model invocations.
+15. Test cases are consumers of the public input contract. They cannot add workflows, source lists, or branches to the product implementation.
 
 ## Model contracts
 
@@ -86,6 +92,9 @@ Each paragraph is read successfully by the model once. A malformed response may 
 
 Before a paid multifonte run:
 
+- a real text PDF proves layout extraction and paragraph normalization;
+- generic ingress proves immutable source capture and emits a zero-model receipt;
+- PostgreSQL structure persistence completes before any model invocation;
 - unit tests prove paragraph partition completeness and uniqueness;
 - tests prove the brief and duration reach paragraph digestion, understanding, Axis, and Project;
 - tests prove free-form tags survive without ontology coercion;
@@ -95,4 +104,4 @@ Before a paid multifonte run:
 - tests prove failure resumes completed paragraph batches without rereading them;
 - no-model CI, image build, PostgreSQL migration, and startup smoke pass.
 
-The first paid proof runs Test A only and stops at the proposed Editorial Project. Test B, renderer, and production remain blocked until the receipt shows a valid understanding, Axis, Project, exact token usage, latency, and rated cost.
+Any acceptance corpus is submitted through the same product contract and must not modify code. A planning operation stops at the proposed Narrative Axis; an explicit human approval action may then produce the proposed Editorial Project. Renderer and production remain blocked until Project approval.

@@ -3,17 +3,22 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Operation
+        description: Product operation
         required: true
         type: choice
-        options: [test-a, resume, inspect]
-      execution_run_id:
-        description: Required only for inspect
+        options: [ingest, plan, resume-plan, approve-axis, inspect]
+      request_uri:
+        description: gs:// manifest URI for ingest or plan
         required: false
         type: string
-  workflow_run:
-    workflows: [main]
-    types: [completed]
+      request_base64:
+        description: Base64 JSON manifest for ingest or plan
+        required: false
+        type: string
+      execution_run_id:
+        description: UUID for resume-plan, approve-axis or inspect
+        required: false
+        type: string
 permissions:
   contents: read
   id-token: write
@@ -25,13 +30,8 @@ env:
   DEPLOYER_SA: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
 jobs:
   operate:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       (contains(github.event.workflow_run.head_commit.message, '[test-a]') ||
-        contains(github.event.workflow_run.head_commit.message, '[resume]')))
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - uses: google-github-actions/auth@v3
         with:
@@ -39,24 +39,33 @@ jobs:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Execute
+      - name: Execute product operation
         env:
-          TRIGGER_MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
+          OPERATION: ${{ inputs.operation }}
+          REQUEST_URI: ${{ inputs.request_uri }}
+          REQUEST_BASE64: ${{ inputs.request_base64 }}
+          EXECUTION_RUN_ID: ${{ inputs.execution_run_id }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_run" && "${TRIGGER_MESSAGE}" == *"[resume]"* ]]; then
-            execution_run_id="$(sed -n 's/^Resume Hefesto \([0-9a-f-]*\) \[resume\]$/\1/p' <<< "${TRIGGER_MESSAGE}")"
-            [[ "${execution_run_id}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
-            args="resume-proof,--execution-run-id=${execution_run_id}"
-          elif [[ "${{ inputs.operation }}" == "resume" ]]; then
-            test -n "${{ inputs.execution_run_id }}"
-            args="resume-proof,--execution-run-id=${{ inputs.execution_run_id }}"
-          elif [[ "${{ github.event_name }}" == "workflow_run" || "${{ inputs.operation }}" == "test-a" ]]; then
-            args="run-proof,--variant=A"
-          else
-            test -n "${{ inputs.execution_run_id }}"
-            args="inspect,--execution-run-id=${{ inputs.execution_run_id }}"
-          fi
+          case "${OPERATION}" in
+            ingest|plan)
+              if [[ -n "${REQUEST_URI}" && -z "${REQUEST_BASE64}" ]]; then
+                args="${OPERATION},--request=${REQUEST_URI}"
+              elif [[ -z "${REQUEST_URI}" && -n "${REQUEST_BASE64}" ]]; then
+                args="${OPERATION},--request-base64=${REQUEST_BASE64}"
+              else
+                echo "ingest/plan require exactly one request transport" >&2
+                exit 2
+              fi
+              test -z "${EXECUTION_RUN_ID}"
+              ;;
+            resume-plan|approve-axis|inspect)
+              [[ "${EXECUTION_RUN_ID}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+              test -z "${REQUEST_URI}${REQUEST_BASE64}"
+              args="${OPERATION},--execution-run-id=${EXECUTION_RUN_ID}"
+              ;;
+            *) exit 2 ;;
+          esac
           set +e
           gcloud run jobs execute "${JOB_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
@@ -70,15 +79,18 @@ jobs:
             execution="$(sed -n 's/.*executions describe \([^ ]*\).*/\1/p' /tmp/execution.err | tail -1)"
           fi
           test -n "${execution}"
-          echo "Execution: ${execution}" >> "${GITHUB_STEP_SUMMARY}"
           filter="resource.type=\"cloud_run_job\" AND labels.\"run.googleapis.com/execution_name\"=\"${execution}\""
           gcloud logging read "${filter}" --project="${PROJECT_ID}" \
-            --freshness=2h --order=asc --limit=1000 --format=json >/tmp/cloud-logs.json
+            --freshness=4h --order=asc --limit=2000 --format=json >/tmp/cloud-logs.json
           jq -r '.[] | .textPayload // empty' /tmp/cloud-logs.json
-          receipt="$(jq -c '[.[] | select(.jsonPayload.execution_run_id? != null) | .jsonPayload] | last // empty' /tmp/cloud-logs.json)"
+          receipt="$(jq -c '[.[] | select(.jsonPayload.status? != null) | .jsonPayload] | last // empty' /tmp/cloud-logs.json)"
           test -n "${receipt}"
-          echo "RECEIPT=${receipt}"
-          echo '```json' >> "${GITHUB_STEP_SUMMARY}"
-          echo "${receipt}" >> "${GITHUB_STEP_SUMMARY}"
-          echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          {
+            echo "# Hefesto operation"
+            echo "- Operation: \`${OPERATION}\`"
+            echo "- Cloud Run execution: \`${execution}\`"
+            echo '```json'
+            echo "${receipt}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
           exit "${status}"

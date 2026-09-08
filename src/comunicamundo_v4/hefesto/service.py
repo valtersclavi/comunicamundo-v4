@@ -61,11 +61,24 @@ class Hefesto:
         *,
         execution_run_id: UUID | None = None,
     ) -> ProductRun:
-        run = await self._load_or_create(request, execution_run_id)
+        run = await self.prepare(request, execution_run_id=execution_run_id)
+        return await self._digest_prepared(run)
+
+    async def digest_prepared(self, execution_run_id: UUID) -> ProductRun:
+        run = await self._required_run(execution_run_id)
+        if run.state is RunState.FAILED:
+            raise ValueError("failed digestion must be resumed explicitly")
+        return await self._digest_prepared(run)
+
+    async def _digest_prepared(self, run: ProductRun) -> ProductRun:
         if run.understanding is not None:
             return run
-        paragraphs = segment_sources(request.sources)
-        await self._repository.save_structure(run.execution_run_id, paragraphs)
+        if run.state is RunState.SOURCE_STRUCTURE_READY:
+            run = run.model_copy(
+                update={"state": RunState.DIGESTING, "updated_at": datetime.now(UTC)}
+            )
+            await self._repository.save_run(run)
+        paragraphs = segment_sources(run.request.sources)
         existing = {item.paragraph_id: item for item in await self._repository.notes(run.execution_run_id)}
         missing = [item for item in paragraphs if item.paragraph_id not in existing]
         try:
@@ -77,7 +90,7 @@ class Hefesto:
             result = await self._call(
                 run,
                 task_type="editorial_understanding",
-                prompt=understanding_prompt(request.brief, notes),
+                prompt=understanding_prompt(run.request.brief, notes),
                 schema=EditorialUnderstandingProposal,
                 max_output_tokens=8_192,
                 thinking_tokens=2_000,
@@ -101,6 +114,17 @@ class Hefesto:
         except Exception as error:
             await self._fail(run, error)
             raise
+
+    async def prepare(
+        self,
+        request: PlanningRequest,
+        *,
+        execution_run_id: UUID | None = None,
+    ) -> ProductRun:
+        run = await self._load_or_create(request, execution_run_id)
+        paragraphs = segment_sources(request.sources)
+        await self._repository.save_structure(run.execution_run_id, paragraphs)
+        return run
 
     async def resume_digest(self, execution_run_id: UUID) -> ProductRun:
         run = await self._repository.get_run(execution_run_id)
@@ -293,7 +317,7 @@ class Hefesto:
             if existing.state is RunState.FAILED:
                 existing = existing.model_copy(
                     update={
-                        "state": RunState.DIGESTING,
+                        "state": RunState.SOURCE_STRUCTURE_READY,
                         "error_class": None,
                         "error_message": None,
                         "updated_at": datetime.now(UTC),

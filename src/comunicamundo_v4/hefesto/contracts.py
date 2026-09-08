@@ -26,6 +26,18 @@ class EditorialBrief(StrictModel):
     product: str = Field(min_length=1)
 
 
+class SourceInput(StrictModel):
+    uri: str = Field(pattern=r"^(gs://|https://)", min_length=8)
+    title: str | None = None
+    language: str = Field(default="und", min_length=2)
+
+
+class EditorialInputRequest(StrictModel):
+    project_id: UUID = Field(default_factory=uuid4)
+    brief: EditorialBrief
+    sources: list[SourceInput] = Field(min_length=1, max_length=64)
+
+
 class NormalizedSource(StrictModel):
     source_id: UUID = Field(default_factory=uuid4)
     text: str = Field(min_length=1)
@@ -38,6 +50,32 @@ class PlanningRequest(StrictModel):
     project_id: UUID = Field(default_factory=uuid4)
     brief: EditorialBrief
     sources: list[NormalizedSource] = Field(min_length=1)
+
+
+class IngestedSource(StrictModel):
+    source_id: UUID
+    source_ordinal: int = Field(ge=1)
+    input_uri: str
+    original_uri: str = Field(pattern=r"^gs://")
+    content_type: str
+    bytes: int = Field(ge=1)
+    pages: int = Field(ge=1)
+    characters: int = Field(ge=1)
+    paragraphs: int = Field(ge=1)
+    sentences: int = Field(ge=1)
+    binary_sha256: Sha256
+    normalized_text_sha256: Sha256
+
+
+class IngestionReceipt(StrictModel):
+    status: str
+    project_id: UUID
+    normalized_request_uri: str = Field(pattern=r"^gs://")
+    source_count: int = Field(ge=1)
+    paragraph_count: int = Field(ge=1)
+    sentence_count: int = Field(ge=1)
+    model_invocations: int = Field(default=0, ge=0)
+    sources: list[IngestedSource] = Field(min_length=1)
 
 
 class Sentence(StrictModel):
@@ -139,6 +177,7 @@ class EditorialProjectRecord(StrictModel):
 
 
 class RunState(StrEnum):
+    SOURCE_STRUCTURE_READY = "source_structure_ready"
     DIGESTING = "digesting"
     UNDERSTANDING_READY = "understanding_ready"
     AXIS_PROPOSED = "axis_proposed"
@@ -151,7 +190,7 @@ class RunState(StrEnum):
 class ProductRun(StrictModel):
     execution_run_id: UUID = Field(default_factory=uuid4)
     project_id: UUID
-    state: RunState = RunState.DIGESTING
+    state: RunState = RunState.SOURCE_STRUCTURE_READY
     request: PlanningRequest
     understanding: EditorialUnderstanding | None = None
     axis: NarrativeAxisRecord | None = None
