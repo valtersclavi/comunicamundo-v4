@@ -10,7 +10,13 @@ from uuid import UUID
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from .contracts import CallUsage, Paragraph, ParagraphNote, ProductRun
+from .contracts import (
+    CallUsage,
+    EditorialCondensation,
+    Paragraph,
+    ProductRun,
+    SelectionBatch,
+)
 
 
 def apply_migrations(direct_url: str, directory: str = "/app/migrations") -> list[str]:
@@ -308,44 +314,108 @@ class ProductRepository:
 
     async def save_structure(self, execution_run_id: UUID, paragraphs: Sequence[Paragraph]) -> None:
         async with self._pool.connection() as connection:
-            for paragraph in paragraphs:
-                await connection.execute(
+            async with connection.cursor() as cursor:
+                await cursor.executemany(
                     """INSERT INTO hefesto_product.paragraphs
                        (execution_run_id,paragraph_id,source_id,source_ordinal,paragraph_ordinal,text,payload)
                        VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING""",
-                    (
+                    [(
                         execution_run_id, paragraph.paragraph_id, paragraph.source_id,
                         paragraph.source_ordinal, paragraph.ordinal, paragraph.text,
                         paragraph.model_dump_json(),
-                    ),
+                    ) for paragraph in paragraphs],
                 )
-                for sentence in paragraph.sentences:
-                    await connection.execute(
+                await cursor.executemany(
                         """INSERT INTO hefesto_product.sentences
                            (execution_run_id,paragraph_id,sentence_id,ordinal,text)
                            VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
-                        (execution_run_id, paragraph.paragraph_id, sentence.sentence_id, sentence.ordinal, sentence.text),
+                        [
+                            (
+                                execution_run_id, paragraph.paragraph_id,
+                                sentence.sentence_id, sentence.ordinal, sentence.text,
+                            )
+                            for paragraph in paragraphs
+                            for sentence in paragraph.sentences
+                        ],
                     )
 
-    async def save_note(self, execution_run_id: UUID, note: ParagraphNote) -> None:
+    async def save_selection_batch(
+        self, execution_run_id: UUID, batch: SelectionBatch
+    ) -> None:
         async with self._pool.connection() as connection:
             await connection.execute(
-                """INSERT INTO hefesto_product.paragraph_notes
-                   (execution_run_id,paragraph_id,source_id,payload)
-                   VALUES (%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING""",
-                (execution_run_id, note.paragraph_id, note.source_id, note.model_dump_json()),
+                """INSERT INTO hefesto_product.selection_batches
+                   (execution_run_id,batch_id,source_id,source_ordinal,
+                    first_passage_ordinal,last_passage_ordinal,input_tokens,payload)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING""",
+                (
+                    execution_run_id, batch.batch_id, batch.source_id,
+                    batch.source_ordinal, batch.first_passage_ordinal,
+                    batch.last_passage_ordinal, batch.input_tokens,
+                    batch.model_dump_json(),
+                ),
             )
 
-    async def notes(self, execution_run_id: UUID) -> list[ParagraphNote]:
+    async def selection_batches(
+        self, execution_run_id: UUID
+    ) -> list[SelectionBatch]:
         async with self._pool.connection() as connection:
             rows = await connection.execute(
-                """SELECT n.payload FROM hefesto_product.paragraph_notes n
-                   JOIN hefesto_product.paragraphs p USING(execution_run_id,paragraph_id)
-                   WHERE n.execution_run_id=%s ORDER BY p.source_ordinal,p.paragraph_ordinal""",
+                """SELECT payload FROM hefesto_product.selection_batches
+                   WHERE execution_run_id=%s
+                   ORDER BY source_ordinal,first_passage_ordinal""",
                 (execution_run_id,),
             )
             values = await rows.fetchall()
-        return [ParagraphNote.model_validate(item[0]) for item in values]
+        return [SelectionBatch.model_validate(item[0]) for item in values]
+
+    async def save_condensation(
+        self, execution_run_id: UUID, unit: EditorialCondensation
+    ) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """INSERT INTO hefesto_product.editorial_condensations
+                   (execution_run_id,unit_id,level,ordinal,input_tokens,payload)
+                   VALUES (%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING""",
+                (
+                    execution_run_id, unit.unit_id, unit.level, unit.ordinal,
+                    unit.input_tokens, unit.model_dump_json(),
+                ),
+            )
+
+    async def condensations(
+        self, execution_run_id: UUID
+    ) -> list[EditorialCondensation]:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT payload FROM hefesto_product.editorial_condensations
+                   WHERE execution_run_id=%s ORDER BY level,ordinal""",
+                (execution_run_id,),
+            )
+            values = await rows.fetchall()
+        return [EditorialCondensation.model_validate(item[0]) for item in values]
+
+    async def work_report(self, execution_run_id: UUID) -> dict[str, object]:
+        batches = await self.selection_batches(execution_run_id)
+        condensations = await self.condensations(execution_run_id)
+        selected: set[tuple[int, int]] = set()
+        for batch in batches:
+            flags = batch.flags
+            ordinals = {
+                *flags.relevant, *flags.central, *flags.uncertain,
+                *flags.include_previous, *flags.include_next,
+                *(ordinal - 1 for ordinal in flags.include_previous),
+                *(ordinal + 1 for ordinal in flags.include_next),
+            }
+            selected.update(
+                (batch.source_ordinal, ordinal)
+                for ordinal in ordinals if ordinal > 0
+            )
+        return {
+            "selection_batches": len(batches),
+            "selected_passages": len(selected),
+            "condensation_units": len(condensations),
+        }
 
     async def record_usage(self, execution_run_id: UUID, project_id: UUID, usage: CallUsage) -> None:
         async with self._pool.connection() as connection:

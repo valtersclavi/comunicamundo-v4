@@ -1,99 +1,153 @@
 from __future__ import annotations
 
 import json
-from typing import Sequence
+from collections.abc import Sequence
 
-from .contracts import (
-    EditorialBrief,
-    EditorialUnderstanding,
-    NarrativeAxisRecord,
-    Paragraph,
-    ParagraphNote,
-)
+from .contracts import EditorialBrief, EditorialCondensation, Passage
 
 
 SYSTEM = """You are Hefesto, an attentive and disciplined editor. Understand the supplied material faithfully. The brief guides editorial attention but never changes what a source says. Return only the requested JSON object."""
 
 
-def paragraph_prompt(brief: EditorialBrief, paragraph: Paragraph) -> str:
+def selection_prompt(
+    brief: EditorialBrief,
+    passages: Sequence[Passage],
+    *,
+    source_title: str | None,
+    previous_context: Passage | None = None,
+    next_context: Passage | None = None,
+) -> str:
+    context_before = _passage_line(previous_context) if previous_context else "none"
+    context_after = _passage_line(next_context) if next_context else "none"
+    body = "\n\n".join(_passage_line(item) for item in passages)
+    allowed = [item.ordinal for item in passages]
     return f"""
-Read this paragraph once and return one structured note.
+Scan these passages once in light of the complete brief. This is routing, not
+summarization or editorial analysis. Return only compact integer flags.
 
-Return every substantively distinct observation needed to understand what the
-paragraph adds in light of the brief. Give each observation whatever
-free-form tags help describe its meaning. Explain the paragraph's possible
-relevance to the brief. Be concise, but do
-not collapse distinct observations into one. Do not force scientific, causal,
-methodological, or any other fixed taxonomy. Low relevance is information, not
-permission to discard it.
+- relevant: passages that can materially serve the requested piece.
+- central: especially important passages. Do not repeat them in relevant.
+- uncertain: passages whose possible value, qualification, contradiction, or
+  unexpected contribution should be preserved for deeper reading.
+- include_previous/include_next: core passage numbers whose meaning requires
+  the adjacent passage. Do not use these arrays as importance labels.
 
-The requested duration ({brief.duration_minutes} minutes) guides eventual editorial selection and depth. It does not truncate reading.
+Omitted core passages will not receive deep reading. Preserve meaningful
+contradictions, limitations, qualifications, and surprising but useful
+directions. Use only these core passage numbers: {allowed}.
+The context passages help interpret boundaries and cannot themselves be flagged.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
 
-PARAGRAPH:
-{paragraph.text}
+SOURCE {passages[0].source_ordinal}: {source_title or 'Untitled source'}
+
+PREVIOUS CONTEXT (not selectable):
+{context_before}
+
+CORE PASSAGES:
+{body}
+
+NEXT CONTEXT (not selectable):
+{context_after}
 """.strip()
 
 
-def understanding_prompt(brief: EditorialBrief, notes: Sequence[ParagraphNote]) -> str:
-    payload = [
-        {
-            "source_ordinal": item.source_ordinal,
-            "paragraph_ordinal": item.paragraph_ordinal,
-            "observations": [
-                {
-                    "observation": observation.observation,
-                    "tags": observation.tags,
-                }
-                for observation in item.observations
-            ],
-            "brief_relevance": item.brief_relevance,
-        }
-        for item in notes
-    ]
+def condensation_prompt(
+    brief: EditorialBrief,
+    material: str,
+    *,
+    level: int,
+) -> str:
     return f"""
-Create the single editorial understanding for this corpus. Synthesize rather than concatenate. Decide what matters for the user's intention, audience, product, and requested duration while preserving meaningful tensions, nuances, limits, and unexpected but useful material.
+Perform one bounded part of the editorial comprehension. Condense what this
+material genuinely contributes to the user's intention. Preserve substantive
+ideas, relationships, tensions, qualifications, limits, and unexpected useful
+directions. Synthesize; do not enumerate every passage and do not make an
+outline or draft the final product.
 
-The understanding should be compact enough to drive the Narrative Axis and Editorial Project without reproducing all paragraph notes. Do not emit database identifiers or source coordinates.
+Keep the source labels only where they are intellectually necessary to
+distinguish agreement, disagreement, evidence, context, or limitation. This
+reading will be combined with other bounded readings before the Editorial
+Project is created.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
 
-ORDERED PARAGRAPH NOTES:
-{json.dumps(payload, ensure_ascii=False)}
-""".strip()
+COMPREHENSION LEVEL: {level}
 
-
-def axis_prompt(brief: EditorialBrief, understanding: EditorialUnderstanding) -> str:
-    return f"""
-Propose one Narrative Axis before any Editorial Project exists. It must be a one- or two-sentence intellectual/editorial direction appropriate to the user's intention, audience, product, and {brief.duration_minutes}-minute duration. It is not an outline, generic topic, source summary, or invented opinion.
-
-BRIEF:
-{brief.model_dump_json(indent=2)}
-
-EDITORIAL UNDERSTANDING:
-{understanding.model_dump_json(indent=2)}
+MATERIAL:
+{material}
 """.strip()
 
 
 def project_prompt(
     brief: EditorialBrief,
-    understanding: EditorialUnderstanding,
-    axis: NarrativeAxisRecord,
+    material: str,
+    *,
+    material_kind: str,
 ) -> str:
     return f"""
-Build the Editorial Project governed by the APPROVED Narrative Axis. The source-supported subjects together must fill the requested {brief.duration_minutes} minutes with real depth; do not cover everything superficially and do not pre-write the article. Assign allocated_minutes to every source-supported subject, and make their sum exactly {brief.duration_minutes}.
+Create one coherent Editorial Project directly from the selected source
+material and the user's brief. The Narrative Axis and the rest of the project
+must be conceived together in this same editorial act.
 
-Keep three classes separate: source-supported subjects, optional suggestions that come mainly from model knowledge, and opportunities that require additional sources. Optional suggestions and enrichment opportunities are not content commitments.
+The Narrative Axis is the one- or two-sentence intention of message that must
+govern the complete future piece. It is not merely the topic, an outline, a
+generic source summary, or an invented opinion. Its rationale must explain why
+this direction carries the user's intention through the material.
+
+The source-supported subjects must operationalize that Axis, fill exactly the
+requested {brief.duration_minutes} minutes with real depth, and avoid superficial
+coverage of everything. Do not pre-write the final piece. Keep three classes
+separate: source-supported subjects, optional suggestions coming mainly from
+model knowledge, and opportunities that require additional sources. Never
+present model knowledge as source-supported content.
+
+Synthesize relationships among all sources, including convergence,
+complementarity, contradiction, context, qualification, and limitation when
+they matter. Do not reproduce internal passage coordinates in the result.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
 
-APPROVED NARRATIVE AXIS:
-{axis.proposal.statement}
+INPUT KIND: {material_kind}
 
-EDITORIAL UNDERSTANDING:
-{understanding.model_dump_json(indent=2)}
+SELECTED EDITORIAL MATERIAL:
+{material}
 """.strip()
+
+
+def render_passages(passages: Sequence[Passage], titles: dict[int, str | None]) -> str:
+    sections: list[str] = []
+    current_source: int | None = None
+    previous_ordinal: int | None = None
+    block_ordinal = 0
+    for item in passages:
+        if item.source_ordinal != current_source:
+            current_source = item.source_ordinal
+            previous_ordinal = None
+            sections.append(
+                f"\nSOURCE {current_source}: {titles.get(current_source) or 'Untitled source'}"
+            )
+        if previous_ordinal is None or item.ordinal != previous_ordinal + 1:
+            block_ordinal += 1
+            sections.append(f"BLOCK {block_ordinal}")
+        sections.append(_passage_line(item))
+        previous_ordinal = item.ordinal
+    return "\n\n".join(sections).strip()
+
+
+def render_condensations(items: Sequence[EditorialCondensation]) -> str:
+    payload = [
+        {"sources": item.source_ordinals, "reading": item.reading}
+        for item in items
+    ]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _passage_line(passage: Passage) -> str:
+    return (
+        f"[passage {passage.ordinal}; paragraph {passage.paragraph_ordinal}] "
+        f"{passage.text}"
+    )

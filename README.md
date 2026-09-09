@@ -6,9 +6,9 @@ O serviço web com login é a única entrada de uso editorial. Nele, o usuário:
 
 1. envia PDFs e/ou informa URLs públicas;
 2. define tema, abordagem, público, produto, idioma e duração;
-3. acompanha ingestão, estruturação, digestão e uso de modelo;
-4. lê e aprova o Eixo Narrativo;
-5. recebe o Projeto Editorial.
+3. acompanha ingestão, triagem, compreensão e uso de modelo;
+4. recebe o Projeto Editorial com o Eixo Narrativo em destaque;
+5. aprova o conjunto em uma única decisão editorial.
 
 O processamento é assíncrono e persistido. Uma atualização da página não perde a execução. Cada usuário só acessa seus próprios uploads e planejamentos. Falhas mostram a etapa e o erro real, e trabalhos retomáveis podem ser continuados sem repetir trabalho concluído.
 
@@ -18,7 +18,7 @@ O processamento é assíncrono e persistido. Uma atualização da página não p
 - Cloud Run Job: processamento editorial de longa duração.
 - PostgreSQL: estado canônico, propriedade, estrutura das fontes, artefatos, etapas e consumo.
 - Cloud Storage: PDFs, solicitações e recibos imutáveis.
-- Vertex AI: digestão editorial, entendimento, Eixo Narrativo e Projeto Editorial.
+- Vertex AI: triagem por flags e compreensão editorial limitada por tokens.
 
 O deploy ocorre em `main`. O workflow testa o contrato completo, constrói uma única imagem, aplica migrações, implanta Job e aplicação web, configura autenticação e publica o recibo na issue canônica.
 

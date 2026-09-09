@@ -108,7 +108,7 @@ async def plan(args: argparse.Namespace) -> None:
             "model_invocations": 0,
         })
         await hefesto.record_stages(execution_id, stages)
-        await _continue_to_axis(
+        await _continue_to_project(
             hefesto, client, execution_id, stages,
             ingestion=ingestion,
         )
@@ -120,40 +120,12 @@ async def resume_plan(execution_id: UUID) -> None:
     client = storage_client()
     repository, hefesto = await services()
     try:
-        stages: list[dict[str, object]] = []
-        current = await repository.get_run(execution_id)
-        if (
-            current is not None
-            and current.axis is not None
-            and current.axis.approved
-            and current.editorial_project is None
-        ):
-            started = perf_counter()
-            try:
-                await hefesto.approve_axis_and_propose_project(execution_id)
-                stages.append({
-                    "stage": "editorial_project",
-                    "duration_ms": int((perf_counter() - started) * 1000),
-                })
-            except Exception:
-                stages.append({
-                    "stage": "editorial_project", "status": "failed",
-                    "duration_ms": int((perf_counter() - started) * 1000),
-                })
-                await _persist_product_receipt(
-                    hefesto, client, execution_id, stages
-                )
-                raise
-            await _persist_product_receipt(
-                hefesto, client, execution_id, stages
-            )
-        else:
-            await _continue_to_axis(hefesto, client, execution_id, stages)
+        await _continue_to_project(hefesto, client, execution_id, [])
     finally:
         await repository.close()
 
 
-async def _continue_to_axis(
+async def _continue_to_project(
     hefesto: Hefesto,
     client: storage.Client,
     execution_id: UUID,
@@ -161,22 +133,27 @@ async def _continue_to_axis(
     *,
     ingestion: IngestionResult | None = None,
 ) -> None:
-    active_stage = "digestion"
+    active_stage = "selection"
     started = perf_counter()
     try:
-        if ingestion is None:
-            current = await hefesto.resume_digest(execution_id)
-        else:
-            current = await hefesto.digest_prepared(execution_id)
+        await hefesto.record_stages(execution_id, [{
+            "stage": active_stage, "status": "running", "duration_ms": 0,
+        }])
+        await hefesto.select(execution_id)
         stages.append({
             "stage": active_stage,
+            "status": "completed",
             "duration_ms": int((perf_counter() - started) * 1000),
         })
         await hefesto.record_stages(execution_id, stages)
-        active_stage, started = "narrative_axis", perf_counter()
-        await hefesto.propose_axis(current.execution_run_id)
+        active_stage, started = "editorial_comprehension", perf_counter()
+        await hefesto.record_stages(execution_id, [{
+            "stage": active_stage, "status": "running", "duration_ms": 0,
+        }])
+        await hefesto.propose_project(execution_id)
         stages.append({
             "stage": active_stage,
+            "status": "completed",
             "duration_ms": int((perf_counter() - started) * 1000),
         })
         await hefesto.record_stages(execution_id, stages)
@@ -194,34 +171,6 @@ async def _continue_to_axis(
         hefesto, client, execution_id, stages,
         ingestion=ingestion,
     )
-
-
-async def approve_axis(execution_id: UUID) -> None:
-    client = storage_client()
-    repository, hefesto = await services()
-    started = perf_counter()
-    stages: list[dict[str, object]] = []
-    try:
-        try:
-            await hefesto.approve_axis_and_propose_project(execution_id)
-            stages.append({
-                "stage": "editorial_project",
-                "duration_ms": int((perf_counter() - started) * 1000),
-            })
-        except Exception:
-            stages.append({
-                "stage": "editorial_project", "status": "failed",
-                "duration_ms": int((perf_counter() - started) * 1000),
-            })
-            await _persist_product_receipt(
-                hefesto, client, execution_id, stages
-            )
-            raise
-        await _persist_product_receipt(
-            hefesto, client, execution_id, stages
-        )
-    finally:
-        await repository.close()
 
 
 async def approve_project(execution_id: UUID) -> None:
@@ -380,18 +329,6 @@ async def run(args: argparse.Namespace) -> None:
             storage_client(), args.execution_run_id, args.command, "completed"
         )
         return
-    if args.command == "approve-axis":
-        try:
-            await approve_axis(args.execution_run_id)
-        except Exception as error:
-            mark_action_dispatch(
-                storage_client(), args.execution_run_id, args.command, "failed", error
-            )
-            raise
-        mark_action_dispatch(
-            storage_client(), args.execution_run_id, args.command, "completed"
-        )
-        return
     if args.command == "approve-project":
         try:
             await approve_project(args.execution_run_id)
@@ -436,8 +373,6 @@ def parser() -> argparse.ArgumentParser:
     planning.add_argument("--execution-run-id", type=UUID)
     resume = commands.add_parser("resume-plan")
     resume.add_argument("--execution-run-id", type=UUID, required=True)
-    approve = commands.add_parser("approve-axis")
-    approve.add_argument("--execution-run-id", type=UUID, required=True)
     approve_project_parser = commands.add_parser("approve-project")
     approve_project_parser.add_argument("--execution-run-id", type=UUID, required=True)
     inspect = commands.add_parser("inspect")

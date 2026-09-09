@@ -78,7 +78,7 @@ jobs:
             --project="${PROJECT_ID}" --region="${REGION}" \
             --image="${PINNED_IMAGE}" --service-account="${RUNTIME_SA}" \
             --args=--help \
-            --cpu=4 --memory=8Gi --task-timeout=3600s --max-retries=0 \
+            --cpu=4 --memory=8Gi --task-timeout=7200s --max-retries=0 \
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET}" \
             --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" \
             --quiet

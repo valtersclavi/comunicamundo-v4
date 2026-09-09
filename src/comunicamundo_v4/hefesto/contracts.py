@@ -93,55 +93,49 @@ class Paragraph(StrictModel):
     sentences: list[Sentence] = Field(min_length=1)
 
 
-class ParagraphObservationProposal(StrictModel):
-    observation: str = Field(min_length=1)
-    tags: list[str] = Field(default_factory=list)
-
-
-class ParagraphNoteProposal(StrictModel):
-    observations: list[ParagraphObservationProposal] = Field(min_length=1)
-    brief_relevance: str = Field(min_length=1)
-
-
-class ParagraphObservation(ParagraphObservationProposal):
-    pass
-
-
-class ParagraphNote(StrictModel):
-    paragraph_id: Sha256
-    observations: list[ParagraphObservation] = Field(min_length=1)
-    brief_relevance: str = Field(min_length=1)
+class Passage(StrictModel):
+    passage_id: Sha256
     source_id: UUID
     source_ordinal: int = Field(ge=1)
+    ordinal: int = Field(ge=1)
     paragraph_ordinal: int = Field(ge=1)
+    text: str = Field(min_length=1)
 
 
-class EditorialUnderstandingProposal(StrictModel):
-    synthesis: str = Field(min_length=1)
-    central_ideas: list[str] = Field(min_length=1)
-    relations_and_tensions: list[str] = Field(default_factory=list)
-    nuances_and_limits: list[str] = Field(default_factory=list)
-    editorial_possibilities: list[str] = Field(min_length=1)
+class SelectionFlags(StrictModel):
+    relevant: list[int] = Field(default_factory=list)
+    central: list[int] = Field(default_factory=list)
+    uncertain: list[int] = Field(default_factory=list)
+    include_previous: list[int] = Field(default_factory=list)
+    include_next: list[int] = Field(default_factory=list)
 
 
-class EditorialUnderstanding(EditorialUnderstandingProposal):
-    understanding_id: UUID = Field(default_factory=uuid4)
-    execution_run_id: UUID
-    project_id: UUID
+class SelectionBatch(StrictModel):
+    batch_id: Sha256
+    source_id: UUID
+    source_ordinal: int = Field(ge=1)
+    first_passage_ordinal: int = Field(ge=1)
+    last_passage_ordinal: int = Field(ge=1)
+    input_tokens: int = Field(ge=1)
+    flags: SelectionFlags
+
+
+class EditorialCondensationProposal(StrictModel):
+    reading: str = Field(min_length=1)
+
+
+class EditorialCondensation(StrictModel):
+    unit_id: Sha256
+    level: int = Field(ge=1)
+    ordinal: int = Field(ge=1)
+    source_ordinals: list[int] = Field(min_length=1)
+    input_tokens: int = Field(ge=1)
+    reading: str = Field(min_length=1)
 
 
 class NarrativeAxisProposal(StrictModel):
     statement: str = Field(min_length=1)
     rationale: str = Field(min_length=1)
-
-
-class NarrativeAxisRecord(StrictModel):
-    narrative_axis_id: UUID = Field(default_factory=uuid4)
-    execution_run_id: UUID
-    project_id: UUID
-    proposal: NarrativeAxisProposal
-    approved: bool = False
-    approved_at: datetime | None = None
 
 
 class EditorialSubject(StrictModel):
@@ -154,6 +148,7 @@ class EditorialSubject(StrictModel):
 class EditorialProjectProposal(StrictModel):
     working_title: str = Field(min_length=1)
     editorial_promise: str = Field(min_length=1)
+    narrative_axis: NarrativeAxisProposal
     duration_minutes: int = Field(ge=1)
     source_supported_subjects: list[EditorialSubject] = Field(min_length=1)
     model_knowledge_suggestions: list[str] = Field(default_factory=list)
@@ -171,17 +166,14 @@ class EditorialProjectRecord(StrictModel):
     editorial_project_id: UUID = Field(default_factory=uuid4)
     execution_run_id: UUID
     project_id: UUID
-    narrative_axis_id: UUID
     proposal: EditorialProjectProposal
     approved: bool = False
 
 
 class RunState(StrEnum):
     SOURCE_STRUCTURE_READY = "source_structure_ready"
-    DIGESTING = "digesting"
-    UNDERSTANDING_READY = "understanding_ready"
-    AXIS_PROPOSED = "axis_proposed"
-    AXIS_APPROVED = "axis_approved"
+    SELECTING = "selecting"
+    COMPREHENDING = "comprehending"
     PROJECT_PROPOSED = "project_proposed"
     PROJECT_APPROVED = "project_approved"
     FAILED = "failed"
@@ -192,8 +184,6 @@ class ProductRun(StrictModel):
     project_id: UUID
     state: RunState = RunState.SOURCE_STRUCTURE_READY
     request: PlanningRequest
-    understanding: EditorialUnderstanding | None = None
-    axis: NarrativeAxisRecord | None = None
     editorial_project: EditorialProjectRecord | None = None
     error_class: str | None = None
     error_message: str | None = None

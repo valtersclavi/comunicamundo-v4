@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+import asyncio
 import json
 from time import perf_counter
 from typing import Generic, Protocol, TypeVar
@@ -23,6 +24,8 @@ class ModelResult(Generic[OutputT]):
 
 
 class ModelGateway(Protocol):
+    async def count_tokens(self, text: str) -> int: ...
+
     async def generate(
         self,
         *,
@@ -51,9 +54,30 @@ class ModelCallError(RuntimeError):
 class VertexGateway:
     """One provider attempt per semantic call; paid malformed output is never retried implicitly."""
 
-    def __init__(self, *, project: str, location: str, model: str = "gemini-2.5-flash") -> None:
+    def __init__(
+        self,
+        *,
+        project: str,
+        location: str,
+        model: str = "gemini-2.5-flash",
+        timeout_seconds: int = 240,
+    ) -> None:
         self.model = model
         self._client = genai.Client(vertexai=True, project=project, location=location)
+        self._timeout_seconds = timeout_seconds
+
+    async def count_tokens(self, text: str) -> int:
+        try:
+            async with asyncio.timeout(30):
+                result = await self._client.aio.models.count_tokens(
+                    model=self.model, contents=text
+                )
+        except Exception as error:
+            raise ModelCallError(f"token measurement failed: {error}", retryable=True) from error
+        total = int(getattr(result, "total_tokens", 0) or 0)
+        if total <= 0:
+            raise ModelCallError("token measurement returned no token count", retryable=True)
+        return total
 
     async def generate(
         self,
@@ -78,11 +102,12 @@ class VertexGateway:
         )
         started = perf_counter()
         try:
-            response = await self._client.aio.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=config,
-            )
+            async with asyncio.timeout(self._timeout_seconds):
+                response = await self._client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config,
+                )
         except Exception as error:
             latency = max(0, int((perf_counter() - started) * 1000))
             message = f"provider call failed: {error}"

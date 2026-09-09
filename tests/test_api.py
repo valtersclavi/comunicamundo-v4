@@ -217,7 +217,7 @@ def test_cloud_run_dispatch_uses_job_override_contract(monkeypatch) -> None:
                 {"args": ["plan", "--request=gs://bucket/input.json"]}
             ],
             "taskCount": 1,
-            "timeout": "3600s",
+            "timeout": "7200s",
         }
     }
     assert captured["timeout"] == 30
@@ -233,27 +233,12 @@ def test_api_exposes_dispatch_state_before_product_run_exists() -> None:
     assert status.json()["cloud_run_operation"] == "operations/1"
 
 
-def test_api_dispatches_human_gate_as_separate_action() -> None:
+def test_api_has_no_separate_axis_approval_route() -> None:
     storage, dispatcher = Storage(), Dispatcher()
-    api = client(storage, dispatcher, receipt={"status": "axis_proposed"})
-    submitted = api.post("/v1/plans", json=request()).json()
-    execution_id = submitted["execution_run_id"]
-    first = api.post(f"/v1/plans/{execution_id}/approve-axis")
-    second = api.post(f"/v1/plans/{execution_id}/approve-axis")
-    assert first.status_code == 202
-    assert second.status_code == 202
-    assert len(dispatcher.calls) == 2
-    assert dispatcher.calls[1] == [
-        "approve-axis", f"--execution-run-id={execution_id}"
-    ]
-
-
-def test_api_rejects_human_gate_before_axis_exists() -> None:
-    storage, dispatcher = Storage(), Dispatcher()
-    api = client(storage, dispatcher, receipt={"status": "understanding_ready"})
+    api = client(storage, dispatcher, receipt={"status": "comprehending"})
     execution_id = api.post("/v1/plans", json=request()).json()["execution_run_id"]
     response = api.post(f"/v1/plans/{execution_id}/approve-axis")
-    assert response.status_code == 409
+    assert response.status_code == 404
     assert len(dispatcher.calls) == 1
 
 

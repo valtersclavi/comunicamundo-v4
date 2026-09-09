@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from comunicamundo_v4.hefesto.batching import passages_from_paragraphs
 from comunicamundo_v4.hefesto.contracts import (
     EditorialBrief,
     EditorialProjectProposal,
@@ -11,13 +12,17 @@ from comunicamundo_v4.hefesto.contracts import (
     PlanningRequest,
     RunState,
 )
+from comunicamundo_v4.hefesto.prompts import selection_prompt
 from comunicamundo_v4.hefesto.segmentation import segment_sources
-from comunicamundo_v4.hefesto.prompts import paragraph_prompt
 from comunicamundo_v4.hefesto.service import Hefesto
 from fakes import FakeGateway, MemoryRepository
 
 
-def request() -> PlanningRequest:
+def request(*, long: bool = False) -> PlanningRequest:
+    filler = (
+        " Esta frase desenvolve o argumento com contexto e qualificação." * 15
+        if long else ""
+    )
     return PlanningRequest(
         project_id=uuid4(),
         brief=EditorialBrief(
@@ -32,142 +37,177 @@ def request() -> PlanningRequest:
             NormalizedSource(
                 title="One",
                 language="en",
-                text="First claim. Its qualification.\n\nA contrasting example appears here.\n\nA third contribution.",
+                text="\n\n".join(
+                    [
+                        "First claim. Its qualification." + filler,
+                        "A contrasting example appears here." + filler,
+                        "A third contribution." + filler,
+                    ]
+                    * (8 if long else 1)
+                ),
             ),
             NormalizedSource(
                 title="Two",
                 language="en",
-                text="Another source contributes a different view.\n\nIts final paragraph adds context.",
+                text="\n\n".join(
+                    [
+                        "Another source contributes a different view." + filler,
+                        "Its final paragraph adds context." + filler,
+                    ]
+                    * (8 if long else 1)
+                ),
             ),
         ],
     )
 
 
-def test_paragraph_is_comprehension_unit_and_sentence_is_evidence_address() -> None:
-    paragraphs = segment_sources(request().sources)
+def test_paragraphs_are_addresses_and_selection_outputs_only_flags() -> None:
+    source = request()
+    paragraphs = segment_sources(source.sources)
+    passages = passages_from_paragraphs(paragraphs, passage_token_target=1_000)
+    prompt = selection_prompt(
+        source.brief, passages[:3], source_title=source.sources[0].title
+    )
     assert len(paragraphs) == 5
-    assert [item.ordinal for item in paragraphs[:3]] == [1, 2, 3]
     assert len(paragraphs[0].sentences) == 2
-    assert paragraphs[0].sentences[0].text == "First claim."
-    assert len({item.paragraph_id for item in paragraphs}) == len(paragraphs)
-    prompt = paragraph_prompt(request().brief, paragraphs[0])
+    assert "routing, not\nsummarization" in prompt
+    assert "relevant" in prompt and "central" in prompt and "uncertain" in prompt
     assert paragraphs[0].paragraph_id not in prompt
-    assert "paragraph_number" not in prompt
-    assert "sentence_id" not in prompt
+
+
+def test_oversized_paragraph_is_divided_only_at_sentence_boundaries() -> None:
+    text = ("Primeira sentença longa " * 12).strip() + ". " + (
+        "Segunda sentença longa " * 12
+    ).strip() + "."
+    source = request()
+    paragraph = segment_sources([
+        NormalizedSource(title="Long", language="pt-BR", text=text)
+    ])[0]
+    passages = passages_from_paragraphs([paragraph], passage_token_target=100)
+    assert len(passages) == 2
+    assert passages[0].text.endswith(".")
+    assert passages[1].text.endswith(".")
+    assert "Primeira" in passages[0].text
+    assert "Segunda" in passages[1].text
 
 
 def test_provider_schema_uses_supported_inclusive_minimums() -> None:
-    schema = EditorialProjectProposal.model_json_schema()
-    serialized = str(schema)
+    serialized = str(EditorialProjectProposal.model_json_schema())
     assert "exclusiveMinimum" not in serialized
     assert "'minimum': 1" in serialized
 
 
 @pytest.mark.asyncio
-async def test_prepare_persists_relational_structure_without_calling_the_model() -> None:
+async def test_prepare_persists_relational_structure_without_model_work() -> None:
     repository = MemoryRepository()
     gateway = FakeGateway()
     hefesto = Hefesto(repository, gateway)
     run = await hefesto.prepare(request())
     assert run.state is RunState.SOURCE_STRUCTURE_READY
     assert gateway.calls == []
-    paragraphs = repository.structures[run.execution_run_id]
-    assert len(paragraphs) == 5
-    assert sum(len(item.sentences) for item in paragraphs) == 6
+    assert len(repository.structures[run.execution_run_id]) == 5
 
 
 @pytest.mark.asyncio
-async def test_brief_and_duration_guide_every_editorial_stage() -> None:
+async def test_short_corpus_goes_from_flags_directly_to_one_complete_project() -> None:
+    source = request()
     repository = MemoryRepository()
     gateway = FakeGateway()
     hefesto = Hefesto(repository, gateway)
-    run = await hefesto.digest(request())
-    run = await hefesto.propose_axis(run.execution_run_id)
-    run = await hefesto.approve_axis_and_propose_project(run.execution_run_id)
+    run = await hefesto.prepare(source)
+    run = await hefesto.select(run.execution_run_id)
+    run = await hefesto.propose_project(run.execution_run_id)
+
+    task_types = [item["task_type"] for item in gateway.calls]
+    assert task_types.count("source_selection") == 2
+    assert task_types.count("editorial_project") == 1
+    assert not any(value.startswith("editorial_comprehension") for value in task_types)
     assert run.state is RunState.PROJECT_PROPOSED
-    for call in gateway.calls:
-        assert "The user's precise intention" in call["prompt"]
-        assert "8" in call["prompt"]
-    assert [item["task_type"] for item in gateway.calls].count("editorial_understanding") == 1
-    assert [item["task_type"] for item in gateway.calls].count("narrative_axis") == 1
-    assert [item["task_type"] for item in gateway.calls].count("editorial_project") == 1
-    assert run.axis is not None and run.axis.approved
     assert run.editorial_project is not None
-    assert run.editorial_project.proposal.duration_minutes == 8
-    assert sum(
-        item.allocated_minutes for item in run.editorial_project.proposal.source_supported_subjects
-    ) == 8
-    assert run.editorial_project.proposal.model_knowledge_suggestions
-    assert run.editorial_project.proposal.source_enrichment_opportunities
+    assert run.editorial_project.proposal.narrative_axis.statement
+    assert not run.editorial_project.approved
+    assert all("The user's precise intention" in item["prompt"] for item in gateway.calls)
 
 
 @pytest.mark.asyncio
-async def test_parallel_calls_create_one_note_per_paragraph_without_ontology_coercion() -> None:
-    source = request()
+async def test_long_corpus_uses_measured_bounded_comprehension_packets() -> None:
+    source = request(long=True)
     repository = MemoryRepository()
     gateway = FakeGateway()
-    run = await Hefesto(repository, gateway, concurrency=4).digest(source)
-    notes = await repository.notes(run.execution_run_id)
-    assert len(notes) == len(segment_sources(source.sources))
-    assert len({item.paragraph_id for item in notes}) == len(notes)
+    hefesto = Hefesto(
+        repository,
+        gateway,
+        selection_input_tokens=2_000,
+        comprehension_input_tokens=1_000,
+        condensation_input_tokens=1_000,
+    )
+    run = await hefesto.prepare(source)
+    await hefesto.select(run.execution_run_id)
+    completed = await hefesto.propose_project(run.execution_run_id)
+
+    task_types = [item["task_type"] for item in gateway.calls]
+    assert task_types.count("source_selection") < len(
+        passages_from_paragraphs(
+            segment_sources(source.sources), passage_token_target=666
+        )
+    )
+    assert "editorial_comprehension_part" in task_types
+    assert task_types[-1] == "editorial_project"
+    assert completed.state is RunState.PROJECT_PROPOSED
     assert all(
-        item.observations[0].tags == ["free-tag-not-in-an-ontology"] for item in notes
+        item.prompt_tokens <= (2_000 if item.task_type == "source_selection" else 1_000)
+        for item in repository.usage[run.execution_run_id]
+        if item.task_type != "editorial_project"
     )
-    assert all(len(item.observations) == 2 for item in notes)
-    assert len([item for item in gateway.calls if item["task_type"] == "paragraph_digest"]) == len(notes)
+    assert await repository.condensations(run.execution_run_id)
 
 
 @pytest.mark.asyncio
-async def test_concurrency_changes_no_semantic_cardinality() -> None:
+async def test_multiple_sources_reach_the_same_final_comprehension() -> None:
     source = request()
-    small_repo, large_repo = MemoryRepository(), MemoryRepository()
-    small_gateway, large_gateway = FakeGateway(), FakeGateway()
-    small = await Hefesto(small_repo, small_gateway, concurrency=1).digest(source)
-    large = await Hefesto(large_repo, large_gateway, concurrency=4).digest(source)
-    assert len(await small_repo.notes(small.execution_run_id)) == len(await large_repo.notes(large.execution_run_id))
-    assert len([c for c in small_gateway.calls if c["task_type"] == "paragraph_digest"]) == len(
-        [c for c in large_gateway.calls if c["task_type"] == "paragraph_digest"]
-    )
-
-
-@pytest.mark.asyncio
-async def test_resume_does_not_reread_completed_paragraphs() -> None:
-    source = request()
-    repository = MemoryRepository()
-    gateway = FakeGateway(fail_understanding_times=2)
-    hefesto = Hefesto(repository, gateway)
-    with pytest.raises(Exception, match="synthetic synthesis failure"):
-        await hefesto.digest(source)
-    execution_id = next(iter(repository.runs))
-    paragraph_calls_before = len([item for item in gateway.calls if item["task_type"] == "paragraph_digest"])
-    resumed = await hefesto.resume_digest(execution_id)
-    paragraph_calls_after = len([item for item in gateway.calls if item["task_type"] == "paragraph_digest"])
-    assert resumed.state is RunState.UNDERSTANDING_READY
-    assert paragraph_calls_after == paragraph_calls_before
-
-
-@pytest.mark.asyncio
-async def test_axis_is_a_real_human_gate() -> None:
     repository = MemoryRepository()
     gateway = FakeGateway()
     hefesto = Hefesto(repository, gateway)
-    digested = await hefesto.digest(request())
-    proposed = await hefesto.propose_axis(digested.execution_run_id)
-    assert proposed.state is RunState.AXIS_PROPOSED
-    assert proposed.axis is not None and not proposed.axis.approved
-    assert proposed.editorial_project is None
+    run = await hefesto.prepare(source)
+    await hefesto.select(run.execution_run_id)
+    await hefesto.propose_project(run.execution_run_id)
+    final_prompt = next(
+        item["prompt"] for item in gateway.calls if item["task_type"] == "editorial_project"
+    )
+    assert "SOURCE 1: One" in final_prompt
+    assert "SOURCE 2: Two" in final_prompt
 
 
 @pytest.mark.asyncio
-async def test_editorial_project_is_a_real_human_gate() -> None:
+async def test_resume_reuses_completed_flags_after_project_failure() -> None:
+    source = request()
+    repository = MemoryRepository()
+    gateway = FakeGateway(fail_task="editorial_project", fail_times=1)
+    hefesto = Hefesto(repository, gateway)
+    run = await hefesto.prepare(source)
+    await hefesto.select(run.execution_run_id)
+    selection_calls = len(
+        [item for item in gateway.calls if item["task_type"] == "source_selection"]
+    )
+    with pytest.raises(Exception, match="synthetic editorial_project failure"):
+        await hefesto.propose_project(run.execution_run_id)
+    resumed = await hefesto.resume_plan(run.execution_run_id)
+    assert resumed.state is RunState.PROJECT_PROPOSED
+    assert len(
+        [item for item in gateway.calls if item["task_type"] == "source_selection"]
+    ) == selection_calls
+
+
+@pytest.mark.asyncio
+async def test_project_and_axis_share_one_human_gate() -> None:
     repository = MemoryRepository()
     hefesto = Hefesto(repository, FakeGateway())
-    run = await hefesto.digest(request())
-    run = await hefesto.propose_axis(run.execution_run_id)
-    proposed = await hefesto.approve_axis_and_propose_project(run.execution_run_id)
-    assert proposed.state is RunState.PROJECT_PROPOSED
+    run = await hefesto.prepare(request())
+    await hefesto.select(run.execution_run_id)
+    proposed = await hefesto.propose_project(run.execution_run_id)
     assert proposed.editorial_project is not None
-    assert not proposed.editorial_project.approved
+    assert proposed.editorial_project.proposal.narrative_axis.statement
+    assert proposed.state is RunState.PROJECT_PROPOSED
     approved = await hefesto.approve_project(run.execution_run_id)
     assert approved.state is RunState.PROJECT_APPROVED
     assert approved.editorial_project is not None

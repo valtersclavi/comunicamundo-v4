@@ -150,7 +150,7 @@ class GoogleCloudRunDispatcher:
             json={"overrides": {
                 "containerOverrides": [{"args": args}],
                 "taskCount": 1,
-                "timeout": "3600s",
+                "timeout": "7200s",
             }},
             timeout=30,
         )
@@ -271,7 +271,7 @@ class SubmissionService:
         return accepted
 
     def dispatch_action(self, execution_id: UUID, action: str) -> dict[str, Any]:
-        if action not in {"resume-plan", "approve-axis", "approve-project"}:
+        if action not in {"resume-plan", "approve-project"}:
             raise ValueError("unsupported product action")
         blob = self._client.bucket(self._bucket_name).blob(
             f"hefesto-product/executions/{execution_id}/{action}-dispatch.json"
@@ -340,17 +340,11 @@ async def _product_receipt(execution_id: UUID) -> dict[str, Any] | None:
             "status": run.state.value,
             "project_id": str(run.project_id),
             "execution_run_id": str(run.execution_run_id),
-            "understanding": (
-                run.understanding.model_dump(mode="json")
-                if run.understanding else None
-            ),
-            "narrative_axis": (
-                run.axis.model_dump(mode="json") if run.axis else None
-            ),
             "editorial_project": (
                 run.editorial_project.model_dump(mode="json")
                 if run.editorial_project else None
             ),
+            "processing": await repository.work_report(execution_id),
             "error_class": run.error_class,
             "error_message": run.error_message,
             "stages": await repository.stage_report(execution_id),
@@ -646,45 +640,18 @@ def create_app(
     ) -> dict[str, Any]:
         receipt = await required_receipt(execution_id, request)
         if receipt["status"] not in {
-            "failed", "digesting", "source_structure_ready"
+            "failed", "selecting", "comprehending", "source_structure_ready"
         }:
             raise HTTPException(
                 status_code=409,
                 detail=(
                     f"execution in {receipt['status']} "
-                    "does not require digestion resume"
+                    "does not require processing resume"
                 ),
             )
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "resume-plan"
-            )
-        except Exception as error:
-            raise HTTPException(
-                status_code=503, detail=f"dispatch failed: {error}"
-            ) from error
-
-    @app.post(
-        "/v1/plans/{execution_id}/approve-axis",
-        status_code=status.HTTP_202_ACCEPTED,
-    )
-    async def approve_axis(
-        execution_id: UUID, request: Request
-    ) -> dict[str, Any]:
-        receipt = await required_receipt(execution_id, request)
-        if receipt["status"] == "project_proposed":
-            return receipt
-        if receipt["status"] != "axis_proposed":
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"execution in {receipt['status']} "
-                    "has no proposed Axis to approve"
-                ),
-            )
-        try:
-            return await asyncio.to_thread(
-                service().dispatch_action, execution_id, "approve-axis"
             )
         except Exception as error:
             raise HTTPException(

@@ -4,10 +4,10 @@ const state = { files: [], current: null, timer: null, history: [], pendingStatu
 
 const labels = {
   queued: "Na fila", input_failed: "Falha na entrada", source_structure_ready: "Fontes estruturadas",
-  digesting: "Digerindo fontes", understanding_ready: "Interpretação concluída", axis_proposed: "Eixo aguardando aprovação",
-  axis_approved: "Eixo aprovado", project_proposed: "Projeto Editorial pronto", project_approved: "Projeto aprovado", failed: "Falha"
+  selecting: "Selecionando material", comprehending: "Compreendendo fontes",
+  project_proposed: "Projeto Editorial pronto", project_approved: "Projeto aprovado", failed: "Falha"
 };
-const stageNames = { ingestion: "Leitura e normalização das fontes", relational_structure: "Estrutura de parágrafos e frases", digestion: "Digestão editorial", narrative_axis: "Construção do Eixo Narrativo", editorial_project: "Construção do Projeto Editorial" };
+const stageNames = { ingestion: "Leitura e normalização das fontes", relational_structure: "Estrutura de parágrafos e frases", selection: "Triagem orientada pelo briefing", editorial_comprehension: "Compreensão e Projeto Editorial" };
 const expectedStages = Object.keys(stageNames);
 
 async function api(path, options = {}) {
@@ -101,12 +101,12 @@ function statusClass(status) { return ["failed", "input_failed"].includes(status
 function renderRun(run) {
   const status = run.status || "queued";
   $("#run-status").textContent = labels[status] || status;
-  $("#execution-title").textContent = status === "project_proposed" ? "Projeto Editorial" : status === "axis_proposed" ? "Eixo Narrativo pronto" : "Hefesto em andamento";
+  $("#execution-title").textContent = ["project_proposed", "project_approved"].includes(status) ? "Projeto Editorial" : "Hefesto em andamento";
   const known = new Map((run.stages || []).map((item) => [item.stage, item]));
   let activeFound = false;
   $("#stages").innerHTML = expectedStages.map((name) => {
     const item = known.get(name); let kind = item ? statusClass(item.status) : "pending";
-    if (!item && !activeFound && !["axis_proposed", "project_proposed", "failed", "input_failed"].includes(status)) { kind = "active"; activeFound = true; }
+    if (!item && !activeFound && !["project_proposed", "project_approved", "failed", "input_failed"].includes(status)) { kind = "active"; activeFound = true; }
     const duration = item?.duration_ms != null ? `${(item.duration_ms / 1000).toFixed(1)} s` : kind === "active" ? "em andamento" : "";
     return `<div class="stage ${kind}"><i class="stage-icon"></i><strong>${stageNames[name]}</strong><span>${duration}</span></div>`;
   }).join("");
@@ -123,9 +123,6 @@ function renderRun(run) {
   $("#run-error").hidden = !failed;
   if (failed) $("#run-error").textContent = `${run.error_class || "Falha no processamento"}: ${run.error_message || "Não foi possível concluir esta execução."}`;
   $("#resume-plan").hidden = status !== "failed" || state.pendingStatus === "failed";
-  const axis = run.narrative_axis?.proposal;
-  $("#axis-panel").hidden = !axis;
-  if (axis) { $("#axis-statement").textContent = axis.statement; $("#axis-rationale").textContent = axis.rationale; $("#approve-axis").hidden = status !== "axis_proposed" || state.pendingStatus === "axis_proposed"; }
   const project = run.editorial_project?.proposal;
   $("#project-panel").hidden = !project;
   if (project) renderProject(project);
@@ -137,6 +134,8 @@ function renderRun(run) {
 function renderProject(project) {
   $("#project-title").textContent = project.working_title;
   $("#project-promise").textContent = project.editorial_promise;
+  $("#axis-statement").textContent = project.narrative_axis.statement;
+  $("#axis-rationale").textContent = project.narrative_axis.rationale;
   $("#project-duration").textContent = `${project.duration_minutes} minutos`;
   $("#subjects").innerHTML = project.source_supported_subjects.map((item) => `<article class="subject"><div class="subject-head"><h4>${escapeHtml(item.title)}</h4><strong>${item.allocated_minutes} min</strong></div><p>${escapeHtml(item.editorial_role)}</p><p>${escapeHtml(item.depth)}</p></article>`).join("");
   const blocks = [["Sugestões de conhecimento do modelo", project.model_knowledge_suggestions], ["Oportunidades de enriquecer as fontes", project.source_enrichment_opportunities]];
@@ -149,7 +148,7 @@ async function poll() {
     const run = await api(`/v1/plans/${state.current}`); const status = renderRun(run);
     const waitingForAction = state.pendingStatus === status;
     if (state.pendingStatus && !waitingForAction) state.pendingStatus = null;
-    if (waitingForAction || !["axis_proposed", "project_proposed", "project_approved", "failed", "input_failed"].includes(status)) state.timer = setTimeout(poll, 4000);
+    if (waitingForAction || !["project_proposed", "project_approved", "failed", "input_failed"].includes(status)) state.timer = setTimeout(poll, 4000);
     else await loadHistory();
   } catch (error) { showError($("#run-error"), error); }
 }
@@ -160,13 +159,6 @@ async function openExecution(id, title) {
   $("#execution-subtitle").textContent = title || id;
   document.querySelectorAll(".history-item").forEach((item) => item.classList.toggle("active", item.dataset.id === id));
   await poll(); window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
-async function approveAxis() {
-  const button = $("#approve-axis"); button.disabled = true; button.textContent = "Aprovando…";
-  try { await api(`/v1/plans/${state.current}/approve-axis`, { method: "POST" }); state.pendingStatus = "axis_proposed"; $("#axis-panel").hidden = true; await poll(); }
-  catch (error) { state.pendingStatus = null; showError($("#run-error"), error); }
-  finally { button.disabled = false; button.textContent = "Aprovar Eixo e continuar"; }
 }
 
 async function runAction(action, button, busyLabel, currentStatus) {
@@ -197,7 +189,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   for (const name of ["dragenter", "dragover"]) dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.add("dragging"); });
   for (const name of ["dragleave", "drop"]) dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.remove("dragging"); });
   dropzone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
-  $("#approve-axis").addEventListener("click", approveAxis);
   $("#resume-plan").addEventListener("click", () => runAction("resume", $("#resume-plan"), "Retomando…", "failed"));
   $("#approve-project").addEventListener("click", () => runAction("approve-project", $("#approve-project"), "Aprovando…", "project_proposed"));
   $("#new-plan").addEventListener("click", newPlan); $("#back-to-form").addEventListener("click", newPlan);

@@ -4,47 +4,34 @@ Status: canônica.
 
 ## Percurso do usuário
 
-`login da equipe → briefing + fontes → acompanhamento → Eixo Narrativo → aprovação humana → Projeto Editorial`
+`login da equipe → briefing + fontes → acompanhamento → Projeto Editorial com Eixo Narrativo → aprovação humana`
 
-A aplicação web e a API são entregues pelo mesmo Cloud Run Service. Isso mantém autenticação, interface e operações no mesmo domínio. O navegador envia PDFs em partes para a API; a API controla uma sessão retomável no Cloud Storage, sem limite prático de uma requisição HTTP única. URLs públicas também são aceitas.
-
-Cada execução e upload pertence à identidade Google autenticada. O PostgreSQL guarda a relação de propriedade e é a fonte canônica para estado, estrutura editorial, métricas e artefatos. O Cloud Storage preserva os arquivos e recibos imutáveis. O Cloud Run Job executa o trabalho demorado sem manter a solicitação do navegador aberta.
+A aplicação web e a API são entregues pelo mesmo Cloud Run Service. O navegador envia PDFs em partes para a API, URLs públicas também são aceitas e o Cloud Run Job executa o processamento demorado. PostgreSQL é a fonte canônica de estado, estrutura, artefatos e métricas; Cloud Storage preserva arquivos e recibos.
 
 ## Processamento editorial
 
-1. A ingestão valida cada PDF, preserva o original, extrai texto por layout e normaliza parágrafos completos.
-2. Parágrafos e frases são persistidos relacionalmente antes da primeira chamada de modelo.
-3. Cada parágrafo recebe uma única leitura editorial, orientada pelo briefing completo.
-4. Uma síntese única integra o corpus.
-5. O Eixo Narrativo é proposto e a execução para obrigatoriamente.
-6. Apenas uma aprovação humana explícita inicia o Projeto Editorial.
+1. A ingestão valida cada PDF, preserva o original e normaliza parágrafos completos.
+2. Parágrafos e frases são gravados no PostgreSQL antes da primeira chamada de modelo.
+3. Uma varredura em lotes orientada pelo briefing devolve somente flags compactas: relevante, central, incerto e contexto adjacente necessário.
+4. Os parágrafos selecionados seguem como texto original para a compreensão editorial.
+5. Se o material selecionado couber no orçamento medido de tokens, uma única chamada produz o Projeto Editorial completo.
+6. Se não couber, partes limitadas por tokens são compreendidas e persistidas; consolidações adicionais só existem quando outro limite real exigir.
+7. Eixo Narrativo e Projeto Editorial são concebidos juntos e apresentados em uma única aprovação humana.
 
-O briefing contém tema, abordagem, público, produto, idioma e duração. A duração determina seleção e profundidade; nunca reduz a leitura das fontes nem corta parágrafos.
+Não existem fichas editoriais por parágrafo. O parágrafo é unidade de estrutura e endereço, não uma chamada de inteligência. Nenhum agrupamento usa somente contagem de parágrafos: cada prompt final é medido pelo tokenizer do modelo, com orçamento separado para seleção, compreensão e saída. Um parágrafo excepcionalmente grande só pode ser dividido entre frases completas.
 
-## Contratos editoriais
+## Contrato editorial
 
-### Digestão de parágrafo
+O briefing contém tema, intenção, público, produto, idioma e duração. Ele orienta todas as decisões sem alterar o que as fontes dizem.
 
-Entrada: um parágrafo completo e o briefing. Saída: observações distintas, tags livres e relevância para o briefing.
-
-### Entendimento editorial
-
-Entrada: briefing e notas ordenadas dos parágrafos. Saída: síntese integrada, ideias centrais, relações e tensões, limites e possibilidades editoriais.
-
-### Eixo Narrativo
-
-Entrada: briefing e entendimento editorial. Saída: uma direção intelectual/editorial e sua justificativa.
-
-### Projeto Editorial
-
-Entrada: Eixo aprovado, briefing e entendimento. Saída: título de trabalho, promessa, assuntos sustentados pelas fontes dimensionados para a duração, sugestões opcionais de conhecimento do modelo e oportunidades de novas fontes.
+O Projeto Editorial inclui título de trabalho, promessa, Eixo Narrativo e sua justificativa, assuntos sustentados pelas fontes dimensionados para a duração, sugestões opcionais provenientes do modelo e oportunidades que exigem fontes adicionais. A identidade mínima das fontes é preservada durante a compreensão para que convergências, complementos, contradições, contextos e limites possam ser reconhecidos.
 
 ## Garantias operacionais
 
 - A mesma solicitação possui identidade determinística e não abre deliberadamente outra execução paga.
-- Trabalho concluído é retomável sem reler parágrafos persistidos.
-- Toda chamada paga registra tokens de entrada, cache, saída, raciocínio, total, latência, resultado, erro e custo tarifado.
+- Flags e compreensões parciais concluídas são persistidas antes da unidade seguinte e reutilizadas após falha.
+- Chamadas de geração têm timeout; falhas são persistidas e exibidas com sua causa real.
+- Toda chamada paga registra tokens, latência, estado, erro e custo tarifado.
 - Toda etapa registra duração, estado e artefatos produzidos.
-- Falhas são persistidas e exibidas ao usuário com a causa real.
-- Nenhum endpoint capaz de ler dados ou iniciar processamento aceita acesso sem sessão.
-- A interface, a API e o Job usam o mesmo contrato genérico para qualquer tema ou conjunto de fontes.
+- A interface oferece uma única aprovação para o Projeto Editorial completo.
+- A mesma entrada atende qualquer tema, fonte, briefing, produto, idioma e duração, sem variante de teste.
