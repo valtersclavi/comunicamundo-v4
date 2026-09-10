@@ -268,7 +268,8 @@ def test_product_interface_is_the_root_entrypoint() -> None:
     assert response.status_code == 200
     assert "Transforme fontes" in response.text
     assert "Produto final" in response.text
-    assert "/assets/app.js" in response.text
+    assert '/assets/app.js?v=' in response.text
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_shared_login_protects_product_operations_with_server_session() -> None:

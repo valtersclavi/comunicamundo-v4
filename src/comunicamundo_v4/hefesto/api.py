@@ -18,7 +18,7 @@ from google.api_core.exceptions import NotFound, PreconditionFailed
 from google.auth.transport.requests import AuthorizedSession
 from google.cloud import storage
 from fastapi import FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 import requests
@@ -372,6 +372,13 @@ def create_app(
     access = access_store or PostgresAccessStore()
     authentication = auth_store or PostgresAuthStore()
     web_root = Path(__file__).resolve().parent.parent / "web"
+    index_html = (web_root / "index.html").read_text(encoding="utf-8")
+    app_asset = web_root / "assets" / "app.js"
+    app_version = sha256(app_asset.read_bytes()).hexdigest()[:16]
+    versioned_index_html = index_html.replace(
+        'src="/assets/app.js"',
+        f'src="/assets/app.js?v={app_version}"',
+    )
     app.mount(
         "/assets", StaticFiles(directory=web_root / "assets"), name="assets"
     )
@@ -407,8 +414,11 @@ def create_app(
         return owner_id
 
     @app.get("/", include_in_schema=False)
-    async def product() -> FileResponse:
-        return FileResponse(web_root / "index.html")
+    async def product() -> HTMLResponse:
+        return HTMLResponse(
+            versioned_index_html,
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/healthz")
     async def health() -> dict[str, str]:
