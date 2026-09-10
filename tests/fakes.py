@@ -13,6 +13,7 @@ from comunicamundo_v4.hefesto.contracts import (
     EditorialCondensation,
     EditorialCondensationProposal,
     EditorialProjectProposal,
+    FinalTextProposal,
     Paragraph,
     ProductRun,
     SelectionBatch,
@@ -202,6 +203,14 @@ class FakeGateway:
                         "Additional source opportunity"
                     ],
                 }
+            )
+        elif task_type == "final_text":
+            value = FinalTextProposal(
+                title="Finished title",
+                body=(
+                    "A complete final text grounded in the selected sources.\n\n"
+                    "It follows the approved Narrative Axis through every section."
+                ),
             )
         else:
             raise AssertionError(task_type)

@@ -5,9 +5,10 @@ const state = { files: [], current: null, timer: null, history: [], pendingStatu
 const labels = {
   queued: "Na fila", input_failed: "Falha na entrada", source_structure_ready: "Fontes estruturadas",
   selecting: "Selecionando material", comprehending: "Compreendendo fontes",
-  project_proposed: "Projeto Editorial pronto", project_approved: "Projeto aprovado", failed: "Falha"
+  project_proposed: "Projeto Editorial pronto", project_approved: "Projeto aprovado",
+  producing_text: "Escrevendo texto final", text_ready: "Texto final pronto", failed: "Falha"
 };
-const stageNames = { ingestion: "Leitura e normalização das fontes", relational_structure: "Estrutura de parágrafos e frases", selection: "Triagem orientada pelo briefing", editorial_comprehension: "Compreensão e Projeto Editorial" };
+const stageNames = { ingestion: "Leitura e normalização das fontes", relational_structure: "Estrutura de parágrafos e frases", selection: "Triagem orientada pelo briefing", editorial_comprehension: "Compreensão e Projeto Editorial", final_text: "Geração do texto final" };
 const expectedStages = Object.keys(stageNames);
 
 async function api(path, options = {}) {
@@ -101,12 +102,12 @@ function statusClass(status) { return ["failed", "input_failed"].includes(status
 function renderRun(run) {
   const status = run.status || "queued";
   $("#run-status").textContent = labels[status] || status;
-  $("#execution-title").textContent = ["project_proposed", "project_approved"].includes(status) ? "Projeto Editorial" : "Hefesto em andamento";
+  $("#execution-title").textContent = status === "text_ready" ? "Texto final" : ["project_proposed", "project_approved"].includes(status) ? "Projeto Editorial" : "Hefesto em andamento";
   const known = new Map((run.stages || []).map((item) => [item.stage, item]));
   let activeFound = false;
   $("#stages").innerHTML = expectedStages.map((name) => {
     const item = known.get(name); let kind = item ? statusClass(item.status) : "pending";
-    if (!item && !activeFound && !["project_proposed", "project_approved", "failed", "input_failed"].includes(status)) { kind = "active"; activeFound = true; }
+    if (!item && !activeFound && !["project_proposed", "project_approved", "text_ready", "failed", "input_failed"].includes(status)) { kind = "active"; activeFound = true; }
     const duration = item?.duration_ms != null ? `${(item.duration_ms / 1000).toFixed(1)} s` : kind === "active" ? "em andamento" : "";
     return `<div class="stage ${kind}"><i class="stage-icon"></i><strong>${stageNames[name]}</strong><span>${duration}</span></div>`;
   }).join("");
@@ -127,7 +128,10 @@ function renderRun(run) {
   $("#project-panel").hidden = !project;
   if (project) renderProject(project);
   $("#approve-project").hidden = status !== "project_proposed" || state.pendingStatus === "project_proposed";
-  $("#project-approval-copy").textContent = status === "project_approved" ? "Projeto Editorial aprovado." : "Revise o projeto antes de concluir o planejamento.";
+  $("#produce-text").hidden = status !== "project_approved" || Boolean(run.final_text) || state.pendingStatus === "project_approved";
+  $("#project-approval-copy").textContent = ["project_approved", "producing_text", "text_ready"].includes(status) ? "Projeto Editorial aprovado." : "Revise o projeto antes de gerar o texto final.";
+  $("#text-panel").hidden = !run.final_text;
+  if (run.final_text) renderFinalText(run.final_text);
   return status;
 }
 
@@ -142,13 +146,19 @@ function renderProject(project) {
   $("#suggestions").innerHTML = blocks.filter(([, items]) => items?.length).map(([title, items]) => `<section class="suggestion-block"><h3>${title}</h3><ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>`).join("");
 }
 
+function renderFinalText(record) {
+  $("#text-title").textContent = record.proposal.title;
+  $("#text-meta").textContent = `${formatter.format(record.word_count)} palavras`;
+  $("#text-body").textContent = record.proposal.body;
+}
+
 async function poll() {
   if (!state.current) return;
   try {
     const run = await api(`/v1/plans/${state.current}`); const status = renderRun(run);
     const waitingForAction = state.pendingStatus === status;
     if (state.pendingStatus && !waitingForAction) state.pendingStatus = null;
-    if (waitingForAction || !["project_proposed", "project_approved", "failed", "input_failed"].includes(status)) state.timer = setTimeout(poll, 4000);
+    if (waitingForAction || !["project_proposed", "project_approved", "text_ready", "failed", "input_failed"].includes(status)) state.timer = setTimeout(poll, 4000);
     else await loadHistory();
   } catch (error) { showError($("#run-error"), error); }
 }
@@ -191,6 +201,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   dropzone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
   $("#resume-plan").addEventListener("click", () => runAction("resume", $("#resume-plan"), "Retomando…", "failed"));
   $("#approve-project").addEventListener("click", () => runAction("approve-project", $("#approve-project"), "Aprovando…", "project_proposed"));
+  $("#produce-text").addEventListener("click", () => runAction("produce-text", $("#produce-text"), "Gerando…", "project_approved"));
   $("#new-plan").addEventListener("click", newPlan); $("#back-to-form").addEventListener("click", newPlan);
   $("#history").addEventListener("click", (event) => { const item = event.target.closest(".history-item"); if (item) openExecution(item.dataset.id, item.dataset.title); });
   try {

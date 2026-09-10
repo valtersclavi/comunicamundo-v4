@@ -17,6 +17,8 @@ from .contracts import (
     EditorialCondensationProposal,
     EditorialProjectProposal,
     EditorialProjectRecord,
+    FinalTextProposal,
+    FinalTextRecord,
     Paragraph,
     Passage,
     PlanningRequest,
@@ -29,6 +31,7 @@ from .gateway import ModelCallError, ModelGateway, ModelResult
 from .prompts import (
     SYSTEM,
     condensation_prompt,
+    final_text_prompt,
     project_prompt,
     render_condensations,
     render_passages,
@@ -230,6 +233,63 @@ class Hefesto:
         await self._repository.save_run(run)
         return run
 
+    async def produce_text(self, execution_run_id: UUID) -> ProductRun:
+        run = await self._required_run(execution_run_id)
+        if run.final_text is not None:
+            return run
+        if run.editorial_project is None or not run.editorial_project.approved:
+            raise ValueError("Final text requires an approved Editorial Project")
+        if run.state is RunState.FAILED:
+            run = run.model_copy(
+                update={
+                    "state": RunState.PROJECT_APPROVED,
+                    "error_class": None,
+                    "error_message": None,
+                    "updated_at": datetime.now(UTC),
+                }
+            )
+            await self._repository.save_run(run)
+        if run.state not in {RunState.PROJECT_APPROVED, RunState.PRODUCING_TEXT}:
+            raise ValueError("Final text cannot be produced from the current state")
+        run = await self._activate(run, RunState.PRODUCING_TEXT)
+        paragraphs = segment_sources(run.request.sources)
+        passages = passages_from_paragraphs(
+            paragraphs, passage_token_target=self._passage_target
+        )
+        titles = {
+            ordinal: source.title
+            for ordinal, source in enumerate(run.request.sources, start=1)
+        }
+        try:
+            selected = await self._selected_passages(run, passages)
+            material = render_passages(selected, titles)
+            prompt = final_text_prompt(
+                run.request.brief,
+                run.editorial_project.proposal,
+                material,
+                material_kind="original selected source passages",
+            )
+            if await self._count_tokens(prompt) <= self._comprehension_budget:
+                return await self._create_final_text(run, prompt)
+
+            readings = await self._condense_passages(run, selected, titles)
+            level = 2
+            while True:
+                combined = render_condensations(readings)
+                prompt = final_text_prompt(
+                    run.request.brief,
+                    run.editorial_project.proposal,
+                    combined,
+                    material_kind="bounded editorial comprehensions of selected passages",
+                )
+                if await self._count_tokens(prompt) <= self._comprehension_budget:
+                    return await self._create_final_text(run, prompt)
+                readings = await self._condense_readings(run, readings, level)
+                level += 1
+        except Exception as error:
+            await self._fail(run, error)
+            raise
+
     async def receipt(self, execution_run_id: UUID) -> dict[str, object]:
         run = await self._required_run(execution_run_id)
         return {
@@ -239,6 +299,9 @@ class Hefesto:
             "editorial_project": (
                 run.editorial_project.model_dump(mode="json")
                 if run.editorial_project else None
+            ),
+            "final_text": (
+                run.final_text.model_dump(mode="json") if run.final_text else None
             ),
             "processing": await self._repository.work_report(execution_run_id),
             "error_class": run.error_class,
@@ -559,6 +622,36 @@ class Hefesto:
         )
         await self._repository.save_run(proposed)
         return proposed
+
+    async def _create_final_text(self, run: ProductRun, prompt: str) -> ProductRun:
+        if run.editorial_project is None:
+            raise ValueError("Final text requires an Editorial Project")
+        result = await self._call(
+            run,
+            task_type="final_text",
+            prompt=prompt,
+            schema=FinalTextProposal,
+            max_output_tokens=16_384,
+            thinking_tokens=4_000,
+        )
+        record = FinalTextRecord(
+            execution_run_id=run.execution_run_id,
+            project_id=run.project_id,
+            editorial_project_id=run.editorial_project.editorial_project_id,
+            proposal=result.value,
+            word_count=len(result.value.body.split()),
+        )
+        completed = run.model_copy(
+            update={
+                "state": RunState.TEXT_READY,
+                "final_text": record,
+                "error_class": None,
+                "error_message": None,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        await self._repository.save_run(completed)
+        return completed
 
     async def _count_tokens(self, prompt: str) -> int:
         for attempt in range(3):

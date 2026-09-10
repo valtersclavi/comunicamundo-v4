@@ -212,3 +212,50 @@ async def test_project_and_axis_share_one_human_gate() -> None:
     assert approved.state is RunState.PROJECT_APPROVED
     assert approved.editorial_project is not None
     assert approved.editorial_project.approved
+
+
+@pytest.mark.asyncio
+async def test_approved_project_produces_one_persisted_final_text() -> None:
+    repository = MemoryRepository()
+    gateway = FakeGateway()
+    hefesto = Hefesto(repository, gateway)
+    run = await hefesto.prepare(request())
+    await hefesto.select(run.execution_run_id)
+    await hefesto.propose_project(run.execution_run_id)
+    await hefesto.approve_project(run.execution_run_id)
+
+    completed = await hefesto.produce_text(run.execution_run_id)
+    repeated = await hefesto.produce_text(run.execution_run_id)
+
+    assert completed.state is RunState.TEXT_READY
+    assert completed.final_text is not None
+    assert completed.final_text.proposal.title == "Finished title"
+    assert completed.final_text.word_count > 0
+    assert repeated.final_text == completed.final_text
+    final_calls = [item for item in gateway.calls if item["task_type"] == "final_text"]
+    assert len(final_calls) == 1
+    assert "APPROVED EDITORIAL PROJECT" in final_calls[0]["prompt"]
+    assert "SOURCE 1: One" in final_calls[0]["prompt"]
+    assert "SOURCE 2: Two" in final_calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_final_text_requires_approval_and_resumes_after_model_failure() -> None:
+    repository = MemoryRepository()
+    gateway = FakeGateway(fail_task="final_text", fail_times=1)
+    hefesto = Hefesto(repository, gateway)
+    run = await hefesto.prepare(request())
+    await hefesto.select(run.execution_run_id)
+    await hefesto.propose_project(run.execution_run_id)
+
+    with pytest.raises(ValueError, match="approved Editorial Project"):
+        await hefesto.produce_text(run.execution_run_id)
+    await hefesto.approve_project(run.execution_run_id)
+    with pytest.raises(Exception, match="synthetic final_text failure"):
+        await hefesto.produce_text(run.execution_run_id)
+    assert repository.runs[run.execution_run_id].state is RunState.FAILED
+
+    completed = await hefesto.produce_text(run.execution_run_id)
+    assert completed.state is RunState.TEXT_READY
+    assert completed.editorial_project is not None
+    assert completed.editorial_project.approved

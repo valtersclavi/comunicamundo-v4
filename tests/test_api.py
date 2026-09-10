@@ -267,6 +267,7 @@ def test_product_interface_is_the_root_entrypoint() -> None:
     response = api.get("/")
     assert response.status_code == 200
     assert "Transforme fontes" in response.text
+    assert "Produto final" in response.text
     assert "/assets/app.js" in response.text
 
 
@@ -363,4 +364,42 @@ def test_project_approval_is_a_separate_human_action() -> None:
     assert response.status_code == 202
     assert dispatcher.calls[-1] == [
         "approve-project", f"--execution-run-id={execution_id}"
+    ]
+
+
+def test_approved_existing_project_can_dispatch_final_text() -> None:
+    storage, dispatcher = Storage(), Dispatcher()
+    api = client(
+        storage,
+        dispatcher,
+        receipt={
+            "status": "project_approved",
+            "editorial_project": {"approved": True},
+            "final_text": None,
+        },
+    )
+    execution_id = api.post("/v1/plans", json=request()).json()["execution_run_id"]
+    response = api.post(f"/v1/plans/{execution_id}/produce-text")
+    assert response.status_code == 202
+    assert dispatcher.calls[-1] == [
+        "produce-text", f"--execution-run-id={execution_id}"
+    ]
+
+
+def test_failed_text_generation_resumes_at_production() -> None:
+    storage, dispatcher = Storage(), Dispatcher()
+    api = client(
+        storage,
+        dispatcher,
+        receipt={
+            "status": "failed",
+            "editorial_project": {"approved": True},
+            "final_text": None,
+        },
+    )
+    execution_id = api.post("/v1/plans", json=request()).json()["execution_run_id"]
+    response = api.post(f"/v1/plans/{execution_id}/resume")
+    assert response.status_code == 202
+    assert dispatcher.calls[-1] == [
+        "produce-text", f"--execution-run-id={execution_id}"
     ]

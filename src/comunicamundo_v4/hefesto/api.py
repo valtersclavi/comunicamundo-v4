@@ -271,7 +271,7 @@ class SubmissionService:
         return accepted
 
     def dispatch_action(self, execution_id: UUID, action: str) -> dict[str, Any]:
-        if action not in {"resume-plan", "approve-project"}:
+        if action not in {"resume-plan", "approve-project", "produce-text"}:
             raise ValueError("unsupported product action")
         blob = self._client.bucket(self._bucket_name).blob(
             f"hefesto-product/executions/{execution_id}/{action}-dispatch.json"
@@ -640,7 +640,8 @@ def create_app(
     ) -> dict[str, Any]:
         receipt = await required_receipt(execution_id, request)
         if receipt["status"] not in {
-            "failed", "selecting", "comprehending", "source_structure_ready"
+            "failed", "selecting", "comprehending", "source_structure_ready",
+            "producing_text",
         }:
             raise HTTPException(
                 status_code=409,
@@ -649,9 +650,11 @@ def create_app(
                     "does not require processing resume"
                 ),
             )
+        project = receipt.get("editorial_project") or {}
+        action = "produce-text" if project.get("approved") else "resume-plan"
         try:
             return await asyncio.to_thread(
-                service().dispatch_action, execution_id, "resume-plan"
+                service().dispatch_action, execution_id, action
             )
         except Exception as error:
             raise HTTPException(
@@ -679,6 +682,33 @@ def create_app(
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "approve-project"
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=503, detail=f"dispatch failed: {error}"
+            ) from error
+
+    @app.post(
+        "/v1/plans/{execution_id}/produce-text",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def produce_text(
+        execution_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
+        if receipt.get("final_text") is not None:
+            return receipt
+        if receipt["status"] != "project_approved":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"execution in {receipt['status']} "
+                    "has no approved Editorial Project to produce"
+                ),
+            )
+        try:
+            return await asyncio.to_thread(
+                service().dispatch_action, execution_id, "produce-text"
             )
         except Exception as error:
             raise HTTPException(

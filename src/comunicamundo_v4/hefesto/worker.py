@@ -178,9 +178,54 @@ async def approve_project(execution_id: UUID) -> None:
     repository, hefesto = await services()
     try:
         await hefesto.approve_project(execution_id)
-        await _persist_product_receipt(hefesto, client, execution_id, [])
+        await _continue_to_text(hefesto, client, execution_id)
     finally:
         await repository.close()
+
+
+async def produce_text(execution_id: UUID) -> None:
+    client = storage_client()
+    repository, hefesto = await services()
+    try:
+        await _continue_to_text(hefesto, client, execution_id)
+    finally:
+        await repository.close()
+
+
+async def _continue_to_text(
+    hefesto: Hefesto,
+    client: storage.Client,
+    execution_id: UUID,
+) -> None:
+    stage = "final_text"
+    started = perf_counter()
+    await hefesto.record_stages(execution_id, [{
+        "stage": stage, "status": "running", "duration_ms": 0,
+    }])
+    try:
+        completed = await hefesto.produce_text(execution_id)
+        artifact = completed.final_text
+        stages = [{
+            "stage": stage,
+            "status": "completed",
+            "duration_ms": int((perf_counter() - started) * 1000),
+            "artifact": (
+                {
+                    "final_text_id": str(artifact.final_text_id),
+                    "word_count": artifact.word_count,
+                }
+                if artifact else None
+            ),
+        }]
+    except Exception:
+        stages = [{
+            "stage": stage,
+            "status": "failed",
+            "duration_ms": int((perf_counter() - started) * 1000),
+        }]
+        await _persist_product_receipt(hefesto, client, execution_id, stages)
+        raise
+    await _persist_product_receipt(hefesto, client, execution_id, stages)
 
 
 def mark_action_dispatch(
@@ -341,6 +386,18 @@ async def run(args: argparse.Namespace) -> None:
             storage_client(), args.execution_run_id, args.command, "completed"
         )
         return
+    if args.command == "produce-text":
+        try:
+            await produce_text(args.execution_run_id)
+        except Exception as error:
+            mark_action_dispatch(
+                storage_client(), args.execution_run_id, args.command, "failed", error
+            )
+            raise
+        mark_action_dispatch(
+            storage_client(), args.execution_run_id, args.command, "completed"
+        )
+        return
     repository, hefesto = await services()
     client = storage_client()
     try:
@@ -375,6 +432,8 @@ def parser() -> argparse.ArgumentParser:
     resume.add_argument("--execution-run-id", type=UUID, required=True)
     approve_project_parser = commands.add_parser("approve-project")
     approve_project_parser.add_argument("--execution-run-id", type=UUID, required=True)
+    produce_text_parser = commands.add_parser("produce-text")
+    produce_text_parser.add_argument("--execution-run-id", type=UUID, required=True)
     inspect = commands.add_parser("inspect")
     inspect.add_argument("--execution-run-id", type=UUID, required=True)
     return root

@@ -109,6 +109,8 @@ blockquote { margin: 28px 0; padding-left: 24px; border-left: 4px solid var(--em
 .subject p { margin: 7px 0 0; color: var(--soft-ink); line-height: 1.5; }
 .suggestion-block { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 20px; }
 .suggestion-block li { color: var(--soft-ink); margin: 8px 0; line-height: 1.5; }
+.final-text h2 { margin: 7px 0 8px; font: 500 clamp(32px, 4vw, 48px)/1.1 Georgia, serif; letter-spacing: -.025em; }
+.text-body { max-width: 760px; margin-top: 32px; white-space: pre-wrap; font: 18px/1.75 Georgia, "Times New Roman", serif; }
 
 @media (max-width: 850px) {
   .login-card { padding: 28px 22px; }

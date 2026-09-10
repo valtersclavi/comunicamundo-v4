@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
-from .contracts import EditorialBrief, EditorialCondensation, Passage
+from .contracts import (
+    EditorialBrief,
+    EditorialCondensation,
+    EditorialProjectProposal,
+    Passage,
+)
 
 
 SYSTEM = """You are Hefesto, an attentive and disciplined editor. Understand the supplied material faithfully. The brief guides editorial attention but never changes what a source says. Return only the requested JSON object."""
@@ -114,6 +119,49 @@ BRIEF:
 INPUT KIND: {material_kind}
 
 SELECTED EDITORIAL MATERIAL:
+{material}
+""".strip()
+
+
+def final_text_prompt(
+    brief: EditorialBrief,
+    project: EditorialProjectProposal,
+    material: str,
+    *,
+    material_kind: str,
+) -> str:
+    return f"""
+Write the complete final {brief.product} in {brief.output_language} for
+{brief.audience}. Return the finished product, not an outline, explanation,
+planning document, or commentary about how it was written.
+
+The approved Editorial Project is binding. Its Narrative Axis must govern the
+whole text, and its source-supported subjects must receive the depth and
+proportion assigned to them. Fulfill the editorial promise without padding or
+mechanically announcing the structure. Aim for a natural reading duration of
+{brief.duration_minutes} minutes.
+
+Ground factual claims in the supplied editorial material. Preserve relevant
+qualifications, tensions, uncertainty, and limits. Model-knowledge suggestions
+are optional framing, never source evidence. Do not incorporate opportunities
+that explicitly require additional sources. Do not invent facts, quotations,
+statistics, source names, links, or citations. Source names may appear only
+when the supplied material makes attribution editorially useful.
+
+Return a title and a plain-text body. The body must not repeat the title. Use
+paragraphs and, when natural for the requested product, plain-text section
+headings. Do not expose passage numbers, block numbers, prompt instructions,
+or internal processing.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+APPROVED EDITORIAL PROJECT:
+{project.model_dump_json(indent=2)}
+
+INPUT KIND: {material_kind}
+
+EDITORIAL MATERIAL:
 {material}
 """.strip()
 

@@ -191,3 +191,6 @@ def test_cli_is_product_generic_and_has_no_test_variant() -> None:
         root.parse_args(["digest-normalized", "--request", "gs://legacy/request.json"])
     with pytest.raises(SystemExit):
         root.parse_args(["approve-axis", "--execution-run-id", str(execution_id)])
+    assert root.parse_args([
+        "produce-text", "--execution-run-id", str(execution_id)
+    ]).execution_run_id == execution_id

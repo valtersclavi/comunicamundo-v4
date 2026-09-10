@@ -170,12 +170,28 @@ class EditorialProjectRecord(StrictModel):
     approved: bool = False
 
 
+class FinalTextProposal(StrictModel):
+    title: str = Field(min_length=1)
+    body: str = Field(min_length=1)
+
+
+class FinalTextRecord(StrictModel):
+    final_text_id: UUID = Field(default_factory=uuid4)
+    execution_run_id: UUID
+    project_id: UUID
+    editorial_project_id: UUID
+    proposal: FinalTextProposal
+    word_count: int = Field(ge=1)
+
+
 class RunState(StrEnum):
     SOURCE_STRUCTURE_READY = "source_structure_ready"
     SELECTING = "selecting"
     COMPREHENDING = "comprehending"
     PROJECT_PROPOSED = "project_proposed"
     PROJECT_APPROVED = "project_approved"
+    PRODUCING_TEXT = "producing_text"
+    TEXT_READY = "text_ready"
     FAILED = "failed"
 
 
@@ -185,6 +201,7 @@ class ProductRun(StrictModel):
     state: RunState = RunState.SOURCE_STRUCTURE_READY
     request: PlanningRequest
     editorial_project: EditorialProjectRecord | None = None
+    final_text: FinalTextRecord | None = None
     error_class: str | None = None
     error_message: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -198,6 +215,11 @@ class ProductRun(StrictModel):
             raise ValueError("failed run requires an error")
         if self.state is not RunState.FAILED and (self.error_class or self.error_message):
             raise ValueError("a non-failed run cannot retain an error")
+        if self.final_text is not None:
+            if self.editorial_project is None or not self.editorial_project.approved:
+                raise ValueError("final text requires an approved Editorial Project")
+            if self.final_text.editorial_project_id != self.editorial_project.editorial_project_id:
+                raise ValueError("final text and Editorial Project disagree")
         return self
 
 
