@@ -336,22 +336,32 @@ async def _product_receipt(execution_id: UUID) -> dict[str, Any] | None:
         run = await repository.get_run(execution_id)
         if run is None:
             return await repository.product_receipt(execution_id)
-        return {
-            "status": run.state.value,
-            "project_id": str(run.project_id),
-            "execution_run_id": str(run.execution_run_id),
-            "editorial_project": (
-                run.editorial_project.model_dump(mode="json")
-                if run.editorial_project else None
-            ),
-            "processing": await repository.work_report(execution_id),
-            "error_class": run.error_class,
-            "error_message": run.error_message,
-            "stages": await repository.stage_report(execution_id),
-            "usage": await repository.usage_report(execution_id),
-        }
+        return await _canonical_receipt(repository, run)
     finally:
         await repository.close()
+
+
+async def _canonical_receipt(
+    repository: ProductRepository, run: Any
+) -> dict[str, Any]:
+    execution_id = run.execution_run_id
+    return {
+        "status": run.state.value,
+        "project_id": str(run.project_id),
+        "execution_run_id": str(execution_id),
+        "editorial_project": (
+            run.editorial_project.model_dump(mode="json")
+            if run.editorial_project else None
+        ),
+        "final_text": (
+            run.final_text.model_dump(mode="json") if run.final_text else None
+        ),
+        "processing": await repository.work_report(execution_id),
+        "error_class": run.error_class,
+        "error_message": run.error_message,
+        "stages": await repository.stage_report(execution_id),
+        "usage": await repository.usage_report(execution_id),
+    }
 
 
 ReceiptReader = Callable[[UUID], Any]

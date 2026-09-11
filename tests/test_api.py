@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from google.api_core.exceptions import NotFound, PreconditionFailed
 
-from comunicamundo_v4.hefesto.api import GoogleCloudRunDispatcher, create_app
+from comunicamundo_v4.hefesto.api import (
+    GoogleCloudRunDispatcher,
+    _canonical_receipt,
+    create_app,
+)
 
 
 class Blob:
@@ -270,6 +276,39 @@ def test_product_interface_is_the_root_entrypoint() -> None:
     assert "Produto final" in response.text
     assert '/assets/app.js?v=' in response.text
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_canonical_receipt_exposes_the_persisted_final_text() -> None:
+    final_text = {"proposal": {"title": "Título", "body": "Texto"}, "word_count": 1}
+
+    class Record:
+        def model_dump(self, *, mode):
+            assert mode == "json"
+            return final_text
+
+    class Repository:
+        async def work_report(self, execution_id):
+            return {}
+
+        async def stage_report(self, execution_id):
+            return []
+
+        async def usage_report(self, execution_id):
+            return {"call_count": 1}
+
+    execution_id = uuid4()
+    run = SimpleNamespace(
+        state=SimpleNamespace(value="text_ready"),
+        project_id=uuid4(),
+        execution_run_id=execution_id,
+        editorial_project=None,
+        final_text=Record(),
+        error_class=None,
+        error_message=None,
+    )
+    receipt = asyncio.run(_canonical_receipt(Repository(), run))
+    assert receipt["status"] == "text_ready"
+    assert receipt["final_text"] == final_text
 
 
 def test_shared_login_protects_product_operations_with_server_session() -> None:
