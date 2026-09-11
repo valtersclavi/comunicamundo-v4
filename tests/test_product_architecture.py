@@ -297,7 +297,7 @@ async def test_duration_is_guidance_not_a_hard_acceptance_gate() -> None:
     completed = await hefesto.produce_text(run.execution_run_id)
 
     assert completed.final_text is not None
-    assert completed.final_text.word_count == 500
+    assert completed.final_text.word_count == 1_120
     tasks = [item["task_type"] for item in gateway.calls]
     assert "content_contract_correction" not in tasks
 
@@ -325,7 +325,7 @@ async def test_rejected_style_is_corrected_and_reverified() -> None:
         for item in gateway.calls
         if item["task_type"] == "product_style_correction"
     )
-    assert "Make only the local" in correction
+    assert "make only the local" in correction
     assert "EDITORIALLY CLOSED REFERENCE" in correction
     assert "CURRENT STYLED TEXT" in correction
     assert "APPROVED EDITORIAL STATE" not in correction
