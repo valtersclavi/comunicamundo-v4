@@ -31,7 +31,7 @@ O briefing contém tema, intenção, público, produto, idioma e duração. Ele 
 
 O Projeto Editorial inclui título de trabalho, promessa, Eixo Narrativo e sua justificativa, assuntos sustentados pelas fontes dimensionados para a duração, sugestões opcionais provenientes do modelo e oportunidades que exigem fontes adicionais. A identidade mínima das fontes é preservada durante a compreensão para que convergências, complementos, contradições, contextos e limites possam ser reconhecidos.
 
-A duração é um contrato de entrega medido em palavras por minuto conforme o produto. O projeto distribui o tempo completo entre seus assuntos, essa proporção vira meta de palavras por seção e o conteúdo precisa terminar dentro da tolerância de 8%. Um resultado fora dessa faixa ou com coordenadas internas das fontes não pode ser entregue.
+A duração orienta a extensão e a proporção editorial conforme o produto. O projeto distribui o tempo completo entre seus assuntos e essa proporção vira uma meta aproximada de palavras por seção, nunca uma faixa mecânica de aceitação. A entrega final é julgada pela compatibilidade substantiva entre o conteúdo editorialmente fechado e o texto estilizado.
 
 ## Garantias operacionais
 

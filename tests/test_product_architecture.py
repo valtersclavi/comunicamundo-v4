@@ -285,7 +285,7 @@ async def test_final_text_requires_approval_and_resumes_after_model_failure() ->
 
 
 @pytest.mark.asyncio
-async def test_duration_contract_is_corrected_before_product_styling() -> None:
+async def test_duration_is_guidance_not_a_hard_acceptance_gate() -> None:
     repository = MemoryRepository()
     gateway = FakeGateway(word_counts={"content_draft": 500})
     hefesto = Hefesto(repository, gateway)
@@ -297,9 +297,9 @@ async def test_duration_contract_is_corrected_before_product_styling() -> None:
     completed = await hefesto.produce_text(run.execution_run_id)
 
     assert completed.final_text is not None
-    assert completed.final_text.word_count == 1_120
+    assert completed.final_text.word_count == 500
     tasks = [item["task_type"] for item in gateway.calls]
-    assert tasks.index("content_contract_correction") < tasks.index("product_styling")
+    assert "content_contract_correction" not in tasks
 
 
 @pytest.mark.asyncio
@@ -326,5 +326,37 @@ async def test_rejected_style_is_corrected_and_reverified() -> None:
         if item["task_type"] == "product_style_correction"
     )
     assert "Make only the local" in correction
+    assert "EDITORIALLY CLOSED REFERENCE" in correction
     assert "CURRENT STYLED TEXT" in correction
     assert "APPROVED EDITORIAL STATE" not in correction
+
+
+@pytest.mark.asyncio
+async def test_second_rejection_is_preserved_and_resume_continues_from_it() -> None:
+    repository = MemoryRepository()
+    gateway = FakeGateway(reject_verification_times=2)
+    hefesto = Hefesto(repository, gateway)
+    run = await hefesto.prepare(request())
+    await hefesto.select(run.execution_run_id)
+    await hefesto.propose_project(run.execution_run_id)
+    await hefesto.approve_project(run.execution_run_id)
+
+    with pytest.raises(
+        ValueError, match="Styled text failed final preservation verification"
+    ):
+        await hefesto.produce_text(run.execution_run_id)
+
+    failed = repository.runs[run.execution_run_id]
+    assert failed.state is RunState.FAILED
+    assert failed.preservation_review is not None
+    assert not failed.preservation_review.approved
+    repaired_text = failed.styled_text
+
+    completed = await hefesto.produce_text(run.execution_run_id)
+
+    assert completed.state is RunState.TEXT_READY
+    assert completed.styled_text is not repaired_text
+    tasks = [item["task_type"] for item in gateway.calls]
+    assert tasks.count("final_verification") == 1
+    assert tasks.count("product_style_correction") == 2
+    assert tasks.count("final_reverification") == 2

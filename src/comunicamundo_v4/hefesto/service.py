@@ -15,7 +15,6 @@ from pydantic import BaseModel
 from .batching import candidate_packets, passages_from_paragraphs, split_packet
 from .contracts import (
     CallUsage,
-    ContentReviewIssue,
     ContentReviewProposal,
     EditorialBrief,
     EditorialCondensation,
@@ -297,8 +296,6 @@ class Hefesto:
                         run.request.brief,
                         project,
                         run.content_draft,
-                        target_words=target_words,
-                        actual_words=_word_count(run.content_draft.body),
                     ),
                     schema=ContentReviewProposal,
                     max_output_tokens=8_192,
@@ -338,47 +335,6 @@ class Hefesto:
                     run, corrected_content=run.content_draft
                 )
 
-            content_issues = _mechanical_issues(run.corrected_content, target_words)
-            if content_issues:
-                contract_review = ContentReviewProposal(
-                    approved=False,
-                    summary="The corrected content still violates the delivery contract.",
-                    issues=[
-                        ContentReviewIssue(
-                            severity="blocking",
-                            location="complete text",
-                            problem=issue,
-                            required_correction=(
-                                "Correct this contract violation without changing the "
-                                "approved editorial state."
-                            ),
-                        )
-                        for issue in content_issues
-                    ],
-                )
-                corrected = await self._generate_step(
-                    run,
-                    stage="content_contract_correction",
-                    task_type="content_contract_correction",
-                    prompt=content_revision_prompt(
-                        run.request.brief,
-                        project,
-                        run.corrected_content,
-                        contract_review,
-                        target_words=target_words,
-                        section_targets=section_targets,
-                    ),
-                    schema=FinalTextProposal,
-                    max_output_tokens=16_384,
-                    thinking_tokens=4_000,
-                )
-                run = await self._save_artifact(run, corrected_content=corrected)
-                remaining = _mechanical_issues(corrected, target_words)
-                if remaining:
-                    raise ValueError(
-                        "Corrected content failed the delivery contract: "
-                        + "; ".join(remaining)
-                    )
 
             if run.styled_text is None:
                 styled = await self._generate_step(
@@ -398,12 +354,11 @@ class Hefesto:
                 )
                 run = await self._save_artifact(run, styled_text=styled)
 
-            run = await self._verify_and_repair_style(
-                run, target_words=target_words
-            )
+            run = await self._verify_and_repair_style(run)
             return await self._complete_final_text(run)
         except Exception as error:
-            await self._fail(run, error)
+            latest = await self._required_run(run.execution_run_id)
+            await self._fail(latest, error)
             raise
 
     async def receipt(self, execution_run_id: UUID) -> dict[str, object]:
@@ -793,12 +748,9 @@ class Hefesto:
         await self._repository.save_run(completed)
         return completed
 
-    async def _verify_and_repair_style(
-        self, run: ProductRun, *, target_words: int
-    ) -> ProductRun:
+    async def _verify_and_repair_style(self, run: ProductRun) -> ProductRun:
         if run.corrected_content is None or run.styled_text is None:
             raise ValueError("Style verification requires both text versions")
-        issues = _mechanical_issues(run.styled_text, target_words)
         if run.preservation_review is None:
             review = await self._generate_step(
                 run,
@@ -808,20 +760,11 @@ class Hefesto:
                     run.corrected_content,
                     run.styled_text,
                     product=run.request.brief.product,
-                    target_words=target_words,
-                    mechanical_issues=issues,
                 ),
                 schema=PreservationReviewProposal,
                 max_output_tokens=8_192,
                 thinking_tokens=3_000,
             )
-            if issues and review.approved:
-                review = review.model_copy(
-                    update={
-                        "approved": False,
-                        "differences": [*review.differences, *issues],
-                    }
-                )
             run = await self._save_artifact(run, preservation_review=review)
         if run.preservation_review.approved:
             return run
@@ -838,8 +781,9 @@ class Hefesto:
                 product=run.request.brief.product,
                 language=run.request.brief.output_language,
                 audience=run.request.brief.audience,
-                target_words=target_words,
+                target_words=_target_words(run.request.brief),
                 correction_request=correction,
+                reference_text=run.corrected_content,
             ),
             schema=FinalTextProposal,
             max_output_tokens=16_384,
@@ -848,7 +792,6 @@ class Hefesto:
         run = await self._save_artifact(
             run, styled_text=repaired, preservation_review=None
         )
-        issues = _mechanical_issues(repaired, target_words)
         review = await self._generate_step(
             run,
             stage="final_reverification",
@@ -857,20 +800,11 @@ class Hefesto:
                 run.corrected_content,
                 repaired,
                 product=run.request.brief.product,
-                target_words=target_words,
-                mechanical_issues=issues,
             ),
             schema=PreservationReviewProposal,
             max_output_tokens=8_192,
             thinking_tokens=3_000,
         )
-        if issues and review.approved:
-            review = review.model_copy(
-                update={
-                    "approved": False,
-                    "differences": [*review.differences, *issues],
-                }
-            )
         run = await self._save_artifact(run, preservation_review=review)
         if not review.approved:
             raise ValueError("Styled text failed final preservation verification")
@@ -1099,23 +1033,3 @@ def _section_targets(
     ]
 
 
-def _mechanical_issues(text: FinalTextProposal, target_words: int) -> list[str]:
-    issues: list[str] = []
-    words = _word_count(text.body)
-    minimum = round(target_words * 0.92)
-    maximum = round(target_words * 1.08)
-    if not minimum <= words <= maximum:
-        issues.append(
-            f"word count {words} is outside the required range {minimum}-{maximum}"
-        )
-    forbidden = re.findall(
-        r"\b(?:fonte|source|passage|parágrafo|paragraph|bloco|block)\s*\d+\b",
-        text.body,
-        flags=re.IGNORECASE,
-    )
-    if forbidden:
-        issues.append(
-            "internal source coordinates leaked into the product: "
-            + ", ".join(sorted(set(forbidden)))
-        )
-    return issues

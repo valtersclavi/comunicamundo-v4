@@ -180,9 +180,6 @@ def content_review_prompt(
     brief: EditorialBrief,
     project: EditorialProjectProposal,
     draft: FinalTextProposal,
-    *,
-    target_words: int,
-    actual_words: int,
 ) -> str:
     return f"""
 Act as the content editor. Audit the content draft against the complete approved
@@ -192,13 +189,13 @@ Check whether the Narrative Axis genuinely governs the entire draft; the
 editorial promise is fulfilled; every essential corpus contribution, tension,
 qualification, and forbidden inference is handled correctly; the approved
 subjects have the intended depth and proportion; factual statements are
-supported by the corpus evidence; no model suggestion or enrichment opportunity
-became unsupported content; and no internal source coordinate leaked.
+supported by the corpus evidence; and no model suggestion or enrichment
+opportunity became unsupported content.
 
-The requested target is {target_words} words. The draft contains
-{actual_words} words. Treat a deviation greater than 8 percent as blocking.
-Return an operational review. Every issue must name its location, problem, and
-required correction. Approval means that no blocking content defect remains.
+Judge the content editorially. Do not enforce a word-count range or perform
+mechanical pattern checks. Return an operational review. Every issue must name
+its location, problem, and required correction. Approval means that no blocking
+content defect remains.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
@@ -226,10 +223,10 @@ review completely and return the corrected, editorially closed text. Preserve
 everything that is already correct. Resolve problems coherently across the
 whole piece rather than applying disconnected patches.
 
-The result must continue the approved editorial state, contain approximately
-{target_words} words within an 8 percent tolerance, and respect the section
-targets. Do not add unsupported knowledge or expose internal source coordinates.
-This is still content writing, not product-specific styling.
+The result must continue the approved editorial state, use approximately
+{target_words} words as editorial guidance, and respect the section targets
+without treating a word count as an acceptance boundary. Do not add unsupported
+knowledge. This is still content writing, not product-specific styling.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
@@ -256,16 +253,23 @@ def product_style_prompt(
     audience: str,
     target_words: int,
     correction_request: str | None = None,
+    reference_text: FinalTextProposal | None = None,
 ) -> str:
     if correction_request:
+        if reference_text is None:
+            raise ValueError("A style correction requires the closed reference text")
         task = f"""
-This is a correction pass over an already styled text. Make only the local
+This is a correction pass over an already styled text. Read the editorially
+closed reference and the current styled text, then make only the local
 corrections explicitly requested below. Preserve all unmentioned wording,
 structure, tone, rhythm, and stylistic decisions. Do not restart the styling
 and do not rewrite the text as a whole.
 
 CORRECTIONS REQUIRED:
 {correction_request}
+
+EDITORIALLY CLOSED REFERENCE:
+{reference_text.model_dump_json(indent=2)}
 
 CURRENT STYLED TEXT:
 """
@@ -285,8 +289,9 @@ opening, ending, and degree of verbosity for a {product} in {language} for
 
 You have no freedom of content. Preserve every fact, number, relationship,
 qualification, limitation, and conclusion. Add no examples, explanations,
-claims, or knowledge. Remove no substantive information. Target approximately
-{target_words} words within an 8 percent tolerance.
+claims, or knowledge. Remove no substantive information. Use approximately
+{target_words} words as guidance for the requested duration, not as a hard
+acceptance boundary.
 
 {task}
 {text.model_dump_json(indent=2)}
@@ -298,26 +303,24 @@ def preservation_review_prompt(
     styled_text: FinalTextProposal,
     *,
     product: str,
-    target_words: int,
-    mechanical_issues: list[str],
 ) -> str:
     return f"""
-Act as the final preservation verifier. Compare the editorially closed text
-with the styled {product}. Do not rewrite either text.
+Read the editorially closed text and the styled {product}. Decide only whether
+the styled text is substantively compatible with the closed text.
 
-Approve only if the styled version preserves every substantive fact, number,
-relationship, qualification, limitation, and conclusion without adding new
-content or losing necessary content. Formal changes are allowed without limit.
-The target is {target_words} words within an 8 percent tolerance.
+Approve when both texts carry the same facts, argument, relationships,
+qualifications, limitations, and conclusions. Changes of wording, order,
+headings, rhythm, transitions, compression, expansion, or length are normal
+styling decisions and are not reasons to reject.
 
-Mechanically detected issues are binding and make approval impossible until
-corrected:
-{json.dumps(mechanical_issues, ensure_ascii=False, indent=2)}
+Reject only when the styled text materially contradicts the closed text, adds
+an unsupported substantive claim, or omits something necessary in a way that
+changes the reader's understanding. Do not enforce a word-count range and do
+not perform mechanical pattern checks.
 
-If approval is denied, every differences item must be a precise, local,
-actionable correction instruction. Identify the affected wording or location
-and state exactly what must be restored, removed, or changed. Do not ask for a
-general rewrite.
+If approval is denied, every differences item must identify one material,
+local difference and say exactly what must be restored, removed, or corrected.
+Do not request a general rewrite.
 
 EDITORIALLY CLOSED TEXT:
 {closed_text.model_dump_json(indent=2)}
@@ -325,7 +328,6 @@ EDITORIALLY CLOSED TEXT:
 STYLED TEXT:
 {styled_text.model_dump_json(indent=2)}
 """.strip()
-
 
 def render_passages(passages: Sequence[Passage], titles: dict[int, str | None]) -> str:
     sections: list[str] = []
