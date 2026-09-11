@@ -4,9 +4,11 @@ import json
 from collections.abc import Sequence
 
 from .contracts import (
+    ContentReviewProposal,
     EditorialBrief,
     EditorialCondensation,
     EditorialProjectProposal,
+    FinalTextProposal,
     Passage,
 )
 
@@ -113,6 +115,18 @@ Synthesize relationships among all sources, including convergence,
 complementarity, contradiction, context, qualification, and limitation when
 they matter. Do not reproduce internal passage coordinates in the result.
 
+Create the editorial_corpus in the same act as the Narrative Axis and Editorial
+Project. It is the complete, integrated body of knowledge that the future
+content writer will use instead of rereading the source material. Organize it
+into meaningful editorial units and preserve essential points, tensions,
+qualifications, forbidden inferences, and concise source support. It must carry
+the intellectual work that led to the project, not merely repeat its outline.
+Source ordinals are internal grounding metadata for the content editor; they
+must never be written into the final product.
+For evidence that may be quoted or whose exact wording materially matters,
+preserve a short exact source excerpt in verbatim_excerpt. Otherwise use null;
+do not copy source prose merely for completeness.
+
 BRIEF:
 {brief.model_dump_json(indent=2)}
 
@@ -123,46 +137,193 @@ SELECTED EDITORIAL MATERIAL:
 """.strip()
 
 
-def final_text_prompt(
+def content_draft_prompt(
     brief: EditorialBrief,
     project: EditorialProjectProposal,
-    material: str,
     *,
-    material_kind: str,
+    target_words: int,
+    section_targets: list[dict[str, object]],
 ) -> str:
     return f"""
-Write the complete final {brief.product} in {brief.output_language} for
-{brief.audience}. Return the finished product, not an outline, explanation,
-planning document, or commentary about how it was written.
+Act as the content writer. Write a complete content draft in
+{brief.output_language} for {brief.audience}. This draft resolves what the piece
+says; product-specific style will be applied later by another writer.
 
-The approved Editorial Project is binding. Its Narrative Axis must govern the
-whole text, and its source-supported subjects must receive the depth and
-proportion assigned to them. Fulfill the editorial promise without padding or
-mechanically announcing the structure. Aim for a natural reading duration of
-{brief.duration_minutes} minutes.
+The approved editorial state is binding and complete. Continue its thinking;
+do not reinterpret sources, redesign the project, or choose a new direction.
+Use the editorial_corpus as the knowledge body, the Narrative Axis as the
+governing intention, and the source-supported subjects as the required
+development. Do not use model_knowledge_suggestions or
+source_enrichment_opportunities as factual content.
 
-Ground factual claims in the supplied editorial material. Preserve relevant
-qualifications, tensions, uncertainty, and limits. Model-knowledge suggestions
-are optional framing, never source evidence. Do not incorporate opportunities
-that explicitly require additional sources. Do not invent facts, quotations,
-statistics, source names, links, or citations. Source names may appear only
-when the supplied material makes attribution editorially useful.
+Produce approximately {target_words} words and respect the section targets
+below. Preserve all relevant qualifications, tensions, uncertainty, and limits.
+Do not invent facts, quotations, statistics, source names, links, or citations.
+Never expose source ordinals or internal processing labels.
 
 Return a title and a plain-text body. The body must not repeat the title. Use
-paragraphs and, when natural for the requested product, plain-text section
-headings. Do not expose passage numbers, block numbers, prompt instructions,
-or internal processing.
+clear sections matching the approved content structure. Do not optimize yet
+for blog, voice-over, podcast, newsletter, or another final style.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
 
-APPROVED EDITORIAL PROJECT:
+TARGET WORDS BY SECTION:
+{json.dumps(section_targets, ensure_ascii=False, indent=2)}
+
+APPROVED EDITORIAL STATE:
+{project.model_dump_json(indent=2)}
+""".strip()
+
+
+def content_review_prompt(
+    brief: EditorialBrief,
+    project: EditorialProjectProposal,
+    draft: FinalTextProposal,
+    *,
+    target_words: int,
+    actual_words: int,
+) -> str:
+    return f"""
+Act as the content editor. Audit the content draft against the complete approved
+editorial state. Do not rewrite it.
+
+Check whether the Narrative Axis genuinely governs the entire draft; the
+editorial promise is fulfilled; every essential corpus contribution, tension,
+qualification, and forbidden inference is handled correctly; the approved
+subjects have the intended depth and proportion; factual statements are
+supported by the corpus evidence; no model suggestion or enrichment opportunity
+became unsupported content; and no internal source coordinate leaked.
+
+The requested target is {target_words} words. The draft contains
+{actual_words} words. Treat a deviation greater than 8 percent as blocking.
+Return an operational review. Every issue must name its location, problem, and
+required correction. Approval means that no blocking content defect remains.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+APPROVED EDITORIAL STATE:
 {project.model_dump_json(indent=2)}
 
-INPUT KIND: {material_kind}
+CONTENT DRAFT:
+{draft.model_dump_json(indent=2)}
+""".strip()
 
-EDITORIAL MATERIAL:
-{material}
+
+def content_revision_prompt(
+    brief: EditorialBrief,
+    project: EditorialProjectProposal,
+    draft: FinalTextProposal,
+    review: ContentReviewProposal,
+    *,
+    target_words: int,
+    section_targets: list[dict[str, object]],
+) -> str:
+    return f"""
+Act as the same content writer who produced the draft. Apply the editor's
+review completely and return the corrected, editorially closed text. Preserve
+everything that is already correct. Resolve problems coherently across the
+whole piece rather than applying disconnected patches.
+
+The result must continue the approved editorial state, contain approximately
+{target_words} words within an 8 percent tolerance, and respect the section
+targets. Do not add unsupported knowledge or expose internal source coordinates.
+This is still content writing, not product-specific styling.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+TARGET WORDS BY SECTION:
+{json.dumps(section_targets, ensure_ascii=False, indent=2)}
+
+APPROVED EDITORIAL STATE:
+{project.model_dump_json(indent=2)}
+
+ORIGINAL CONTENT DRAFT:
+{draft.model_dump_json(indent=2)}
+
+EDITOR REVIEW:
+{review.model_dump_json(indent=2)}
+""".strip()
+
+
+def product_style_prompt(
+    text: FinalTextProposal,
+    *,
+    product: str,
+    language: str,
+    audience: str,
+    target_words: int,
+    correction_request: str | None = None,
+) -> str:
+    if correction_request:
+        task = f"""
+This is a correction pass over an already styled text. Make only the local
+corrections explicitly requested below. Preserve all unmentioned wording,
+structure, tone, rhythm, and stylistic decisions. Do not restart the styling
+and do not rewrite the text as a whole.
+
+CORRECTIONS REQUIRED:
+{correction_request}
+
+CURRENT STYLED TEXT:
+"""
+    else:
+        task = """
+This is the first styling pass.
+
+EDITORIALLY CLOSED TEXT:
+"""
+    return f"""
+Act only as the style writer for a {product}. You receive an editorially closed
+text and no sources, Editorial Project, Narrative Axis, or research context.
+
+Give the text the strongest natural form, tone, rhythm, structure, transitions,
+opening, ending, and degree of verbosity for a {product} in {language} for
+{audience}. You have complete freedom of form.
+
+You have no freedom of content. Preserve every fact, number, relationship,
+qualification, limitation, and conclusion. Add no examples, explanations,
+claims, or knowledge. Remove no substantive information. Target approximately
+{target_words} words within an 8 percent tolerance.
+
+{task}
+{text.model_dump_json(indent=2)}
+""".strip()
+
+
+def preservation_review_prompt(
+    closed_text: FinalTextProposal,
+    styled_text: FinalTextProposal,
+    *,
+    product: str,
+    target_words: int,
+    mechanical_issues: list[str],
+) -> str:
+    return f"""
+Act as the final preservation verifier. Compare the editorially closed text
+with the styled {product}. Do not rewrite either text.
+
+Approve only if the styled version preserves every substantive fact, number,
+relationship, qualification, limitation, and conclusion without adding new
+content or losing necessary content. Formal changes are allowed without limit.
+The target is {target_words} words within an 8 percent tolerance.
+
+Mechanically detected issues are binding and make approval impossible until
+corrected:
+{json.dumps(mechanical_issues, ensure_ascii=False, indent=2)}
+
+If approval is denied, every differences item must be a precise, local,
+actionable correction instruction. Identify the affected wording or location
+and state exactly what must be restored, removed, or changed. Do not ask for a
+general rewrite.
+
+EDITORIALLY CLOSED TEXT:
+{closed_text.model_dump_json(indent=2)}
+
+STYLED TEXT:
+{styled_text.model_dump_json(indent=2)}
 """.strip()
 
 

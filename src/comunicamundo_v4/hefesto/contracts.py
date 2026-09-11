@@ -138,6 +138,27 @@ class NarrativeAxisProposal(StrictModel):
     rationale: str = Field(min_length=1)
 
 
+class EditorialEvidence(StrictModel):
+    source_ordinals: list[int] = Field(min_length=1)
+    contribution: str = Field(min_length=1)
+    verbatim_excerpt: str | None = None
+
+
+class EditorialKnowledgeUnit(StrictModel):
+    title: str = Field(min_length=1)
+    synthesis: str = Field(min_length=1)
+    essential_points: list[str] = Field(min_length=1)
+    tensions: list[str] = Field(default_factory=list)
+    qualifications: list[str] = Field(default_factory=list)
+    evidence: list[EditorialEvidence] = Field(min_length=1)
+
+
+class EditorialCorpus(StrictModel):
+    governing_understanding: str = Field(min_length=1)
+    units: list[EditorialKnowledgeUnit] = Field(min_length=1)
+    forbidden_inferences: list[str] = Field(default_factory=list)
+
+
 class EditorialSubject(StrictModel):
     title: str = Field(min_length=1)
     editorial_role: str = Field(min_length=1)
@@ -151,6 +172,9 @@ class EditorialProjectProposal(StrictModel):
     narrative_axis: NarrativeAxisProposal
     duration_minutes: int = Field(ge=1)
     source_supported_subjects: list[EditorialSubject] = Field(min_length=1)
+    # The key is required in newly generated projects. PostgreSQL normalizes
+    # projects created before the editorial corpus existed to an explicit null.
+    editorial_corpus: EditorialCorpus | None
     model_knowledge_suggestions: list[str] = Field(default_factory=list)
     source_enrichment_opportunities: list[str] = Field(default_factory=list)
 
@@ -173,6 +197,40 @@ class EditorialProjectRecord(StrictModel):
 class FinalTextProposal(StrictModel):
     title: str = Field(min_length=1)
     body: str = Field(min_length=1)
+
+
+class ContentReviewIssue(StrictModel):
+    severity: str = Field(pattern=r"^(blocking|important|minor)$")
+    location: str = Field(min_length=1)
+    problem: str = Field(min_length=1)
+    required_correction: str = Field(min_length=1)
+
+
+class ContentReviewProposal(StrictModel):
+    approved: bool
+    summary: str = Field(min_length=1)
+    issues: list[ContentReviewIssue] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def approval_matches_issues(self) -> "ContentReviewProposal":
+        blocking = any(item.severity == "blocking" for item in self.issues)
+        if self.approved and blocking:
+            raise ValueError("an approved content review cannot contain blocking issues")
+        if not self.approved and not self.issues:
+            raise ValueError("a rejected content review must identify its issues")
+        return self
+
+
+class PreservationReviewProposal(StrictModel):
+    approved: bool
+    summary: str = Field(min_length=1)
+    differences: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def rejection_identifies_differences(self) -> "PreservationReviewProposal":
+        if not self.approved and not self.differences:
+            raise ValueError("a rejected preservation review must identify differences")
+        return self
 
 
 class FinalTextRecord(StrictModel):
@@ -201,6 +259,11 @@ class ProductRun(StrictModel):
     state: RunState = RunState.SOURCE_STRUCTURE_READY
     request: PlanningRequest
     editorial_project: EditorialProjectRecord | None = None
+    content_draft: FinalTextProposal | None = None
+    content_review: ContentReviewProposal | None = None
+    corrected_content: FinalTextProposal | None = None
+    styled_text: FinalTextProposal | None = None
+    preservation_review: PreservationReviewProposal | None = None
     final_text: FinalTextRecord | None = None
     error_class: str | None = None
     error_message: str | None = None

@@ -310,7 +310,15 @@ class ProductRepository:
                 (execution_run_id,),
             )
             value = await row.fetchone()
-        return ProductRun.model_validate(value[0]) if value else None
+        if not value:
+            return None
+        payload = dict(value[0])
+        project_record = payload.get("editorial_project")
+        if isinstance(project_record, dict):
+            proposal = project_record.get("proposal")
+            if isinstance(proposal, dict):
+                proposal.setdefault("editorial_corpus", None)
+        return ProductRun.model_validate(payload)
 
     async def save_structure(self, execution_run_id: UUID, paragraphs: Sequence[Paragraph]) -> None:
         async with self._pool.connection() as connection:

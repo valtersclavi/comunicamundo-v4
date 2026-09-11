@@ -279,7 +279,10 @@ def test_product_interface_is_the_root_entrypoint() -> None:
 
 
 def test_canonical_receipt_exposes_the_persisted_final_text() -> None:
-    final_text = {"proposal": {"title": "Título", "body": "Texto"}, "word_count": 1}
+    final_text = {
+        "proposal": {"title": "Título", "body": "Texto"},
+        "word_count": 1,
+    }
 
     class Record:
         def model_dump(self, *, mode):

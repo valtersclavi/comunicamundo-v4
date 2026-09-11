@@ -10,12 +10,14 @@ from pydantic import BaseModel
 
 from comunicamundo_v4.hefesto.contracts import (
     CallUsage,
+    ContentReviewProposal,
     EditorialCondensation,
     EditorialCondensationProposal,
     EditorialProjectProposal,
     FinalTextProposal,
     Paragraph,
     ProductRun,
+    PreservationReviewProposal,
     SelectionBatch,
     SelectionFlags,
 )
@@ -127,12 +129,16 @@ class FakeGateway:
         fail_task: str | None = None,
         fail_times: int = 0,
         token_divisor: int = 4,
+        word_counts: dict[str, int] | None = None,
+        reject_verification_times: int = 0,
     ) -> None:
         self.calls: list[dict[str, object]] = []
         self.counted: list[str] = []
         self.fail_task = fail_task
         self.failures_remaining = fail_times
         self.token_divisor = token_divisor
+        self.word_counts = word_counts or {}
+        self.reject_verification_times = reject_verification_times
 
     async def count_tokens(self, text: str) -> int:
         self.counted.append(text)
@@ -198,19 +204,73 @@ class FakeGateway:
                             "allocated_minutes": duration,
                         }
                     ],
+                    "editorial_corpus": {
+                        "governing_understanding": (
+                            "The sources support one integrated understanding."
+                        ),
+                        "units": [
+                            {
+                                "title": "Core subject",
+                                "synthesis": "The complete source-grounded synthesis.",
+                                "essential_points": [
+                                    "The central supported point",
+                                    "The relevant qualification",
+                                ],
+                                "tensions": ["A meaningful source tension"],
+                                "qualifications": ["Do not overstate causality"],
+                                "evidence": [
+                                    {
+                                        "source_ordinals": [1, 2],
+                                        "contribution": (
+                                            "Both sources support and qualify the point."
+                                        ),
+                                    }
+                                ],
+                            }
+                        ],
+                        "forbidden_inferences": [
+                            "Do not turn association into causation"
+                        ],
+                    },
                     "model_knowledge_suggestions": ["Optional model suggestion"],
                     "source_enrichment_opportunities": [
                         "Additional source opportunity"
                     ],
                 }
             )
-        elif task_type == "final_text":
+        elif task_type in {
+            "content_draft",
+            "content_revision",
+            "content_contract_correction",
+            "product_styling",
+            "product_style_correction",
+        }:
+            match = re.search(r"(?:approximately|target is) (\d+) words", prompt)
+            words = self.word_counts.get(
+                task_type, int(match.group(1)) if match else 1_120
+            )
             value = FinalTextProposal(
                 title="Finished title",
-                body=(
-                    "A complete final text grounded in the selected sources.\n\n"
-                    "It follows the approved Narrative Axis through every section."
+                body=" ".join(["conteúdo"] * words),
+            )
+        elif task_type == "content_review":
+            value = ContentReviewProposal(
+                approved=True,
+                summary="The content respects the approved editorial state.",
+                issues=[],
+            )
+        elif task_type in {"final_verification", "final_reverification"}:
+            rejected = self.reject_verification_times > 0
+            if rejected:
+                self.reject_verification_times -= 1
+            value = PreservationReviewProposal(
+                approved=not rejected,
+                summary=(
+                    "The styled text changed content."
+                    if rejected
+                    else "The styled text preserves the closed content."
                 ),
+                differences=["A qualification was lost"] if rejected else [],
             )
         else:
             raise AssertionError(task_type)

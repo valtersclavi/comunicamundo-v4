@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from datetime import UTC, datetime
+from decimal import Decimal
 import json
 import os
 from time import perf_counter
@@ -75,6 +76,8 @@ async def plan(args: argparse.Namespace) -> None:
             "stages": [{
                 "stage": "ingestion", "status": "failed",
                 "duration_ms": int((perf_counter() - started) * 1000),
+                "error_class": type(error).__name__,
+                "error_message": str(error)[:2000],
             }],
             "generated_at": datetime.now(UTC).isoformat(),
         }
@@ -144,6 +147,10 @@ async def _continue_to_project(
             "stage": active_stage,
             "status": "completed",
             "duration_ms": int((perf_counter() - started) * 1000),
+            **_task_metrics(
+                await hefesto.usage_report(execution_id),
+                {"source_selection"},
+            ),
         })
         await hefesto.record_stages(execution_id, stages)
         active_stage, started = "editorial_comprehension", perf_counter()
@@ -155,12 +162,22 @@ async def _continue_to_project(
             "stage": active_stage,
             "status": "completed",
             "duration_ms": int((perf_counter() - started) * 1000),
+            **_task_metrics(
+                await hefesto.usage_report(execution_id),
+                {
+                    "editorial_comprehension_part",
+                    "editorial_comprehension_merge",
+                    "editorial_project",
+                },
+            ),
         })
         await hefesto.record_stages(execution_id, stages)
-    except Exception:
+    except Exception as error:
         stages.append({
             "stage": active_stage, "status": "failed",
             "duration_ms": int((perf_counter() - started) * 1000),
+            "error_class": type(error).__name__,
+            "error_message": str(error)[:2000],
         })
         await _persist_product_receipt(
             hefesto, client, execution_id, stages,
@@ -197,35 +214,12 @@ async def _continue_to_text(
     client: storage.Client,
     execution_id: UUID,
 ) -> None:
-    stage = "final_text"
-    started = perf_counter()
-    await hefesto.record_stages(execution_id, [{
-        "stage": stage, "status": "running", "duration_ms": 0,
-    }])
     try:
-        completed = await hefesto.produce_text(execution_id)
-        artifact = completed.final_text
-        stages = [{
-            "stage": stage,
-            "status": "completed",
-            "duration_ms": int((perf_counter() - started) * 1000),
-            "artifact": (
-                {
-                    "final_text_id": str(artifact.final_text_id),
-                    "word_count": artifact.word_count,
-                }
-                if artifact else None
-            ),
-        }]
+        await hefesto.produce_text(execution_id)
     except Exception:
-        stages = [{
-            "stage": stage,
-            "status": "failed",
-            "duration_ms": int((perf_counter() - started) * 1000),
-        }]
-        await _persist_product_receipt(hefesto, client, execution_id, stages)
+        await _persist_product_receipt(hefesto, client, execution_id, [])
         raise
-    await _persist_product_receipt(hefesto, client, execution_id, stages)
+    await _persist_product_receipt(hefesto, client, execution_id, [])
 
 
 def mark_action_dispatch(
@@ -307,6 +301,31 @@ def _empty_usage() -> dict[str, object]:
         "provider_latency_ms": 0,
         "rated_cost_usd": "0.000000000",
         "calls": [],
+    }
+
+
+def _task_metrics(
+    report: dict[str, object], task_types: set[str]
+) -> dict[str, object]:
+    calls = [
+        call for call in report.get("calls", [])
+        if isinstance(call, dict) and call.get("task_type") in task_types
+    ]
+    cost = sum(
+        (Decimal(str(call.get("rated_cost_usd") or "0")) for call in calls),
+        start=Decimal("0"),
+    )
+    return {
+        "model_invocations": len(calls),
+        "prompt_tokens": sum(int(call.get("prompt_tokens") or 0) for call in calls),
+        "cached_tokens": sum(int(call.get("cached_tokens") or 0) for call in calls),
+        "output_tokens": sum(int(call.get("output_tokens") or 0) for call in calls),
+        "reasoning_tokens": sum(
+            int(call.get("reasoning_tokens") or 0) for call in calls
+        ),
+        "total_tokens": sum(int(call.get("total_tokens") or 0) for call in calls),
+        "provider_latency_ms": sum(int(call.get("latency_ms") or 0) for call in calls),
+        "rated_cost_usd": str(cost),
     }
 
 

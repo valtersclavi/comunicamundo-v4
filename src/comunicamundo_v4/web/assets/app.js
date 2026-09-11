@@ -8,8 +8,22 @@ const labels = {
   project_proposed: "Projeto Editorial pronto", project_approved: "Projeto aprovado",
   producing_text: "Escrevendo texto final", text_ready: "Texto final pronto", failed: "Falha"
 };
-const stageNames = { ingestion: "Leitura e normalização das fontes", relational_structure: "Estrutura de parágrafos e frases", selection: "Triagem orientada pelo briefing", editorial_comprehension: "Compreensão e Projeto Editorial", final_text: "Geração do texto final" };
-const expectedStages = Object.keys(stageNames);
+const stageNames = {
+  ingestion: "Leitura e normalização das fontes",
+  relational_structure: "Estrutura de parágrafos e frases",
+  selection: "Triagem orientada pelo briefing",
+  editorial_comprehension: "Compreensão e Projeto Editorial",
+  content_draft: "Redação do conteúdo",
+  content_review: "Revisão editorial do conteúdo",
+  content_revision: "Correção pelo redator",
+  content_contract_correction: "Ajuste do contrato de duração",
+  product_styling: "Forma e estilo do produto",
+  final_verification: "Verificação final de preservação",
+  product_style_correction: "Correção de forma e estilo",
+  final_reverification: "Verificação final da correção",
+  final_text: "Geração do texto final"
+};
+const expectedStages = ["ingestion", "relational_structure", "selection", "editorial_comprehension", "content_draft", "content_review", "content_revision", "product_styling", "final_verification"];
 
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { ...(options.body && typeof options.body === "string" ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) } });
@@ -104,12 +118,18 @@ function renderRun(run) {
   $("#run-status").textContent = labels[status] || status;
   $("#execution-title").textContent = status === "text_ready" ? "Texto final" : ["project_proposed", "project_approved"].includes(status) ? "Projeto Editorial" : "Hefesto em andamento";
   const known = new Map((run.stages || []).map((item) => [item.stage, item]));
+  const displayedStages = [...expectedStages, ...(run.stages || []).map((item) => item.stage).filter((name) => !expectedStages.includes(name))];
   let activeFound = false;
-  $("#stages").innerHTML = expectedStages.map((name) => {
+  $("#stages").innerHTML = displayedStages.map((name) => {
     const item = known.get(name); let kind = item ? statusClass(item.status) : "pending";
     if (!item && !activeFound && !["project_proposed", "project_approved", "text_ready", "failed", "input_failed"].includes(status)) { kind = "active"; activeFound = true; }
-    const duration = item?.duration_ms != null ? `${(item.duration_ms / 1000).toFixed(1)} s` : kind === "active" ? "em andamento" : "";
-    return `<div class="stage ${kind}"><i class="stage-icon"></i><strong>${stageNames[name]}</strong><span>${duration}</span></div>`;
+    const details = [];
+    if (item?.duration_ms != null) details.push(`${(item.duration_ms / 1000).toFixed(1)} s`);
+    else if (kind === "active") details.push("em andamento");
+    if (item?.model_invocations) details.push(`${formatter.format(item.model_invocations)} chamada${item.model_invocations === 1 ? "" : "s"}`);
+    if (item?.total_tokens) details.push(`${formatter.format(item.total_tokens)} tokens`);
+    if (Number(item?.rated_cost_usd || 0)) details.push(`US$ ${Number(item.rated_cost_usd).toFixed(6)}`);
+    return `<div class="stage ${kind}"><i class="stage-icon"></i><strong>${stageNames[name] || escapeHtml(name)}</strong><span>${details.join(" · ")}</span></div>`;
   }).join("");
   const usage = run.usage;
   $("#metrics-panel").hidden = !usage;

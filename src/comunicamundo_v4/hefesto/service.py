@@ -5,6 +5,8 @@ from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from hashlib import sha256
+import re
+from time import perf_counter
 from typing import Protocol, TypeVar
 from uuid import UUID
 
@@ -13,6 +15,9 @@ from pydantic import BaseModel
 from .batching import candidate_packets, passages_from_paragraphs, split_packet
 from .contracts import (
     CallUsage,
+    ContentReviewIssue,
+    ContentReviewProposal,
+    EditorialBrief,
     EditorialCondensation,
     EditorialCondensationProposal,
     EditorialProjectProposal,
@@ -23,6 +28,7 @@ from .contracts import (
     Passage,
     PlanningRequest,
     ProductRun,
+    PreservationReviewProposal,
     RunState,
     SelectionBatch,
     SelectionFlags,
@@ -31,7 +37,11 @@ from .gateway import ModelCallError, ModelGateway, ModelResult
 from .prompts import (
     SYSTEM,
     condensation_prompt,
-    final_text_prompt,
+    content_draft_prompt,
+    content_review_prompt,
+    content_revision_prompt,
+    preservation_review_prompt,
+    product_style_prompt,
     project_prompt,
     render_condensations,
     render_passages,
@@ -252,40 +262,146 @@ class Hefesto:
         if run.state not in {RunState.PROJECT_APPROVED, RunState.PRODUCING_TEXT}:
             raise ValueError("Final text cannot be produced from the current state")
         run = await self._activate(run, RunState.PRODUCING_TEXT)
-        paragraphs = segment_sources(run.request.sources)
-        passages = passages_from_paragraphs(
-            paragraphs, passage_token_target=self._passage_target
-        )
-        titles = {
-            ordinal: source.title
-            for ordinal, source in enumerate(run.request.sources, start=1)
-        }
         try:
-            selected = await self._selected_passages(run, passages)
-            material = render_passages(selected, titles)
-            prompt = final_text_prompt(
-                run.request.brief,
-                run.editorial_project.proposal,
-                material,
-                material_kind="original selected source passages",
-            )
-            if await self._count_tokens(prompt) <= self._comprehension_budget:
-                return await self._create_final_text(run, prompt)
-
-            readings = await self._condense_passages(run, selected, titles)
-            level = 2
-            while True:
-                combined = render_condensations(readings)
-                prompt = final_text_prompt(
-                    run.request.brief,
-                    run.editorial_project.proposal,
-                    combined,
-                    material_kind="bounded editorial comprehensions of selected passages",
+            project = run.editorial_project.proposal
+            if project.editorial_corpus is None:
+                raise ValueError(
+                    "Editorial Project has no canonical editorial corpus"
                 )
-                if await self._count_tokens(prompt) <= self._comprehension_budget:
-                    return await self._create_final_text(run, prompt)
-                readings = await self._condense_readings(run, readings, level)
-                level += 1
+            target_words = _target_words(run.request.brief)
+            section_targets = _section_targets(project, target_words)
+
+            if run.content_draft is None:
+                draft = await self._generate_step(
+                    run,
+                    stage="content_draft",
+                    task_type="content_draft",
+                    prompt=content_draft_prompt(
+                        run.request.brief,
+                        project,
+                        target_words=target_words,
+                        section_targets=section_targets,
+                    ),
+                    schema=FinalTextProposal,
+                    max_output_tokens=16_384,
+                    thinking_tokens=4_000,
+                )
+                run = await self._save_artifact(run, content_draft=draft)
+
+            if run.content_review is None:
+                review = await self._generate_step(
+                    run,
+                    stage="content_review",
+                    task_type="content_review",
+                    prompt=content_review_prompt(
+                        run.request.brief,
+                        project,
+                        run.content_draft,
+                        target_words=target_words,
+                        actual_words=_word_count(run.content_draft.body),
+                    ),
+                    schema=ContentReviewProposal,
+                    max_output_tokens=8_192,
+                    thinking_tokens=4_000,
+                )
+                run = await self._save_artifact(run, content_review=review)
+
+            if run.corrected_content is None and run.content_review.issues:
+                corrected = await self._generate_step(
+                    run,
+                    stage="content_revision",
+                    task_type="content_revision",
+                    prompt=content_revision_prompt(
+                        run.request.brief,
+                        project,
+                        run.content_draft,
+                        run.content_review,
+                        target_words=target_words,
+                        section_targets=section_targets,
+                    ),
+                    schema=FinalTextProposal,
+                    max_output_tokens=16_384,
+                    thinking_tokens=4_000,
+                )
+                run = await self._save_artifact(run, corrected_content=corrected)
+            elif run.corrected_content is None:
+                await self._repository.record_stages(
+                    run.execution_run_id,
+                    [{
+                        "stage": "content_revision",
+                        "status": "skipped",
+                        "duration_ms": 0,
+                        "artifact": {"reason": "editor requested no corrections"},
+                    }],
+                )
+                run = await self._save_artifact(
+                    run, corrected_content=run.content_draft
+                )
+
+            content_issues = _mechanical_issues(run.corrected_content, target_words)
+            if content_issues:
+                contract_review = ContentReviewProposal(
+                    approved=False,
+                    summary="The corrected content still violates the delivery contract.",
+                    issues=[
+                        ContentReviewIssue(
+                            severity="blocking",
+                            location="complete text",
+                            problem=issue,
+                            required_correction=(
+                                "Correct this contract violation without changing the "
+                                "approved editorial state."
+                            ),
+                        )
+                        for issue in content_issues
+                    ],
+                )
+                corrected = await self._generate_step(
+                    run,
+                    stage="content_contract_correction",
+                    task_type="content_contract_correction",
+                    prompt=content_revision_prompt(
+                        run.request.brief,
+                        project,
+                        run.corrected_content,
+                        contract_review,
+                        target_words=target_words,
+                        section_targets=section_targets,
+                    ),
+                    schema=FinalTextProposal,
+                    max_output_tokens=16_384,
+                    thinking_tokens=4_000,
+                )
+                run = await self._save_artifact(run, corrected_content=corrected)
+                remaining = _mechanical_issues(corrected, target_words)
+                if remaining:
+                    raise ValueError(
+                        "Corrected content failed the delivery contract: "
+                        + "; ".join(remaining)
+                    )
+
+            if run.styled_text is None:
+                styled = await self._generate_step(
+                    run,
+                    stage="product_styling",
+                    task_type="product_styling",
+                    prompt=product_style_prompt(
+                        run.corrected_content,
+                        product=run.request.brief.product,
+                        language=run.request.brief.output_language,
+                        audience=run.request.brief.audience,
+                        target_words=target_words,
+                    ),
+                    schema=FinalTextProposal,
+                    max_output_tokens=16_384,
+                    thinking_tokens=3_000,
+                )
+                run = await self._save_artifact(run, styled_text=styled)
+
+            run = await self._verify_and_repair_style(
+                run, target_words=target_words
+            )
+            return await self._complete_final_text(run)
         except Exception as error:
             await self._fail(run, error)
             raise
@@ -303,6 +419,29 @@ class Hefesto:
             "final_text": (
                 run.final_text.model_dump(mode="json") if run.final_text else None
             ),
+            "content_pipeline": {
+                "target_words": _target_words(run.request.brief),
+                "content_draft": (
+                    run.content_draft.model_dump(mode="json")
+                    if run.content_draft else None
+                ),
+                "content_review": (
+                    run.content_review.model_dump(mode="json")
+                    if run.content_review else None
+                ),
+                "corrected_content": (
+                    run.corrected_content.model_dump(mode="json")
+                    if run.corrected_content else None
+                ),
+                "styled_text": (
+                    run.styled_text.model_dump(mode="json")
+                    if run.styled_text else None
+                ),
+                "preservation_review": (
+                    run.preservation_review.model_dump(mode="json")
+                    if run.preservation_review else None
+                ),
+            },
             "processing": await self._repository.work_report(execution_run_id),
             "error_class": run.error_class,
             "error_message": run.error_message,
@@ -319,6 +458,9 @@ class Hefesto:
         self, execution_run_id: UUID, payload: dict[str, object]
     ) -> None:
         await self._repository.record_product_receipt(execution_run_id, payload)
+
+    async def usage_report(self, execution_run_id: UUID) -> dict[str, object]:
+        return await self._repository.usage_report(execution_run_id)
 
     async def _selection_specs(
         self,
@@ -601,11 +743,13 @@ class Hefesto:
             task_type="editorial_project",
             prompt=prompt,
             schema=EditorialProjectProposal,
-            max_output_tokens=8_192,
+            max_output_tokens=16_384,
             thinking_tokens=4_000,
         )
         if result.value.duration_minutes != run.request.brief.duration_minutes:
             raise ValueError("Editorial Project changed the requested duration")
+        if result.value.editorial_corpus is None:
+            raise ValueError("Editorial Project omitted the canonical editorial corpus")
         project = EditorialProjectRecord(
             execution_run_id=run.execution_run_id,
             project_id=run.project_id,
@@ -623,23 +767,19 @@ class Hefesto:
         await self._repository.save_run(proposed)
         return proposed
 
-    async def _create_final_text(self, run: ProductRun, prompt: str) -> ProductRun:
+    async def _complete_final_text(self, run: ProductRun) -> ProductRun:
         if run.editorial_project is None:
             raise ValueError("Final text requires an Editorial Project")
-        result = await self._call(
-            run,
-            task_type="final_text",
-            prompt=prompt,
-            schema=FinalTextProposal,
-            max_output_tokens=16_384,
-            thinking_tokens=4_000,
-        )
+        if run.styled_text is None or run.preservation_review is None:
+            raise ValueError("Final text pipeline is incomplete")
+        if not run.preservation_review.approved:
+            raise ValueError("Styled text failed final preservation verification")
         record = FinalTextRecord(
             execution_run_id=run.execution_run_id,
             project_id=run.project_id,
             editorial_project_id=run.editorial_project.editorial_project_id,
-            proposal=result.value,
-            word_count=len(result.value.body.split()),
+            proposal=run.styled_text,
+            word_count=_word_count(run.styled_text.body),
         )
         completed = run.model_copy(
             update={
@@ -652,6 +792,153 @@ class Hefesto:
         )
         await self._repository.save_run(completed)
         return completed
+
+    async def _verify_and_repair_style(
+        self, run: ProductRun, *, target_words: int
+    ) -> ProductRun:
+        if run.corrected_content is None or run.styled_text is None:
+            raise ValueError("Style verification requires both text versions")
+        issues = _mechanical_issues(run.styled_text, target_words)
+        if run.preservation_review is None:
+            review = await self._generate_step(
+                run,
+                stage="final_verification",
+                task_type="final_verification",
+                prompt=preservation_review_prompt(
+                    run.corrected_content,
+                    run.styled_text,
+                    product=run.request.brief.product,
+                    target_words=target_words,
+                    mechanical_issues=issues,
+                ),
+                schema=PreservationReviewProposal,
+                max_output_tokens=8_192,
+                thinking_tokens=3_000,
+            )
+            if issues and review.approved:
+                review = review.model_copy(
+                    update={
+                        "approved": False,
+                        "differences": [*review.differences, *issues],
+                    }
+                )
+            run = await self._save_artifact(run, preservation_review=review)
+        if run.preservation_review.approved:
+            return run
+
+        correction = "; ".join(
+            [run.preservation_review.summary, *run.preservation_review.differences]
+        )
+        repaired = await self._generate_step(
+            run,
+            stage="product_style_correction",
+            task_type="product_style_correction",
+            prompt=product_style_prompt(
+                run.styled_text,
+                product=run.request.brief.product,
+                language=run.request.brief.output_language,
+                audience=run.request.brief.audience,
+                target_words=target_words,
+                correction_request=correction,
+            ),
+            schema=FinalTextProposal,
+            max_output_tokens=16_384,
+            thinking_tokens=3_000,
+        )
+        run = await self._save_artifact(
+            run, styled_text=repaired, preservation_review=None
+        )
+        issues = _mechanical_issues(repaired, target_words)
+        review = await self._generate_step(
+            run,
+            stage="final_reverification",
+            task_type="final_reverification",
+            prompt=preservation_review_prompt(
+                run.corrected_content,
+                repaired,
+                product=run.request.brief.product,
+                target_words=target_words,
+                mechanical_issues=issues,
+            ),
+            schema=PreservationReviewProposal,
+            max_output_tokens=8_192,
+            thinking_tokens=3_000,
+        )
+        if issues and review.approved:
+            review = review.model_copy(
+                update={
+                    "approved": False,
+                    "differences": [*review.differences, *issues],
+                }
+            )
+        run = await self._save_artifact(run, preservation_review=review)
+        if not review.approved:
+            raise ValueError("Styled text failed final preservation verification")
+        return run
+
+    async def _save_artifact(self, run: ProductRun, **updates: object) -> ProductRun:
+        saved = run.model_copy(
+            update={**updates, "updated_at": datetime.now(UTC)}
+        )
+        await self._repository.save_run(saved)
+        return saved
+
+    async def _generate_step(
+        self,
+        run: ProductRun,
+        *,
+        stage: str,
+        task_type: str,
+        prompt: str,
+        schema: type[OutputT],
+        max_output_tokens: int,
+        thinking_tokens: int,
+    ) -> OutputT:
+        started = perf_counter()
+        await self._repository.record_stages(
+            run.execution_run_id,
+            [{"stage": stage, "status": "running", "duration_ms": 0}],
+        )
+        try:
+            result = await self._call(
+                run,
+                task_type=task_type,
+                prompt=prompt,
+                schema=schema,
+                max_output_tokens=max_output_tokens,
+                thinking_tokens=thinking_tokens,
+            )
+        except Exception as error:
+            await self._repository.record_stages(
+                run.execution_run_id,
+                [{
+                    "stage": stage,
+                    "status": "failed",
+                    "duration_ms": int((perf_counter() - started) * 1000),
+                    "error_class": type(error).__name__,
+                    "error_message": str(error)[:2000],
+                }],
+            )
+            raise
+        usage = result.usage
+        await self._repository.record_stages(
+            run.execution_run_id,
+            [{
+                "stage": stage,
+                "status": "completed",
+                "duration_ms": int((perf_counter() - started) * 1000),
+                "model_invocations": 1,
+                "prompt_tokens": usage.prompt_tokens,
+                "cached_tokens": usage.cached_tokens,
+                "output_tokens": usage.output_tokens,
+                "reasoning_tokens": usage.reasoning_tokens,
+                "total_tokens": usage.total_tokens,
+                "provider_latency_ms": usage.latency_ms,
+                "rated_cost_usd": usage.rated_cost_usd or "0",
+                "artifact": {"schema": schema.__name__},
+            }],
+        )
+        return result.value
 
     async def _count_tokens(self, prompt: str) -> int:
         for attempt in range(3):
@@ -764,3 +1051,71 @@ def _validated_flags(flags: SelectionFlags, allowed: set[int]) -> SelectionFlags
         include_previous=sorted(set(flags.include_previous) & allowed),
         include_next=sorted(set(flags.include_next) & allowed),
     )
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b[\wÀ-ÖØ-öø-ÿ]+(?:['’\-][\wÀ-ÖØ-öø-ÿ]+)*\b", text))
+
+
+def _target_words(brief: EditorialBrief) -> int:
+    product = brief.product.strip().lower()
+    rates = {
+        "article": 140,
+        "blog": 140,
+        "newsletter": 140,
+        "report": 130,
+        "video": 135,
+        "voice-over": 135,
+        "voiceover": 135,
+        "podcast": 145,
+        "presentation": 120,
+    }
+    words_per_minute = rates.get(product, 140)
+    return brief.duration_minutes * words_per_minute
+
+
+def _section_targets(
+    project: EditorialProjectProposal, target_words: int
+) -> list[dict[str, object]]:
+    subjects = project.source_supported_subjects
+    targets: list[int] = []
+    assigned = 0
+    for index, subject in enumerate(subjects):
+        if index == len(subjects) - 1:
+            words = target_words - assigned
+        else:
+            words = round(
+                target_words * subject.allocated_minutes / project.duration_minutes
+            )
+            assigned += words
+        targets.append(words)
+    return [
+        {
+            "title": subject.title,
+            "allocated_minutes": subject.allocated_minutes,
+            "target_words": words,
+        }
+        for subject, words in zip(subjects, targets, strict=True)
+    ]
+
+
+def _mechanical_issues(text: FinalTextProposal, target_words: int) -> list[str]:
+    issues: list[str] = []
+    words = _word_count(text.body)
+    minimum = round(target_words * 0.92)
+    maximum = round(target_words * 1.08)
+    if not minimum <= words <= maximum:
+        issues.append(
+            f"word count {words} is outside the required range {minimum}-{maximum}"
+        )
+    forbidden = re.findall(
+        r"\b(?:fonte|source|passage|parágrafo|paragraph|bloco|block)\s*\d+\b",
+        text.body,
+        flags=re.IGNORECASE,
+    )
+    if forbidden:
+        issues.append(
+            "internal source coordinates leaked into the product: "
+            + ", ".join(sorted(set(forbidden)))
+        )
+    return issues
