@@ -13,6 +13,7 @@ from google.cloud import storage
 
 from .gateway import VertexGateway
 from .ingestion import IngestionResult, ingest
+from .maintenance import clean_operational_history
 from .postgres import ProductRepository, apply_migrations
 from .service import Hefesto
 from .storage import load_input_request, persist_receipt
@@ -342,6 +343,25 @@ async def run(args: argparse.Namespace) -> None:
             ),
         }))
         return
+    if args.command == "clean-operational-history":
+        client = storage_client()
+        report = await asyncio.to_thread(
+            clean_operational_history,
+            direct_url=required("HEFESTO_POSTGRES_DIRECT_URL"),
+            client=client,
+            bucket_name=required("HEFESTO_GCS_BUCKET"),
+            keep_execution_ids=args.keep_execution_run_id,
+            execute=args.execute,
+        )
+        if args.execute:
+            client.bucket(required("HEFESTO_GCS_BUCKET")).blob(
+                "hefesto-product/maintenance/freeze-cleanup.json"
+            ).upload_from_string(
+                json.dumps(report, ensure_ascii=False, sort_keys=True).encode(),
+                content_type="application/json",
+            )
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
+        return
     if args.command == "ingest":
         client = storage_client()
         input_request = load_input_request(
@@ -442,6 +462,11 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command")
     commands.add_parser("migrate-postgres")
     commands.add_parser("check-postgres")
+    cleanup = commands.add_parser("clean-operational-history")
+    cleanup.add_argument(
+        "--keep-execution-run-id", action="append", type=UUID, required=True
+    )
+    cleanup.add_argument("--execute", action="store_true")
     ingestion = commands.add_parser("ingest")
     _input_transport(ingestion)
     planning = commands.add_parser("plan")

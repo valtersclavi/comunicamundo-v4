@@ -32,3 +32,7 @@ uvicorn comunicamundo_v4.hefesto.api:app --reload
 ```
 
 Em produção, somente a página inicial e o endpoint de login são públicos. Uploads, planejamentos, aprovações e histórico exigem uma sessão válida armazenada no PostgreSQL. A senha não é armazenada em texto aberto, e dez tentativas inválidas bloqueiam novas tentativas por quinze minutos.
+
+## Baseline congelada
+
+O núcleo editorial validado está congelado em `7eb1cd8273f805ba682623857d360618a7516687` e identificado pela tag `hefesto-v4-core-v1`. A definição do bloco, as duas provas funcionais preservadas e as fronteiras de evolução estão em [docs/hefesto-v4-baseline.md](docs/hefesto-v4-baseline.md).
