@@ -50,7 +50,7 @@ jobs:
         if: steps.guard.outputs.run == 'true'
         run: |
           set -euo pipefail
-          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="clean-operational-history,--keep-execution-run-id,${KEEP_A},--keep-execution-run-id,${KEEP_B},--execute"             --wait --format='value(metadata.name)')"
+          execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="clean-operational-history,${KEEP_A},${KEEP_B},--execute"             --wait --format='value(metadata.name)')"
           test -n "${execution}"
           gcloud storage cat "gs://${BUCKET}/hefesto-product/maintenance/freeze-cleanup.json" > /tmp/freeze-cleanup.json
           jq -e --arg a "${KEEP_A}" --arg b "${KEEP_B}" '

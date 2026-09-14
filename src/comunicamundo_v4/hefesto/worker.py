@@ -463,9 +463,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("migrate-postgres")
     commands.add_parser("check-postgres")
     cleanup = commands.add_parser("clean-operational-history")
-    cleanup.add_argument(
-        "--keep-execution-run-id", action="append", type=UUID, required=True
-    )
+    cleanup.add_argument("keep_execution_run_id", nargs="+", type=UUID)
     cleanup.add_argument("--execute", action="store_true")
     ingestion = commands.add_parser("ingest")
     _input_transport(ingestion)
