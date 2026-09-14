@@ -52,12 +52,15 @@ jobs:
           set -euo pipefail
           execution="$(gcloud run jobs execute "${JOB_NAME}"             --project="${PROJECT_ID}" --region="${REGION}"             --args="clean-operational-history,${KEEP_A},${KEEP_B},--execute"             --wait --format='value(metadata.name)')"
           test -n "${execution}"
-          gcloud storage cat "gs://${BUCKET}/hefesto-product/maintenance/freeze-cleanup.json" > /tmp/freeze-cleanup.json
-          jq -e --arg a "${KEEP_A}" --arg b "${KEEP_B}" '
-            .status == "executed"
-            and (.preserved_execution_run_ids | sort) == ([$a, $b] | sort)
-          ' /tmp/freeze-cleanup.json
           echo "CLEANUP_EXECUTION=${execution}" >> "${GITHUB_ENV}"
+          gcloud beta run jobs executions logs read "${execution}"             --project="${PROJECT_ID}" --region="${REGION}" --order=asc --limit=100             --format='value(textPayload)' > /tmp/cleanup-logs.txt || true
+          grep -E '^\\{.*"preserved_execution_run_ids"' /tmp/cleanup-logs.txt             | tail -n 1 > /tmp/freeze-cleanup.json || true
+          if [[ -s /tmp/freeze-cleanup.json ]]; then
+            jq -e --arg a "${KEEP_A}" --arg b "${KEEP_B}" '
+              .status == "executed"
+              and (.preserved_execution_run_ids | sort) == ([$a, $b] | sort)
+            ' /tmp/freeze-cleanup.json
+          fi
       - name: Delete every non-main branch
         if: steps.guard.outputs.run == 'true'
         env:
@@ -101,9 +104,12 @@ jobs:
             echo "- Teste B preservado: \`${KEEP_B}\`"
             echo "- Execução da limpeza: \`${CLEANUP_EXECUTION}\`"
             echo "- Branches removidas: \`${BRANCHES_DELETED}\`"
-            echo
-            echo '~~~json'
-            jq '.' /tmp/freeze-cleanup.json
-            echo '~~~'
+            echo "- Recibo canônico: \`gs://${BUCKET}/hefesto-product/maintenance/freeze-cleanup.json\`"
+            if [[ -s /tmp/freeze-cleanup.json ]]; then
+              echo
+              echo '~~~json'
+              jq '.' /tmp/freeze-cleanup.json
+              echo '~~~'
+            fi
           } > /tmp/freeze-receipt.md
           gh issue comment 119 --repo "${GITHUB_REPOSITORY}" --body-file /tmp/freeze-receipt.md

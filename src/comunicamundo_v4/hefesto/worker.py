@@ -10,6 +10,7 @@ from time import perf_counter
 from uuid import UUID, uuid4
 
 from google.cloud import storage
+from google.api_core.exceptions import NotFound
 
 from .gateway import VertexGateway
 from .ingestion import IngestionResult, ingest
@@ -345,21 +346,38 @@ async def run(args: argparse.Namespace) -> None:
         return
     if args.command == "clean-operational-history":
         client = storage_client()
-        report = await asyncio.to_thread(
-            clean_operational_history,
-            direct_url=required("HEFESTO_POSTGRES_DIRECT_URL"),
-            client=client,
-            bucket_name=required("HEFESTO_GCS_BUCKET"),
-            keep_execution_ids=args.keep_execution_run_id,
-            execute=args.execute,
+        receipt_blob = client.bucket(required("HEFESTO_GCS_BUCKET")).blob(
+            "hefesto-product/maintenance/freeze-cleanup.json"
         )
+        previous = None
         if args.execute:
-            client.bucket(required("HEFESTO_GCS_BUCKET")).blob(
-                "hefesto-product/maintenance/freeze-cleanup.json"
-            ).upload_from_string(
-                json.dumps(report, ensure_ascii=False, sort_keys=True).encode(),
-                content_type="application/json",
+            try:
+                previous = json.loads(receipt_blob.download_as_bytes())
+            except NotFound:
+                pass
+        expected_ids = sorted(str(value) for value in args.keep_execution_run_id)
+        if previous is not None:
+            if (
+                previous.get("status") != "executed"
+                or sorted(previous.get("preserved_execution_run_ids", []))
+                != expected_ids
+            ):
+                raise ValueError("existing cleanup receipt does not match request")
+            report = previous
+        else:
+            report = await asyncio.to_thread(
+                clean_operational_history,
+                direct_url=required("HEFESTO_POSTGRES_DIRECT_URL"),
+                client=client,
+                bucket_name=required("HEFESTO_GCS_BUCKET"),
+                keep_execution_ids=args.keep_execution_run_id,
+                execute=args.execute,
             )
+            if args.execute:
+                receipt_blob.upload_from_string(
+                    json.dumps(report, ensure_ascii=False, sort_keys=True).encode(),
+                    content_type="application/json",
+                )
         print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
         return
     if args.command == "ingest":
