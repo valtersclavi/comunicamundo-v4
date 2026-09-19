@@ -14,12 +14,14 @@ from comunicamundo_v4.hefesto.contracts import (
     EditorialCondensation,
     EditorialCondensationProposal,
     EditorialProjectProposal,
+    EditorialProjectScaffold,
     FinalTextProposal,
     Paragraph,
     ProductRun,
     PreservationReviewProposal,
     SelectionBatch,
     SelectionFlags,
+    SubjectEditorialCorpus,
 )
 from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
 
@@ -185,9 +187,9 @@ class FakeGateway:
             value = EditorialCondensationProposal(
                 reading="A compact editorial reading preserving source tensions and limits."
             )
-        elif task_type == "editorial_project":
+        elif task_type == "editorial_project_scaffold":
             duration = int(re.search(r'"duration_minutes":\s*(\d+)', prompt).group(1))
-            value = EditorialProjectProposal.model_validate(
+            value = EditorialProjectScaffold.model_validate(
                 {
                     "working_title": "Working title",
                     "editorial_promise": "A concrete promise",
@@ -204,38 +206,41 @@ class FakeGateway:
                             "allocated_minutes": duration,
                         }
                     ],
-                    "editorial_corpus": {
-                        "governing_understanding": (
-                            "The sources support one integrated understanding."
-                        ),
-                        "units": [
-                            {
-                                "title": "Core subject",
-                                "synthesis": "The complete source-grounded synthesis.",
-                                "essential_points": [
-                                    "The central supported point",
-                                    "The relevant qualification",
-                                ],
-                                "tensions": ["A meaningful source tension"],
-                                "qualifications": ["Do not overstate causality"],
-                                "evidence": [
-                                    {
-                                        "source_ordinals": [1, 2],
-                                        "contribution": (
-                                            "Both sources support and qualify the point."
-                                        ),
-                                    }
-                                ],
-                            }
-                        ],
-                        "forbidden_inferences": [
-                            "Do not turn association into causation"
-                        ],
-                    },
+                    "corpus_governing_understanding": (
+                        "The sources support one integrated understanding."
+                    ),
+                    "forbidden_inferences": [
+                        "Do not turn association into causation"
+                    ],
                     "model_knowledge_suggestions": ["Optional model suggestion"],
                     "source_enrichment_opportunities": [
                         "Additional source opportunity"
                     ],
+                }
+            )
+        elif task_type == "editorial_subject_corpus":
+            value = SubjectEditorialCorpus.model_validate(
+                {
+                    "units": [
+                        {
+                            "title": "Core subject",
+                            "synthesis": "The complete source-grounded synthesis.",
+                            "essential_points": [
+                                "The central supported point",
+                                "The relevant qualification",
+                            ],
+                            "tensions": ["A meaningful source tension"],
+                            "qualifications": ["Do not overstate causality"],
+                            "evidence": [
+                                {
+                                    "source_ordinals": [1, 2],
+                                    "contribution": (
+                                        "Both sources support and qualify the point."
+                                    ),
+                                }
+                            ],
+                        }
+                    ]
                 }
             )
         elif task_type in {

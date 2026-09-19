@@ -8,6 +8,8 @@ from .contracts import (
     EditorialBrief,
     EditorialCondensation,
     EditorialProjectProposal,
+    EditorialProjectScaffold,
+    EditorialSubject,
     FinalTextProposal,
     Passage,
     ProvisionalEditorialProject,
@@ -308,6 +310,79 @@ expanding the output.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
+
+INPUT KIND: {material_kind}
+
+SELECTED EDITORIAL MATERIAL:
+{material}
+""".strip()
+
+
+def project_scaffold_prompt(
+    brief: EditorialBrief,
+    material: str,
+    *,
+    material_kind: str,
+) -> str:
+    return f"""
+Create the Editorial Project scaffold directly from the selected source
+material and the user's brief. Do not create the editorial_corpus units in this
+step; they will be generated subject by subject.
+
+The Narrative Axis is the one- or two-sentence intention of message that must
+govern the complete future piece. The subjects must operationalize that Axis
+with real depth and avoid superficial coverage of everything.
+
+Start from the requested {brief.duration_minutes} minutes. If incorporating an
+additional subject discovered through source or model enrichment, preserve every
+existing subject and increase the total duration enough to develop the new
+subject; never cut a subject merely to keep the original duration.
+
+Return empty arrays for model_knowledge_suggestions and
+source_enrichment_opportunities: this Editorial Project is closed for approval
+and must not initiate another enrichment spiral.
+
+Also return a compact corpus_governing_understanding and forbidden_inferences
+that apply to the complete future corpus. Source names, citations and internal
+passage coordinates must not appear in the user-facing project.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+INPUT KIND: {material_kind}
+
+SELECTED EDITORIAL MATERIAL:
+{material}
+""".strip()
+
+
+def subject_corpus_prompt(
+    brief: EditorialBrief,
+    scaffold: EditorialProjectScaffold,
+    subject: EditorialSubject,
+    material: str,
+    *,
+    material_kind: str,
+) -> str:
+    return f"""
+Create only the editorial_corpus units for this one subject. Do not revise the
+Narrative Axis, title, promise, duration, or subject list. Keep the output
+compact: at most three units, concise synthesis, concise evidence, and only
+short verbatim excerpts when exact wording materially matters.
+
+The units must serve the named subject inside the approved scaffold and preserve
+essential points, tensions, qualifications, forbidden inferences, and concise
+source support. Source ordinals are internal grounding metadata for the content
+editor; they must never be written into the final product.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+EDITORIAL PROJECT SCAFFOLD:
+{scaffold.model_dump_json(indent=2)}
+
+SUBJECT:
+{subject.model_dump_json(indent=2)}
 
 INPUT KIND: {material_kind}
 

@@ -264,7 +264,7 @@ class EditorialKnowledgeUnit(StrictModel):
 
 class EditorialCorpus(StrictModel):
     governing_understanding: str = Field(min_length=1, max_length=1_400)
-    units: list[EditorialKnowledgeUnit] = Field(min_length=1, max_length=8)
+    units: list[EditorialKnowledgeUnit] = Field(min_length=1, max_length=36)
     forbidden_inferences: list[str] = Field(default_factory=list, max_length=6)
 
 
@@ -273,6 +273,29 @@ class EditorialSubject(StrictModel):
     editorial_role: str = Field(min_length=1)
     depth: str = Field(min_length=1)
     allocated_minutes: float = Field(ge=0.01)
+
+
+class EditorialProjectScaffold(StrictModel):
+    working_title: str = Field(min_length=1)
+    editorial_promise: str = Field(min_length=1)
+    narrative_axis: NarrativeAxisProposal
+    duration_minutes: int = Field(ge=1)
+    source_supported_subjects: list[EditorialSubject] = Field(min_length=1, max_length=12)
+    corpus_governing_understanding: str = Field(min_length=1, max_length=1_400)
+    forbidden_inferences: list[str] = Field(default_factory=list, max_length=6)
+    model_knowledge_suggestions: list[str] = Field(default_factory=list)
+    source_enrichment_opportunities: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def duration_is_fully_allocated(self) -> "EditorialProjectScaffold":
+        allocated = sum(item.allocated_minutes for item in self.source_supported_subjects)
+        if not isclose(allocated, float(self.duration_minutes), rel_tol=0, abs_tol=0.01):
+            raise ValueError("source-supported subjects must allocate the complete requested duration")
+        return self
+
+
+class SubjectEditorialCorpus(StrictModel):
+    units: list[EditorialKnowledgeUnit] = Field(min_length=1, max_length=3)
 
 
 class EditorialProjectProposal(StrictModel):

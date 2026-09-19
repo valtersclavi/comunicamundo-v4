@@ -120,7 +120,8 @@ async def test_short_corpus_goes_from_flags_directly_to_one_complete_project() -
 
     task_types = [item["task_type"] for item in gateway.calls]
     assert task_types.count("source_selection") == 2
-    assert task_types.count("editorial_project") == 1
+    assert task_types.count("editorial_project_scaffold") == 1
+    assert task_types.count("editorial_subject_corpus") == 1
     assert not any(value.startswith("editorial_comprehension") for value in task_types)
     assert run.state is RunState.PROJECT_PROPOSED
     assert run.editorial_project is not None
@@ -152,12 +153,12 @@ async def test_long_corpus_uses_measured_bounded_comprehension_packets() -> None
         )
     )
     assert "editorial_comprehension_part" in task_types
-    assert task_types[-1] == "editorial_project"
+    assert task_types[-2:] == ["editorial_project_scaffold", "editorial_subject_corpus"]
     assert completed.state is RunState.PROJECT_PROPOSED
     assert all(
         item.prompt_tokens <= (2_000 if item.task_type == "source_selection" else 1_000)
         for item in repository.usage[run.execution_run_id]
-        if item.task_type != "editorial_project"
+        if item.task_type not in {"editorial_project_scaffold", "editorial_subject_corpus"}
     )
     assert await repository.condensations(run.execution_run_id)
 
@@ -172,7 +173,7 @@ async def test_multiple_sources_reach_the_same_final_comprehension() -> None:
     await hefesto.select(run.execution_run_id)
     await hefesto.propose_project(run.execution_run_id)
     final_prompt = next(
-        item["prompt"] for item in gateway.calls if item["task_type"] == "editorial_project"
+        item["prompt"] for item in gateway.calls if item["task_type"] == "editorial_project_scaffold"
     )
     assert "SOURCE 1: One" in final_prompt
     assert "SOURCE 2: Two" in final_prompt
@@ -182,14 +183,14 @@ async def test_multiple_sources_reach_the_same_final_comprehension() -> None:
 async def test_resume_reuses_completed_flags_after_project_failure() -> None:
     source = request()
     repository = MemoryRepository()
-    gateway = FakeGateway(fail_task="editorial_project", fail_times=1)
+    gateway = FakeGateway(fail_task="editorial_project_scaffold", fail_times=1)
     hefesto = Hefesto(repository, gateway)
     run = await hefesto.prepare(source)
     await hefesto.select(run.execution_run_id)
     selection_calls = len(
         [item for item in gateway.calls if item["task_type"] == "source_selection"]
     )
-    with pytest.raises(Exception, match="synthetic editorial_project failure"):
+    with pytest.raises(Exception, match="synthetic editorial_project_scaffold failure"):
         await hefesto.propose_project(run.execution_run_id)
     resumed = await hefesto.resume_plan(run.execution_run_id)
     assert resumed.state is RunState.PROJECT_PROPOSED

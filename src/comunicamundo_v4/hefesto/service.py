@@ -19,8 +19,11 @@ from .contracts import (
     EditorialBrief,
     EditorialCondensation,
     EditorialCondensationProposal,
+    EditorialCorpus,
+    EditorialKnowledgeUnit,
     EditorialProjectProposal,
     EditorialProjectRecord,
+    EditorialProjectScaffold,
     FinalTextProposal,
     FinalTextRecord,
     Paragraph,
@@ -31,6 +34,7 @@ from .contracts import (
     RunState,
     SelectionBatch,
     SelectionFlags,
+    SubjectEditorialCorpus,
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
 from .prompts import (
@@ -41,10 +45,12 @@ from .prompts import (
     content_revision_prompt,
     preservation_review_prompt,
     product_style_prompt,
+    project_scaffold_prompt,
     project_prompt,
     render_condensations,
     render_passages,
     selection_prompt,
+    subject_corpus_prompt,
 )
 from .segmentation import segment_sources
 
@@ -693,22 +699,57 @@ class Hefesto:
         ]
 
     async def _create_project(self, run: ProductRun, prompt: str) -> ProductRun:
-        result = await self._call(
+        scaffold_result = await self._call(
             run,
-            task_type="editorial_project",
-            prompt=prompt,
-            schema=EditorialProjectProposal,
-            max_output_tokens=16_384,
-            thinking_tokens=4_000,
+            task_type="editorial_project_scaffold",
+            prompt=project_scaffold_prompt(
+                run.request.brief,
+                _selected_material_from_project_prompt(prompt),
+                material_kind=_material_kind_from_project_prompt(prompt),
+            ),
+            schema=EditorialProjectScaffold,
+            max_output_tokens=8_192,
+            thinking_tokens=3_000,
         )
-        if result.value.duration_minutes < run.request.brief.duration_minutes:
+        if scaffold_result.value.duration_minutes < run.request.brief.duration_minutes:
             raise ValueError("Editorial Project shortened the requested duration")
-        if result.value.editorial_corpus is None:
-            raise ValueError("Editorial Project omitted the canonical editorial corpus")
+        units: list[EditorialKnowledgeUnit] = []
+        material = _selected_material_from_project_prompt(prompt)
+        material_kind = _material_kind_from_project_prompt(prompt)
+        for subject in scaffold_result.value.source_supported_subjects:
+            corpus_result = await self._call(
+                run,
+                task_type="editorial_subject_corpus",
+                prompt=subject_corpus_prompt(
+                    run.request.brief,
+                    scaffold_result.value,
+                    subject,
+                    material,
+                    material_kind=material_kind,
+                ),
+                schema=SubjectEditorialCorpus,
+                max_output_tokens=4_096,
+                thinking_tokens=2_000,
+            )
+            units.extend(corpus_result.value.units)
+        value = EditorialProjectProposal(
+            working_title=scaffold_result.value.working_title,
+            editorial_promise=scaffold_result.value.editorial_promise,
+            narrative_axis=scaffold_result.value.narrative_axis,
+            duration_minutes=scaffold_result.value.duration_minutes,
+            source_supported_subjects=scaffold_result.value.source_supported_subjects,
+            editorial_corpus=EditorialCorpus(
+                governing_understanding=scaffold_result.value.corpus_governing_understanding,
+                units=units,
+                forbidden_inferences=scaffold_result.value.forbidden_inferences,
+            ),
+            model_knowledge_suggestions=scaffold_result.value.model_knowledge_suggestions,
+            source_enrichment_opportunities=scaffold_result.value.source_enrichment_opportunities,
+        )
         project = EditorialProjectRecord(
             execution_run_id=run.execution_run_id,
             project_id=run.project_id,
-            proposal=result.value,
+            proposal=value,
         )
         proposed = run.model_copy(
             update={
@@ -974,6 +1015,20 @@ class Hefesto:
         await self._repository.save_run(failed)
 
 
+def _material_kind_from_project_prompt(prompt: str) -> str:
+    marker = "\nINPUT KIND: "
+    if marker not in prompt:
+        return "selected source material"
+    return prompt.split(marker, 1)[1].split("\n\nSELECTED EDITORIAL MATERIAL:", 1)[0].strip()
+
+
+def _selected_material_from_project_prompt(prompt: str) -> str:
+    marker = "\nSELECTED EDITORIAL MATERIAL:\n"
+    if marker not in prompt:
+        return prompt
+    return prompt.split(marker, 1)[1]
+
+
 def _validated_flags(flags: SelectionFlags, allowed: set[int]) -> SelectionFlags:
     central = set(flags.central) & allowed
     relevant = (set(flags.relevant) & allowed) - central
@@ -1031,4 +1086,3 @@ def _section_targets(
         }
         for subject, words in zip(subjects, targets, strict=True)
     ]
-
