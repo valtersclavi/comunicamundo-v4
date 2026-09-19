@@ -223,7 +223,7 @@ async def source_search(execution_id: UUID) -> None:
         discovery = SourceDiscovery([
             YouSearchProvider(required("YOU_API_KEY")),
             OpenAlexSearchProvider(required("OPENALEX_API_KEY")),
-        ])
+        ], results_per_query=2)
         research = SourceResearch(
             editor,
             discovery,

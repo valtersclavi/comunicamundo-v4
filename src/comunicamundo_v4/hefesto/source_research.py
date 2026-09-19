@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from .contracts import (
@@ -65,59 +66,98 @@ class SourceResearch:
         selection: SourceSelectionProposal | None = None
 
         for _ in range(self._max_search_rounds):
-            if queries:
-                found = await asyncio.to_thread(
-                    self._discovery.discover,
-                    SourceSearchPlan(
-                        queries=queries,
-                        editorial_coverage=planned.value.editorial_coverage,
-                    ),
+            active_queries = queries
+            queries = []
+            if not active_queries and not candidates:
+                break
+
+            for query in active_queries or [""]:
+                if query:
+                    found = await asyncio.to_thread(
+                        self._discovery.discover,
+                        SourceSearchPlan(
+                            queries=[query],
+                            editorial_coverage=planned.value.editorial_coverage,
+                        ),
+                    )
+                    candidates = deduplicate_candidates([*candidates, *found])
+                    if not candidates:
+                        continue
+                result = await self._judge_and_acquire(
+                    brief,
+                    project,
+                    candidates,
+                    acquired,
+                    failed,
                 )
-                candidates = deduplicate_candidates([*candidates, *found])
+                usages.append(result.usage)
+                selection = result.value
+                if _selected_is_available(selection, acquired):
+                    if selection.coverage_complete:
+                        return SourceResearchResult(
+                            search_plan=planned.value,
+                            candidates=tuple(candidates),
+                            selection=selection,
+                            acquisitions=tuple(acquired.values()),
+                            usages=tuple(usages),
+                        )
+                queries = list(selection.follow_up_queries)
+                if acquired and selection.coverage_complete:
+                    return SourceResearchResult(
+                        search_plan=planned.value,
+                        candidates=tuple(candidates),
+                        selection=selection,
+                        acquisitions=tuple(acquired.values()),
+                        usages=tuple(usages),
+                    )
+
             if not candidates:
                 raise ValueError("source search returned no candidates")
-
-            judged = await self._editor.select(
-                brief,
-                project,
-                candidates,
-                acquired_candidate_ids=tuple(acquired),
-                failed_candidate_ids=tuple(failed),
-            )
-            usages.append(judged.usage)
-            selection = judged.value
-            by_id = {item.candidate_id: item for item in candidates}
-            fresh = [
-                by_id[item]
-                for item in selection.selected_candidate_ids
-                if item not in acquired and item not in failed
-            ]
-            if fresh:
-                semaphore = asyncio.Semaphore(self._acquisition_concurrency)
-
-                async def acquire(item: SourceCandidate) -> AcquisitionPayload:
-                    async with semaphore:
-                        return await asyncio.to_thread(self._acquirer.acquire, item)
-
-                for payload in await asyncio.gather(*(acquire(item) for item in fresh)):
-                    target = acquired if payload.record.status == "acquired" else failed
-                    target[payload.record.candidate.candidate_id] = payload
-
-            selected_is_available = bool(selection.selected_candidate_ids) and all(
-                item in acquired for item in selection.selected_candidate_ids
-            )
-            if selection.coverage_complete and selected_is_available:
-                return SourceResearchResult(
-                    search_plan=planned.value,
-                    candidates=tuple(candidates),
-                    selection=selection,
-                    acquisitions=tuple(acquired.values()),
-                    usages=tuple(usages),
-                )
-            queries = list(selection.follow_up_queries)
 
         acquired_count = len(acquired)
         raise ValueError(
             "source editor did not reach adequate coverage after "
             f"{self._max_search_rounds} rounds ({acquired_count} sources acquired)"
         )
+
+    async def _judge_and_acquire(
+        self,
+        brief: EditorialBrief,
+        project: ProvisionalEditorialProject,
+        candidates: Sequence[SourceCandidate],
+        acquired: dict[str, AcquisitionPayload],
+        failed: dict[str, AcquisitionPayload],
+    ) -> ModelResult[SourceSelectionProposal]:
+        judged = await self._editor.select(
+            brief,
+            project,
+            candidates,
+            acquired_candidate_ids=tuple(acquired),
+            failed_candidate_ids=tuple(failed),
+        )
+        by_id = {item.candidate_id: item for item in candidates}
+        fresh = [
+            by_id[item]
+            for item in judged.value.selected_candidate_ids
+            if item not in acquired and item not in failed
+        ]
+        if fresh:
+            semaphore = asyncio.Semaphore(self._acquisition_concurrency)
+
+            async def acquire(item: SourceCandidate) -> AcquisitionPayload:
+                async with semaphore:
+                    return await asyncio.to_thread(self._acquirer.acquire, item)
+
+            for payload in await asyncio.gather(*(acquire(item) for item in fresh)):
+                target = acquired if payload.record.status == "acquired" else failed
+                target[payload.record.candidate.candidate_id] = payload
+        return judged
+
+
+def _selected_is_available(
+    selection: SourceSelectionProposal,
+    acquired: dict[str, AcquisitionPayload],
+) -> bool:
+    return bool(selection.selected_candidate_ids) and all(
+        item in acquired for item in selection.selected_candidate_ids
+    )

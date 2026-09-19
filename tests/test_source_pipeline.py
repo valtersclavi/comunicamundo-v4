@@ -449,3 +449,67 @@ async def test_source_research_replaces_failed_selection_until_editor_has_covera
     assert result.failures == ()
     assert result.selection.selected_candidate_ids == [second.candidate_id]
     assert len(result.usages) == 3
+
+
+@pytest.mark.asyncio
+async def test_source_research_stops_after_first_query_with_acquired_coverage() -> None:
+    found = candidate()
+
+    class Editor:
+        async def search_plan(self, brief, project):
+            return ModelResult(
+                value=SourceSearchPlan(
+                    queries=["first query", "second query"],
+                    editorial_coverage=["axis"],
+                ),
+                usage=usage("source_search_plan"),
+            )
+
+        async def select(self, brief, project, candidates, **kwargs):
+            return ModelResult(
+                value=SourceSelectionProposal(
+                    selected_candidate_ids=[found.candidate_id],
+                    coverage_judgment="first query covered the need",
+                    coverage_complete=True,
+                ),
+                usage=usage("source_editor_selection"),
+            )
+
+    class Discovery:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        def discover(self, plan):
+            self.queries.extend(plan.queries)
+            return [found]
+
+    class Acquirer:
+        def acquire(self, item):
+            text = long_text("First Complete Source")
+            return AcquisitionPayload(record=AcquiredSource(
+                candidate=item, status="acquired", selected_route="you_contents",
+                final_url=item.url, normalized_text=text,
+                normalized_text_sha256=sha256(text.encode()).hexdigest(),
+            ))
+
+    brief = EditorialBrief(
+        theme="Theme", approach="Approach", duration_minutes=10,
+        output_language="pt-BR", audience="Audience", product="article",
+    )
+    project = ProvisionalEditorialProject(
+        working_title="Project", editorial_promise="Promise",
+        narrative_axis=NarrativeAxisProposal(statement="Axis", rationale="Why"),
+        duration_minutes=10,
+        subjects=[ProvisionalEditorialSubject(
+            title="Subject", editorial_role="Role", desired_depth="Deep",
+            allocated_minutes=10,
+        )],
+        disclaimer="To be sustained by sources found",
+    )
+    discovery = Discovery()
+
+    result = await SourceResearch(Editor(), discovery, Acquirer()).run(brief, project)
+
+    assert discovery.queries == ["first query"]
+    assert result.selection.coverage_complete is True
+    assert [item.record.status for item in result.acquisitions] == ["acquired"]
