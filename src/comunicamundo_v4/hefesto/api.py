@@ -739,8 +739,8 @@ def create_app(
     ) -> dict[str, Any]:
         receipt = await required_receipt(execution_id, request)
         if receipt["status"] not in {
-            "failed", "selecting", "comprehending", "source_structure_ready",
-            "producing_text",
+            "failed", "searching_sources", "selecting", "comprehending",
+            "source_structure_ready", "producing_text",
         }:
             raise HTTPException(
                 status_code=409,
@@ -755,8 +755,15 @@ def create_app(
         else:
             action = "produce-text" if project.get("approved") else "resume-plan"
         try:
+            dispatch_key = (
+                f"resume-{action}-"
+                f"{sha256(datetime.now(UTC).isoformat().encode()).hexdigest()[:16]}"
+            )
             return await asyncio.to_thread(
-                service().dispatch_action, execution_id, action
+                service().dispatch_action,
+                execution_id,
+                action,
+                dispatch_key=dispatch_key,
             )
         except Exception as error:
             raise HTTPException(

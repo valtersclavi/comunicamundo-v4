@@ -200,7 +200,8 @@ function renderRun(run) {
   $("#run-error").hidden = !(failed || actionError);
   if (failed) $("#run-error").textContent = `${run.error_class || "Falha no processamento"}: ${run.error_message || "Não foi possível concluir esta execução."}`;
   else if (actionError) $("#run-error").textContent = `${actionError.error_class || "Falha na ação"}: ${actionError.error_message || "Não foi possível concluir esta ação."}`;
-  $("#resume-plan").hidden = status !== "failed" || state.pendingStatus === "failed";
+  const canResume = ["failed", "searching_sources"].includes(status);
+  $("#resume-plan").hidden = !canResume || state.pendingStatus === status;
   const provisional = status === "provisional_project_proposed" || status === "searching_sources";
   state.currentProjectSignature = project ? JSON.stringify(project) : null;
   $("#project-panel").hidden = !project;
@@ -298,7 +299,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   for (const name of ["dragenter", "dragover"]) dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.add("dragging"); });
   for (const name of ["dragleave", "drop"]) dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.remove("dragging"); });
   dropzone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
-  $("#resume-plan").addEventListener("click", () => runAction("resume", $("#resume-plan"), "Retomando…", "failed"));
+  $("#resume-plan").addEventListener("click", () => runAction("resume", $("#resume-plan"), "Retomando…", state.currentStatus));
   $("#approve-project").addEventListener("click", () => { const provisional = state.currentStatus === "provisional_project_proposed"; runAction(provisional ? "approve-provisional-project" : "approve-project", $("#approve-project"), provisional ? "Aprovando pré-projeto…" : "Aprovando…", state.currentStatus); });
   $("#revise-provisional").addEventListener("click", reviseProvisional);
   $("#produce-text").addEventListener("click", () => runAction("produce-text", $("#produce-text"), "Gerando…", "project_approved"));

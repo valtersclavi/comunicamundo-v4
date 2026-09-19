@@ -562,7 +562,57 @@ def test_failed_text_generation_resumes_at_production() -> None:
     execution_id = api.post("/v1/plans", json=request()).json()["execution_run_id"]
     response = api.post(f"/v1/plans/{execution_id}/resume")
     assert response.status_code == 202
-    assert dispatcher.calls[-1] == [
+    assert dispatcher.calls[-1][:2] == [
         "produce-text", f"--execution-run-id={execution_id}",
-        "--dispatch-key=produce-text",
     ]
+    assert dispatcher.calls[-1][2].startswith("--dispatch-key=resume-produce-text-")
+
+
+def test_failed_zero_source_generation_resumes_at_source_search_with_fresh_dispatch() -> None:
+    storage, dispatcher, access = Storage(), Dispatcher(), Access()
+    api = client(
+        storage,
+        dispatcher,
+        receipt={
+            "status": "failed",
+            "provisional_editorial_project": {"working_title": "Pre"},
+            "editorial_project": None,
+        },
+        access=access,
+    )
+    payload = request()
+    payload.update({"source_mode": "find_for_me", "sources": []})
+    execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
+
+    response = api.post(f"/v1/plans/{execution_id}/resume")
+
+    assert response.status_code == 202
+    assert dispatcher.calls[-1][:2] == [
+        "source-search", f"--execution-run-id={execution_id}",
+    ]
+    assert dispatcher.calls[-1][2].startswith("--dispatch-key=resume-source-search-")
+
+
+def test_stuck_source_search_can_be_resumed_with_fresh_dispatch() -> None:
+    storage, dispatcher, access = Storage(), Dispatcher(), Access()
+    api = client(
+        storage,
+        dispatcher,
+        receipt={
+            "status": "searching_sources",
+            "provisional_editorial_project": {"working_title": "Pre"},
+            "editorial_project": None,
+        },
+        access=access,
+    )
+    payload = request()
+    payload.update({"source_mode": "find_for_me", "sources": []})
+    execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
+
+    response = api.post(f"/v1/plans/{execution_id}/resume")
+
+    assert response.status_code == 202
+    assert dispatcher.calls[-1][:2] == [
+        "source-search", f"--execution-run-id={execution_id}",
+    ]
+    assert dispatcher.calls[-1][2].startswith("--dispatch-key=resume-source-search-")
