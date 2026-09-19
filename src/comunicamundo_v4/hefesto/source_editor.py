@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from decimal import Decimal
+import re
 
 from .contracts import (
     CallUsage,
     EditorialBrief,
     ProvisionalEditorialProject,
+    RawSourceSelectionProposal,
     SourceCandidate,
     SourceSearchPlan,
     SourceSelectionProposal,
@@ -98,22 +100,17 @@ class EditorialSourceEditor:
                 acquired_candidate_ids=acquired_candidate_ids,
                 failed_candidate_ids=failed_candidate_ids,
             ),
-            schema=SourceSelectionProposal,
+            schema=RawSourceSelectionProposal,
             system_instruction=SYSTEM,
             max_output_tokens=4_096,
             thinking_tokens=2_000,
         )
-        known = {item.candidate_id for item in candidates}
-        selected = result.value.selected_candidate_ids
-        if len(selected) != len(set(selected)):
-            raise ValueError("source editor selected a candidate more than once")
-        unknown = sorted(set(selected) - known)
-        if unknown:
-            raise ValueError(f"source editor selected unknown candidate IDs: {unknown}")
-        forbidden = set(failed_candidate_ids)
-        if forbidden.intersection(selected):
-            raise ValueError("source editor selected a previously failed candidate")
-        return result
+        selection = _sanitize_selection(
+            result.value,
+            candidates,
+            failed_candidate_ids=failed_candidate_ids,
+        )
+        return ModelResult(value=selection, usage=result.usage)
 
     async def _select_in_batches(
         self,
@@ -137,17 +134,17 @@ class EditorialSourceEditor:
                     acquired_candidate_ids=acquired_candidate_ids,
                     failed_candidate_ids=failed_candidate_ids,
                 ),
-                schema=SourceSelectionProposal,
+                schema=RawSourceSelectionProposal,
                 system_instruction=SYSTEM,
                 max_output_tokens=2_048,
                 thinking_tokens=1_500,
             )
-            self._validate_selection(
+            selection = _sanitize_selection(
                 result.value,
                 batch,
                 failed_candidate_ids=failed_candidate_ids,
             )
-            proposals.append(result.value)
+            proposals.append(selection)
             usages.append(result.usage)
 
         result = await self._gateway.generate(
@@ -160,39 +157,21 @@ class EditorialSourceEditor:
                 acquired_candidate_ids=acquired_candidate_ids,
                 failed_candidate_ids=failed_candidate_ids,
             ),
-            schema=SourceSelectionProposal,
+            schema=RawSourceSelectionProposal,
             system_instruction=SYSTEM,
             max_output_tokens=2_048,
             thinking_tokens=1_500,
         )
-        self._validate_selection(
+        selection = _sanitize_selection(
             result.value,
             candidates,
             failed_candidate_ids=failed_candidate_ids,
         )
         usages.append(result.usage)
         return ModelResult(
-            value=result.value,
+            value=selection,
             usage=_combined_usage("source_editor_selection", usages),
         )
-
-    def _validate_selection(
-        self,
-        selection: SourceSelectionProposal,
-        candidates: Sequence[SourceCandidate],
-        *,
-        failed_candidate_ids: Sequence[str] = (),
-    ) -> None:
-        known = {item.candidate_id for item in candidates}
-        selected = selection.selected_candidate_ids
-        if len(selected) != len(set(selected)):
-            raise ValueError("source editor selected a candidate more than once")
-        unknown = sorted(set(selected) - known)
-        if unknown:
-            raise ValueError(f"source editor selected unknown candidate IDs: {unknown}")
-        forbidden = set(failed_candidate_ids)
-        if forbidden.intersection(selected):
-            raise ValueError("source editor selected a previously failed candidate")
 
 
 def _combined_usage(task_type: str, usages: Sequence[CallUsage]) -> CallUsage:
@@ -210,4 +189,34 @@ def _combined_usage(task_type: str, usages: Sequence[CallUsage]) -> CallUsage:
         latency_ms=sum(item.latency_ms for item in usages),
         rated_cost_usd=f"{rated_cost:.9f}" if rated_cost else None,
         status="succeeded",
+    )
+
+
+def _sanitize_selection(
+    selection: RawSourceSelectionProposal,
+    candidates: Sequence[SourceCandidate],
+    *,
+    failed_candidate_ids: Sequence[str] = (),
+) -> SourceSelectionProposal:
+    known = {item.candidate_id for item in candidates}
+    forbidden = set(failed_candidate_ids)
+    selected: list[str] = []
+    for item in selection.selected_candidate_ids:
+        if not re.fullmatch(r"[0-9a-f]{64}", item):
+            continue
+        if item not in known or item in forbidden or item in selected:
+            continue
+        selected.append(item)
+
+    coverage_complete = selection.coverage_complete and bool(selected)
+    follow_up_queries = list(selection.follow_up_queries)
+    if not coverage_complete and not follow_up_queries:
+        follow_up_queries = [
+            "buscar fontes adicionais para cobrir lacunas do eixo editorial"
+        ]
+    return SourceSelectionProposal(
+        selected_candidate_ids=selected,
+        coverage_judgment=selection.coverage_judgment,
+        coverage_complete=coverage_complete,
+        follow_up_queries=follow_up_queries,
     )

@@ -88,6 +88,13 @@ class SourceSelectionProposal(StrictModel):
         return self
 
 
+class RawSourceSelectionProposal(StrictModel):
+    selected_candidate_ids: list[str] = Field(default_factory=list, max_length=64)
+    coverage_judgment: str = Field(min_length=1)
+    coverage_complete: bool
+    follow_up_queries: list[str] = Field(default_factory=list, max_length=8)
+
+
 class AcquisitionAttempt(StrictModel):
     route: str = Field(pattern=r"^(direct|you_contents|jina_reader|browser_use)$")
     ok: bool

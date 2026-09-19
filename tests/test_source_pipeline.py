@@ -16,6 +16,7 @@ from comunicamundo_v4.hefesto.contracts import (
     NarrativeAxisProposal,
     ProvisionalEditorialProject,
     ProvisionalEditorialSubject,
+    RawSourceSelectionProposal,
     SourceSelectionProposal,
 )
 from comunicamundo_v4.hefesto.gateway import ModelResult
@@ -332,6 +333,46 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
     ]
     assert all(item in {candidate.candidate_id for candidate in candidates}
                for item in result.value.selected_candidate_ids)
+
+
+@pytest.mark.asyncio
+async def test_source_editor_discards_malformed_selected_candidate_ids() -> None:
+    brief = EditorialBrief(
+        theme="Theme", approach="Approach", duration_minutes=10,
+        output_language="pt-BR", audience="Audience", product="article",
+    )
+    project = ProvisionalEditorialProject(
+        working_title="Project",
+        editorial_promise="Promise",
+        narrative_axis=NarrativeAxisProposal(statement="Axis", rationale="Why"),
+        duration_minutes=10,
+        subjects=[ProvisionalEditorialSubject(
+            title="Subject", editorial_role="Role", desired_depth="Depth",
+            allocated_minutes=10,
+        )],
+        disclaimer="To be sustained by found sources.",
+    )
+    valid = candidate()
+
+    class Gateway:
+        async def generate(self, **kwargs):
+            return ModelResult(
+                value=RawSourceSelectionProposal(
+                    selected_candidate_ids=[
+                        valid.candidate_id,
+                        f"{valid.candidate_id}{valid.candidate_id[:6]}",
+                        "not-a-candidate-id",
+                    ],
+                    coverage_judgment="valid source plus malformed model output",
+                    coverage_complete=True,
+                ),
+                usage=usage(kwargs["task_type"]),
+            )
+
+    result = await EditorialSourceEditor(Gateway()).select(brief, project, [valid])
+
+    assert result.value.selected_candidate_ids == [valid.candidate_id]
+    assert result.value.coverage_complete is True
 
 
 @pytest.mark.asyncio
