@@ -233,6 +233,20 @@ def test_provisional_approval_dispatches_internal_source_search() -> None:
     ]
 
 
+def test_provisional_approval_does_not_redispatch_active_source_search() -> None:
+    storage, dispatcher, access = Storage(), Dispatcher(), Access()
+    receipt = {"status": "searching_sources"}
+    api = client(storage, dispatcher, receipt=receipt, access=access)
+    payload = request()
+    payload.update({"source_mode": "find_for_me", "sources": []})
+    execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
+
+    response = api.post(f"/v1/plans/{execution_id}/approve-provisional-project")
+
+    assert response.status_code == 409
+    assert dispatcher.calls[-1][0] == "plan"
+
+
 def test_provisional_chat_dispatches_revision_with_immutable_instruction() -> None:
     storage, dispatcher, access = Storage(), Dispatcher(), Access()
     receipt = {"status": "provisional_project_proposed"}

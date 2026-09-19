@@ -713,7 +713,7 @@ def create_app(
         execution_id: UUID, request: Request
     ) -> dict[str, Any]:
         receipt = await required_receipt(execution_id, request)
-        if receipt["status"] not in {"provisional_project_proposed", "searching_sources"}:
+        if receipt["status"] != "provisional_project_proposed":
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -721,8 +721,6 @@ def create_app(
                     "Editorial Project awaiting approval"
                 ),
             )
-        if receipt["status"] == "searching_sources":
-            return receipt
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "source-search"

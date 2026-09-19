@@ -206,9 +206,17 @@ function renderRun(run) {
   $("#project-panel").hidden = !project;
   if (project) renderProject(project, provisional);
   $("#approve-project").hidden = !["project_proposed", "provisional_project_proposed"].includes(status) || state.pendingStatus === status;
+  $("#approve-project").textContent = status === "provisional_project_proposed" ? "Aprovar pré-projeto" : "Aprovar Projeto Editorial";
   $("#provisional-chat").hidden = status !== "provisional_project_proposed";
   $("#produce-text").hidden = status !== "project_approved" || Boolean(run.final_text) || state.pendingStatus === "project_approved";
-  $("#project-approval-copy").textContent = ["project_approved", "producing_text", "text_ready"].includes(status) ? "Projeto Editorial aprovado." : "Revise o projeto antes de gerar o texto final.";
+  $("#project-approval-copy").textContent =
+    status === "provisional_project_proposed"
+      ? "Revise o pré-projeto ou aprove para o Hefesto buscar fontes automaticamente."
+      : status === "searching_sources"
+        ? "Pré-projeto aprovado. O Hefesto está buscando fontes e preparará o Projeto Editorial definitivo."
+        : ["project_approved", "producing_text", "text_ready"].includes(status)
+          ? "Projeto Editorial aprovado."
+          : "Revise o Projeto Editorial antes de gerar o texto final.";
   $("#text-panel").hidden = !run.final_text;
   if (run.final_text) renderFinalText(run.final_text);
   return status;
@@ -291,7 +299,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   for (const name of ["dragleave", "drop"]) dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.remove("dragging"); });
   dropzone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
   $("#resume-plan").addEventListener("click", () => runAction("resume", $("#resume-plan"), "Retomando…", "failed"));
-  $("#approve-project").addEventListener("click", () => { const provisional = state.currentStatus === "provisional_project_proposed"; runAction(provisional ? "approve-provisional-project" : "approve-project", $("#approve-project"), provisional ? "Iniciando busca…" : "Aprovando…", state.currentStatus); });
+  $("#approve-project").addEventListener("click", () => { const provisional = state.currentStatus === "provisional_project_proposed"; runAction(provisional ? "approve-provisional-project" : "approve-project", $("#approve-project"), provisional ? "Aprovando pré-projeto…" : "Aprovando…", state.currentStatus); });
   $("#revise-provisional").addEventListener("click", reviseProvisional);
   $("#produce-text").addEventListener("click", () => runAction("produce-text", $("#produce-text"), "Gerando…", "project_approved"));
   $("#new-plan").addEventListener("click", newPlan); $("#back-to-form").addEventListener("click", newPlan);
