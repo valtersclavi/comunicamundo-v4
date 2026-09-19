@@ -55,6 +55,15 @@ def canonical_url(value: str) -> str:
     return urlunsplit(("https", netloc, path, urlencode(sorted(query)), ""))
 
 
+def safe_canonical_url(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return canonical_url(value)
+    except ValueError:
+        return None
+
+
 def canonical_doi(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -84,11 +93,10 @@ class YouSearchProvider:
         web = response.json().get("results", {}).get("web", [])
         result: list[SourceCandidate] = []
         for rank, item in enumerate(web[:count], start=1):
-            url = item.get("url")
+            normalized_url = safe_canonical_url(item.get("url"))
             title = item.get("title")
-            if not isinstance(url, str) or not isinstance(title, str) or not title.strip():
+            if not normalized_url or not isinstance(title, str) or not title.strip():
                 continue
-            normalized_url = canonical_url(url)
             result.append(SourceCandidate(
                 candidate_id=candidate_identity(doi=None, url=normalized_url),
                 provider=self.name,
@@ -126,21 +134,20 @@ class OpenAlexSearchProvider:
             doi = canonical_doi(item.get("doi"))
             landing = best_oa.get("landing_page_url") or primary.get("landing_page_url")
             public_id = item.get("id")
-            url = f"https://doi.org/{doi}" if doi else landing or public_id
-            acquisition_url = (
+            url = safe_canonical_url(f"https://doi.org/{doi}" if doi else landing or public_id)
+            acquisition_url = safe_canonical_url(
                 best_oa.get("pdf_url") or primary.get("pdf_url") or landing or url
             )
-            if not isinstance(title, str) or not isinstance(url, str) or not isinstance(acquisition_url, str):
+            if not isinstance(title, str) or not url or not acquisition_url:
                 continue
-            normalized_url = canonical_url(url)
             result.append(SourceCandidate(
-                candidate_id=candidate_identity(doi=doi, url=normalized_url),
+                candidate_id=candidate_identity(doi=doi, url=url),
                 provider=self.name,
                 query=query,
                 rank=rank,
                 title=title.strip(),
-                url=normalized_url,
-                acquisition_url=canonical_url(acquisition_url),
+                url=url,
+                acquisition_url=acquisition_url,
                 publisher=source.get("display_name"),
                 doi=doi,
                 published_at=item.get("publication_date"),
@@ -158,12 +165,13 @@ class SourceDiscovery:
         self._results_per_query = results_per_query
 
     def discover(self, plan: SourceSearchPlan) -> list[SourceCandidate]:
-        candidates = [
-            candidate
-            for query in plan.queries
-            for provider in self._providers
-            for candidate in provider.search(query, count=self._results_per_query)
-        ]
+        candidates: list[SourceCandidate] = []
+        for query in plan.queries:
+            for provider in self._providers:
+                try:
+                    candidates.extend(provider.search(query, count=self._results_per_query))
+                except Exception:
+                    continue
         return deduplicate_candidates(candidates)
 
 

@@ -147,6 +147,53 @@ def test_search_providers_normalize_and_discovery_deduplicates() -> None:
     assert deduplicate_candidates([found[0], duplicate])[0].acquisition_url.endswith(".pdf")
 
 
+def test_discovery_discards_unsafe_candidate_urls_and_keeps_valid_results() -> None:
+    session = Session()
+    session.queue("POST", "https://ydc-index.io/v1/search", Response(payload={
+        "results": {"web": [
+            {"title": "Bad", "url": "https://user:pass@example.org/private"},
+            {"title": "Good", "url": "https://example.org/good?utm_source=x"},
+        ]},
+    }))
+    session.queue("GET", "https://api.openalex.org/works", Response(payload={
+        "results": [{
+            "display_name": "Bad OA",
+            "doi": None,
+            "primary_location": {"landing_page_url": "http://example.org/openalex"},
+        }]},
+    ))
+
+    found = SourceDiscovery([
+        YouSearchProvider("you-key", session=session),
+        OpenAlexSearchProvider("openalex-key", session=session),
+    ]).discover(SourceSearchPlan(queries=["query"], editorial_coverage=["axis"]))
+
+    assert [item.title for item in found] == ["Good"]
+    assert found[0].url == "https://example.org/good"
+
+
+def test_discovery_ignores_provider_failure_when_another_provider_returns_sources() -> None:
+    good = candidate()
+
+    class BrokenProvider:
+        name = "broken"
+
+        def search(self, query, *, count):
+            raise ValueError("source URLs must be public HTTPS URLs without credentials")
+
+    class GoodProvider:
+        name = "good"
+
+        def search(self, query, *, count):
+            return [good]
+
+    found = SourceDiscovery([BrokenProvider(), GoodProvider()]).discover(
+        SourceSearchPlan(queries=["query"], editorial_coverage=["axis"])
+    )
+
+    assert found == [good]
+
+
 def test_acquire_falls_through_to_you_contents_and_preserves_attempts() -> None:
     session = Session()
     session.queue("GET", "https://example.org/article", Response(
@@ -295,6 +342,7 @@ async def test_source_research_replaces_failed_selection_until_editor_has_covera
         Editor(), Discovery(), Acquirer(), max_search_rounds=2,
     ).run(brief, project)
 
-    assert [item.record.status for item in result.acquisitions] == ["acquired", "failed"]
+    assert [item.record.status for item in result.acquisitions] == ["acquired"]
+    assert result.failures == ()
     assert result.selection.selected_candidate_ids == [second.candidate_id]
     assert len(result.usages) == 3

@@ -111,7 +111,7 @@ class SourceResearch:
                     search_plan=planned.value,
                     candidates=tuple(candidates),
                     selection=selection,
-                    acquisitions=tuple([*acquired.values(), *failed.values()]),
+                    acquisitions=tuple(acquired.values()),
                     usages=tuple(usages),
                 )
             queries = list(selection.follow_up_queries)
