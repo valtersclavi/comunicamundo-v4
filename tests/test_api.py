@@ -273,6 +273,41 @@ def test_provisional_chat_dispatches_revision_with_immutable_instruction() -> No
     assert instruction == {"message": "Aprofunde o segundo assunto"}
 
 
+def test_provisional_chat_does_not_start_source_search() -> None:
+    storage, dispatcher, access = Storage(), Dispatcher(), Access()
+    receipt = {"status": "provisional_project_proposed"}
+    api = client(storage, dispatcher, receipt=receipt, access=access)
+    payload = request()
+    payload.update({"source_mode": "find_for_me", "sources": []})
+    execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
+
+    response = api.post(
+        f"/v1/plans/{execution_id}/revise-provisional-project",
+        json={"message": "Inclua um assunto antes do primeiro"},
+    )
+
+    assert response.status_code == 202
+    assert dispatcher.calls[-1][0] == "revise-provisional"
+    assert all(call[0] != "source-search" for call in dispatcher.calls)
+
+
+def test_provisional_chat_is_rejected_after_preproject_approval() -> None:
+    storage, dispatcher, access = Storage(), Dispatcher(), Access()
+    receipt = {"status": "searching_sources"}
+    api = client(storage, dispatcher, receipt=receipt, access=access)
+    payload = request()
+    payload.update({"source_mode": "find_for_me", "sources": []})
+    execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
+
+    response = api.post(
+        f"/v1/plans/{execution_id}/revise-provisional-project",
+        json={"message": "Inclua um assunto antes do primeiro"},
+    )
+
+    assert response.status_code == 409
+    assert all(call[0] != "revise-provisional" for call in dispatcher.calls)
+
+
 def test_cloud_run_dispatch_uses_job_override_contract(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

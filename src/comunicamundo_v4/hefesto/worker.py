@@ -208,6 +208,10 @@ async def source_search(execution_id: UUID) -> None:
             raise KeyError("zero-source submission is missing")
         if request.source_mode is not SourceMode.FIND_FOR_ME:
             raise ValueError("source search is only valid for find-for-me submissions")
+        if receipt.get("status") != "provisional_project_proposed":
+            raise ValueError(
+                "source search requires an approved provisional Editorial Project"
+            )
         provisional = ProvisionalEditorialProject.model_validate(
             receipt.get("provisional_editorial_project")
         )
@@ -321,6 +325,10 @@ async def revise_provisional(execution_id: UUID, instruction_uri: str) -> None:
         receipt = await repository.product_receipt(execution_id)
         if request is None or receipt is None:
             raise KeyError("zero-source submission is missing")
+        if receipt.get("status") != "provisional_project_proposed":
+            raise ValueError(
+                "provisional revision is only valid while the pre-project awaits approval"
+            )
         bucket, name = instruction_uri.removeprefix("gs://").split("/", 1)
         instruction = json.loads(client.bucket(bucket).blob(name).download_as_bytes())
         message = str(instruction.get("message") or "").strip()
