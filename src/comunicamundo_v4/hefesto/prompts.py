@@ -64,10 +64,17 @@ def provisional_revision_prompt(
     return f"""
 Revise the provisional Editorial Project according to the user's chat request.
 The result still has zero sources: do not invent facts, evidence, source names
-or citations. Preserve everything the request does not change. Rebalance the
-subjects and duration coherently when needed, while keeping the whole duration
-allocated. The disclaimer must continue to say that the axis and project will
-be sustained by the sources found.
+or citations. Preserve everything the request does not change.
+
+Duration rule:
+- If the user adds a new subject or expands the scope, preserve the existing
+  subjects and increase duration_minutes enough to develop the added subject.
+  Never compress or cut existing subjects merely to keep the original duration.
+- Only reduce, merge or delete subjects when the user explicitly asks for that.
+- Always allocate the complete revised duration across the subjects.
+
+The disclaimer must continue to say that the axis and project will be sustained
+by the sources found.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}

@@ -314,7 +314,10 @@ class SubmissionService:
                 return existing
         try:
             operation = self._dispatcher.run([
-                action, f"--execution-run-id={execution_id}", *(extra_args or [])
+                action,
+                f"--execution-run-id={execution_id}",
+                f"--dispatch-key={dispatch_key or action}",
+                *(extra_args or []),
             ])
         except Exception as error:
             failed = {

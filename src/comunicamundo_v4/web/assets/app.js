@@ -150,8 +150,10 @@ function renderRun(run) {
     $("#metric-cost").textContent = `US$ ${Number(usage.rated_cost_usd || 0).toFixed(6)}`;
   }
   const failed = ["failed", "input_failed"].includes(status);
-  $("#run-error").hidden = !failed;
+  const actionError = run.last_action_error;
+  $("#run-error").hidden = !(failed || actionError);
   if (failed) $("#run-error").textContent = `${run.error_class || "Falha no processamento"}: ${run.error_message || "Não foi possível concluir esta execução."}`;
+  else if (actionError) $("#run-error").textContent = `${actionError.error_class || "Falha na ação"}: ${actionError.error_message || "Não foi possível concluir esta ação."}`;
   $("#resume-plan").hidden = status !== "failed" || state.pendingStatus === "failed";
   const provisional = status === "provisional_project_proposed" || status === "searching_sources";
   const project = run.editorial_project?.proposal || run.provisional_editorial_project;

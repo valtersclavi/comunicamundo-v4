@@ -352,6 +352,7 @@ async def revise_provisional(execution_id: UUID, instruction_uri: str) -> None:
             "provisional_revision_history": history,
             "usage": _usage_from_calls(calls),
             "provisional_usage": result.usage.model_dump(mode="json"),
+            "last_action_error": None,
             "generated_at": datetime.now(UTC).isoformat(),
         }
         await repository.record_product_receipt(execution_id, revised)
@@ -473,9 +474,10 @@ def mark_action_dispatch(
     action: str,
     status: str,
     error: Exception | None = None,
+    dispatch_key: str | None = None,
 ) -> None:
     blob = client.bucket(required("HEFESTO_GCS_BUCKET")).blob(
-        f"hefesto-product/executions/{execution_id}/{action}-dispatch.json"
+        f"hefesto-product/executions/{execution_id}/{dispatch_key or action}-dispatch.json"
     )
     try:
         current = json.loads(blob.download_as_bytes())
@@ -499,6 +501,35 @@ def mark_action_dispatch(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode(),
         content_type="application/json",
     )
+
+
+async def record_action_failure(
+    execution_id: UUID,
+    action: str,
+    error: Exception,
+    *,
+    stage: str | None = None,
+) -> None:
+    repository = ProductRepository(required("HEFESTO_POSTGRES_URL"))
+    await repository.open()
+    try:
+        receipt = await repository.product_receipt(execution_id)
+        if receipt is None:
+            return
+        await repository.record_product_receipt(execution_id, {
+            **receipt,
+            "last_action_error": {
+                "action": action,
+                "stage": stage or action,
+                "status": "failed",
+                "error_class": type(error).__name__,
+                "error_message": str(error)[:4000],
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+            "generated_at": datetime.now(UTC).isoformat(),
+        })
+    finally:
+        await repository.close()
 
 
 async def _persist_product_receipt(
@@ -687,23 +718,33 @@ async def run(args: argparse.Namespace) -> None:
                 args.execution_run_id, error, "source_research"
             )
             mark_action_dispatch(
-                storage_client(), args.execution_run_id, args.command, "failed", error
+                storage_client(), args.execution_run_id, args.command, "failed", error,
+                dispatch_key=args.dispatch_key,
             )
             raise
         mark_action_dispatch(
-            storage_client(), args.execution_run_id, args.command, "completed"
+            storage_client(), args.execution_run_id, args.command, "completed",
+            dispatch_key=args.dispatch_key,
         )
         return
     if args.command == "revise-provisional":
         try:
             await revise_provisional(args.execution_run_id, args.instruction)
         except Exception as error:
+            await record_action_failure(
+                args.execution_run_id,
+                args.command,
+                error,
+                stage="provisional_editorial_revision",
+            )
             mark_action_dispatch(
-                storage_client(), args.execution_run_id, args.command, "failed", error
+                storage_client(), args.execution_run_id, args.command, "failed", error,
+                dispatch_key=args.dispatch_key,
             )
             raise
         mark_action_dispatch(
-            storage_client(), args.execution_run_id, args.command, "completed"
+            storage_client(), args.execution_run_id, args.command, "completed",
+            dispatch_key=args.dispatch_key,
         )
         return
     if args.command == "resume-plan":
@@ -711,11 +752,13 @@ async def run(args: argparse.Namespace) -> None:
             await resume_plan(args.execution_run_id)
         except Exception as error:
             mark_action_dispatch(
-                storage_client(), args.execution_run_id, args.command, "failed", error
+                storage_client(), args.execution_run_id, args.command, "failed", error,
+                dispatch_key=args.dispatch_key,
             )
             raise
         mark_action_dispatch(
-            storage_client(), args.execution_run_id, args.command, "completed"
+            storage_client(), args.execution_run_id, args.command, "completed",
+            dispatch_key=args.dispatch_key,
         )
         return
     if args.command == "approve-project":
@@ -723,11 +766,13 @@ async def run(args: argparse.Namespace) -> None:
             await approve_project(args.execution_run_id)
         except Exception as error:
             mark_action_dispatch(
-                storage_client(), args.execution_run_id, args.command, "failed", error
+                storage_client(), args.execution_run_id, args.command, "failed", error,
+                dispatch_key=args.dispatch_key,
             )
             raise
         mark_action_dispatch(
-            storage_client(), args.execution_run_id, args.command, "completed"
+            storage_client(), args.execution_run_id, args.command, "completed",
+            dispatch_key=args.dispatch_key,
         )
         return
     if args.command == "produce-text":
@@ -735,11 +780,13 @@ async def run(args: argparse.Namespace) -> None:
             await produce_text(args.execution_run_id)
         except Exception as error:
             mark_action_dispatch(
-                storage_client(), args.execution_run_id, args.command, "failed", error
+                storage_client(), args.execution_run_id, args.command, "failed", error,
+                dispatch_key=args.dispatch_key,
             )
             raise
         mark_action_dispatch(
-            storage_client(), args.execution_run_id, args.command, "completed"
+            storage_client(), args.execution_run_id, args.command, "completed",
+            dispatch_key=args.dispatch_key,
         )
         return
     repository, hefesto = await services()
@@ -777,15 +824,20 @@ def parser() -> argparse.ArgumentParser:
     planning.add_argument("--execution-run-id", type=UUID)
     resume = commands.add_parser("resume-plan")
     resume.add_argument("--execution-run-id", type=UUID, required=True)
+    resume.add_argument("--dispatch-key")
     source_search_parser = commands.add_parser("source-search")
     source_search_parser.add_argument("--execution-run-id", type=UUID, required=True)
+    source_search_parser.add_argument("--dispatch-key")
     revise_provisional_parser = commands.add_parser("revise-provisional")
     revise_provisional_parser.add_argument("--execution-run-id", type=UUID, required=True)
     revise_provisional_parser.add_argument("--instruction", required=True)
+    revise_provisional_parser.add_argument("--dispatch-key")
     approve_project_parser = commands.add_parser("approve-project")
     approve_project_parser.add_argument("--execution-run-id", type=UUID, required=True)
+    approve_project_parser.add_argument("--dispatch-key")
     produce_text_parser = commands.add_parser("produce-text")
     produce_text_parser.add_argument("--execution-run-id", type=UUID, required=True)
+    produce_text_parser.add_argument("--dispatch-key")
     inspect = commands.add_parser("inspect")
     inspect.add_argument("--execution-run-id", type=UUID, required=True)
     return root

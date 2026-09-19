@@ -229,6 +229,7 @@ def test_provisional_approval_dispatches_internal_source_search() -> None:
     assert response.status_code == 202
     assert dispatcher.calls[-1] == [
         "source-search", f"--execution-run-id={execution_id}",
+        "--dispatch-key=source-search",
     ]
 
 
@@ -249,7 +250,8 @@ def test_provisional_chat_dispatches_revision_with_immutable_instruction() -> No
     assert dispatcher.calls[-1][0:2] == [
         "revise-provisional", f"--execution-run-id={execution_id}",
     ]
-    assert dispatcher.calls[-1][2].startswith("--instruction=gs://product/")
+    assert dispatcher.calls[-1][2].startswith("--dispatch-key=revise-provisional-")
+    assert dispatcher.calls[-1][3].startswith("--instruction=gs://product/")
     instruction = json.loads(next(
         value for key, value in storage.values.items()
         if "/provisional-revisions/" in key
@@ -472,7 +474,8 @@ def test_project_approval_is_a_separate_human_action() -> None:
     response = api.post(f"/v1/plans/{execution_id}/approve-project")
     assert response.status_code == 202
     assert dispatcher.calls[-1] == [
-        "approve-project", f"--execution-run-id={execution_id}"
+        "approve-project", f"--execution-run-id={execution_id}",
+        "--dispatch-key=approve-project",
     ]
 
 
@@ -491,7 +494,8 @@ def test_approved_existing_project_can_dispatch_final_text() -> None:
     response = api.post(f"/v1/plans/{execution_id}/produce-text")
     assert response.status_code == 202
     assert dispatcher.calls[-1] == [
-        "produce-text", f"--execution-run-id={execution_id}"
+        "produce-text", f"--execution-run-id={execution_id}",
+        "--dispatch-key=produce-text",
     ]
 
 
@@ -510,5 +514,6 @@ def test_failed_text_generation_resumes_at_production() -> None:
     response = api.post(f"/v1/plans/{execution_id}/resume")
     assert response.status_code == 202
     assert dispatcher.calls[-1] == [
-        "produce-text", f"--execution-run-id={execution_id}"
+        "produce-text", f"--execution-run-id={execution_id}",
+        "--dispatch-key=produce-text",
     ]
