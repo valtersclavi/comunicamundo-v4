@@ -310,13 +310,13 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
         async def generate(self, **kwargs):
             self.calls.append(kwargs)
             ids = re.findall(r'"candidate_id":\s*"([0-9a-f]{64})"', kwargs["prompt"])
-            selected = ids[:1] if kwargs["task_type"].endswith("_batch") else ids[:2]
+            selected = ids[:1]
             return ModelResult(
                 value=SourceSelectionProposal(
                     selected_candidate_ids=selected,
                     coverage_judgment="enough after bounded review",
-                    coverage_complete=kwargs["task_type"].endswith("_merge"),
-                    follow_up_queries=[] if kwargs["task_type"].endswith("_merge") else ["gap"],
+                    coverage_complete=True,
+                    follow_up_queries=[],
                 ),
                 usage=usage(kwargs["task_type"]),
             )
@@ -329,7 +329,6 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
         "source_editor_selection_batch",
         "source_editor_selection_batch",
         "source_editor_selection_batch",
-        "source_editor_selection_merge",
     ]
     assert all(item in {candidate.candidate_id for candidate in candidates}
                for item in result.value.selected_candidate_ids)

@@ -18,7 +18,6 @@ from .prompts import (
     SYSTEM,
     provisional_project_prompt,
     provisional_revision_prompt,
-    source_selection_merge_prompt,
     source_search_plan_prompt,
     source_selection_prompt,
 )
@@ -147,29 +146,8 @@ class EditorialSourceEditor:
             proposals.append(selection)
             usages.append(result.usage)
 
-        result = await self._gateway.generate(
-            task_type="source_editor_selection_merge",
-            prompt=source_selection_merge_prompt(
-                brief,
-                project,
-                proposals,
-                candidates,
-                acquired_candidate_ids=acquired_candidate_ids,
-                failed_candidate_ids=failed_candidate_ids,
-            ),
-            schema=RawSourceSelectionProposal,
-            system_instruction=SYSTEM,
-            max_output_tokens=2_048,
-            thinking_tokens=1_500,
-        )
-        selection = _sanitize_selection(
-            result.value,
-            candidates,
-            failed_candidate_ids=failed_candidate_ids,
-        )
-        usages.append(result.usage)
         return ModelResult(
-            value=selection,
+            value=_merge_batch_selections(proposals),
             usage=_combined_usage("source_editor_selection", usages),
         )
 
@@ -218,5 +196,36 @@ def _sanitize_selection(
         selected_candidate_ids=selected,
         coverage_judgment=selection.coverage_judgment,
         coverage_complete=coverage_complete,
+        follow_up_queries=follow_up_queries,
+    )
+
+
+def _merge_batch_selections(
+    proposals: Sequence[SourceSelectionProposal],
+) -> SourceSelectionProposal:
+    selected: list[str] = []
+    follow_up_queries: list[str] = []
+    judgments: list[str] = []
+    coverage_complete = False
+    for proposal in proposals:
+        judgments.append(proposal.coverage_judgment)
+        for candidate_id in proposal.selected_candidate_ids:
+            if candidate_id not in selected:
+                selected.append(candidate_id)
+        for query in proposal.follow_up_queries:
+            if query not in follow_up_queries:
+                follow_up_queries.append(query)
+        coverage_complete = coverage_complete or proposal.coverage_complete
+
+    if coverage_complete and selected:
+        follow_up_queries = []
+    elif not follow_up_queries:
+        follow_up_queries = [
+            "buscar fontes adicionais para cobrir lacunas do eixo editorial"
+        ]
+    return SourceSelectionProposal(
+        selected_candidate_ids=selected,
+        coverage_judgment=" | ".join(judgments),
+        coverage_complete=coverage_complete and bool(selected),
         follow_up_queries=follow_up_queries,
     )
