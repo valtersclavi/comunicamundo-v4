@@ -102,6 +102,10 @@ blockquote { margin: 28px 0; padding-left: 24px; border-left: 4px solid var(--em
 .approval-row { margin-top: 30px; border-top: 1px solid var(--line); padding-top: 22px; }
 .approval-row p { color: var(--soft-ink); font-size: 13px; }
 .duration-badge { display: inline-block; margin: 3px 0 28px; padding: 7px 10px; color: var(--green); background: var(--green-soft); font-size: 13px; font-weight: 700; }
+.source-choice { display: flex; gap: 12px; align-items: flex-start; margin: 8px 0 20px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+.source-choice input { margin-top: 4px; }
+.source-choice span { display: grid; gap: 4px; }
+.source-choice small { color: var(--muted); }
 .subject-list { display: grid; gap: 10px; margin: 14px 0 28px; }
 .subject { border-left: 3px solid var(--green); background: #f4f5f0; padding: 17px; }
 .subject-head { display: flex; justify-content: space-between; gap: 20px; }

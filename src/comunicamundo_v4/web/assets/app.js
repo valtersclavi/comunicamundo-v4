@@ -1,14 +1,18 @@
 const $ = (selector) => document.querySelector(selector);
 const formatter = new Intl.NumberFormat("pt-BR");
-const state = { files: [], current: null, timer: null, history: [], pendingStatus: null };
+const state = { files: [], current: null, timer: null, history: [], pendingStatus: null, pendingSignature: null, currentStatus: null, currentProjectSignature: null };
 
 const labels = {
-  queued: "Na fila", input_failed: "Falha na entrada", source_structure_ready: "Fontes estruturadas",
+  queued: "Na fila", input_failed: "Falha na entrada", provisional_project_proposed: "Direção provisória pronta", searching_sources: "Procurando fontes", source_structure_ready: "Fontes estruturadas",
   selecting: "Selecionando material", comprehending: "Compreendendo fontes",
   project_proposed: "Projeto Editorial pronto", project_approved: "Projeto aprovado",
   producing_text: "Escrevendo texto final", text_ready: "Texto final pronto", failed: "Falha"
 };
 const stageNames = {
+  provisional_editorial_project: "Direção editorial provisória",
+  source_research: "Busca e seleção editorial de fontes",
+  source_acquisition: "Aquisição das fontes selecionadas",
+  redigestion: "Redigestão das fontes adquiridas",
   ingestion: "Leitura e normalização das fontes",
   relational_structure: "Estrutura de parágrafos e frases",
   selection: "Triagem orientada pelo briefing",
@@ -92,19 +96,21 @@ async function uploadFile(file, index, totalFiles) {
 
 async function submitPlan(event) {
   event.preventDefault(); clearError($("#form-error"));
+  const findForMe = $("#find-sources").checked;
   const urls = $("#urls").value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
-  if (!state.files.length && !urls.length) return showError($("#form-error"), "Adicione pelo menos um PDF ou uma URL pública.");
+  if (!findForMe && !state.files.length && !urls.length) return showError($("#form-error"), "Adicione pelo menos um PDF ou uma URL pública, ou escolha procurar as fontes.");
   if (state.files.length + urls.length > 64) return showError($("#form-error"), "Use no máximo 64 fontes por planejamento.");
   if (urls.some((url) => !url.startsWith("https://"))) return showError($("#form-error"), "Cada URL precisa começar com https://.");
   const button = $("#submit-plan"); button.disabled = true;
   try {
     const uploaded = [];
-    for (let i = 0; i < state.files.length; i++) uploaded.push(await uploadFile(state.files[i], i, state.files.length));
+    if (!findForMe) for (let i = 0; i < state.files.length; i++) uploaded.push(await uploadFile(state.files[i], i, state.files.length));
     button.textContent = "Iniciando o Hefesto…";
     const payload = {
       project_id: crypto.randomUUID(),
       brief: { theme: $("#theme").value, approach: $("#approach").value, duration_minutes: Number($("#duration").value), output_language: $("#language").value, audience: $("#audience").value, product: $("#product").value },
-      sources: [...uploaded.map((item) => ({ uri: item.uri, title: item.title, language: $("#language").value })), ...urls.map((url) => ({ uri: url, title: null, language: $("#language").value }))]
+      source_mode: findForMe ? "find_for_me" : "provided",
+      sources: findForMe ? [] : [...uploaded.map((item) => ({ uri: item.uri, title: item.title, language: $("#language").value })), ...urls.map((url) => ({ uri: url, title: null, language: $("#language").value }))]
     };
     const result = await api("/v1/plans", { method: "POST", body: JSON.stringify(payload) });
     await loadHistory(); await openExecution(result.execution_run_id, payload.brief.theme);
@@ -115,10 +121,13 @@ async function submitPlan(event) {
 function statusClass(status) { return ["failed", "input_failed"].includes(status) ? "failed" : "completed"; }
 function renderRun(run) {
   const status = run.status || "queued";
+  state.currentStatus = status;
   $("#run-status").textContent = labels[status] || status;
   $("#execution-title").textContent = status === "text_ready" ? "Texto final" : ["project_proposed", "project_approved"].includes(status) ? "Projeto Editorial" : "Hefesto em andamento";
   const known = new Map((run.stages || []).map((item) => [item.stage, item]));
-  const displayedStages = [...expectedStages, ...(run.stages || []).map((item) => item.stage).filter((name) => !expectedStages.includes(name))];
+  const zeroSource = ["provisional_project_proposed", "searching_sources"].includes(status) || known.has("source_research") || known.has("redigestion");
+  const baseStages = zeroSource ? ["provisional_editorial_project", "source_research", "source_acquisition", "redigestion", ...expectedStages.slice(1)] : expectedStages;
+  const displayedStages = [...baseStages, ...(run.stages || []).map((item) => item.stage).filter((name) => !baseStages.includes(name))];
   let activeFound = false;
   $("#stages").innerHTML = displayedStages.map((name) => {
     const item = known.get(name); let kind = item ? statusClass(item.status) : "pending";
@@ -144,10 +153,13 @@ function renderRun(run) {
   $("#run-error").hidden = !failed;
   if (failed) $("#run-error").textContent = `${run.error_class || "Falha no processamento"}: ${run.error_message || "Não foi possível concluir esta execução."}`;
   $("#resume-plan").hidden = status !== "failed" || state.pendingStatus === "failed";
-  const project = run.editorial_project?.proposal;
+  const provisional = status === "provisional_project_proposed" || status === "searching_sources";
+  const project = run.editorial_project?.proposal || run.provisional_editorial_project;
+  state.currentProjectSignature = project ? JSON.stringify(project) : null;
   $("#project-panel").hidden = !project;
-  if (project) renderProject(project);
-  $("#approve-project").hidden = status !== "project_proposed" || state.pendingStatus === "project_proposed";
+  if (project) renderProject(project, provisional);
+  $("#approve-project").hidden = !["project_proposed", "provisional_project_proposed"].includes(status) || state.pendingStatus === status;
+  $("#provisional-chat").hidden = status !== "provisional_project_proposed";
   $("#produce-text").hidden = status !== "project_approved" || Boolean(run.final_text) || state.pendingStatus === "project_approved";
   $("#project-approval-copy").textContent = ["project_approved", "producing_text", "text_ready"].includes(status) ? "Projeto Editorial aprovado." : "Revise o projeto antes de gerar o texto final.";
   $("#text-panel").hidden = !run.final_text;
@@ -155,15 +167,14 @@ function renderRun(run) {
   return status;
 }
 
-function renderProject(project) {
+function renderProject(project, provisional = false) {
   $("#project-title").textContent = project.working_title;
   $("#project-promise").textContent = project.editorial_promise;
-  $("#axis-statement").textContent = project.narrative_axis.statement;
+  $("#axis-statement").textContent = provisional ? `Eixo editorial pensado: ${project.narrative_axis.statement}, a ser sustentado pelas fontes encontradas` : project.narrative_axis.statement;
   $("#axis-rationale").textContent = project.narrative_axis.rationale;
   $("#project-duration").textContent = `${project.duration_minutes} minutos`;
-  $("#subjects").innerHTML = project.source_supported_subjects.map((item) => `<article class="subject"><div class="subject-head"><h4>${escapeHtml(item.title)}</h4><strong>${item.allocated_minutes} min</strong></div><p>${escapeHtml(item.editorial_role)}</p><p>${escapeHtml(item.depth)}</p></article>`).join("");
-  const blocks = [["Sugestões de conhecimento do modelo", project.model_knowledge_suggestions], ["Oportunidades de enriquecer as fontes", project.source_enrichment_opportunities]];
-  $("#suggestions").innerHTML = blocks.filter(([, items]) => items?.length).map(([title, items]) => `<section class="suggestion-block"><h3>${title}</h3><ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></section>`).join("");
+  const subjects = project.source_supported_subjects || project.subjects || [];
+  $("#subjects").innerHTML = subjects.map((item) => `<article class="subject"><div class="subject-head"><h4>${escapeHtml(item.title)}</h4><strong>${item.allocated_minutes} min</strong></div><p>${escapeHtml(item.editorial_role)}</p><p>${escapeHtml(item.depth || item.desired_depth)}</p></article>`).join("") + (provisional ? '<p class="muted">Projeto editorial a ser sustentado pelas fontes encontradas.</p>' : "");
 }
 
 function renderFinalText(record) {
@@ -176,8 +187,8 @@ async function poll() {
   if (!state.current) return;
   try {
     const run = await api(`/v1/plans/${state.current}`); const status = renderRun(run);
-    const waitingForAction = state.pendingStatus === status;
-    if (state.pendingStatus && !waitingForAction) state.pendingStatus = null;
+    const waitingForAction = state.pendingStatus === status && (!state.pendingSignature || state.pendingSignature === state.currentProjectSignature);
+    if (state.pendingStatus && !waitingForAction) { state.pendingStatus = null; state.pendingSignature = null; }
     if (waitingForAction || !["project_proposed", "project_approved", "text_ready", "failed", "input_failed"].includes(status)) state.timer = setTimeout(poll, 4000);
     else await loadHistory();
   } catch (error) { showError($("#run-error"), error); }
@@ -194,8 +205,20 @@ async function openExecution(id, title) {
 async function runAction(action, button, busyLabel, currentStatus) {
   button.disabled = true; const label = button.textContent; button.textContent = busyLabel;
   try { await api(`/v1/plans/${state.current}/${action}`, { method: "POST" }); state.pendingStatus = currentStatus; await poll(); }
-  catch (error) { state.pendingStatus = null; showError($("#run-error"), error); }
+  catch (error) { state.pendingStatus = null; state.pendingSignature = null; showError($("#run-error"), error); }
   finally { button.disabled = false; button.textContent = label; }
+}
+
+async function reviseProvisional() {
+  const message = $("#provisional-message").value.trim();
+  if (!message) return showError($("#run-error"), "Escreva a alteração desejada.");
+  clearError($("#run-error"));
+  const button = $("#revise-provisional"); button.disabled = true; button.textContent = "Revisando…";
+  try {
+    await api(`/v1/plans/${state.current}/revise-provisional-project`, { method: "POST", body: JSON.stringify({ message }) });
+    state.pendingSignature = state.currentProjectSignature; state.pendingStatus = "provisional_project_proposed"; $("#provisional-message").value = ""; await poll();
+  } catch (error) { state.pendingStatus = null; state.pendingSignature = null; showError($("#run-error"), error); }
+  finally { button.disabled = false; button.textContent = "Enviar alterações"; }
 }
 
 async function loadHistory() {
@@ -213,6 +236,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#login-form").addEventListener("submit", login);
   $("#logout").addEventListener("click", logout);
   $("#plan-form").addEventListener("submit", submitPlan);
+  $("#find-sources").addEventListener("change", (event) => { $("#provided-sources").hidden = event.target.checked; });
   $("#files").addEventListener("change", (event) => addFiles(event.target.files));
   $("#file-list").addEventListener("click", (event) => { const index = event.target.dataset.remove; if (index !== undefined) { state.files.splice(Number(index), 1); renderFiles(); } });
   const dropzone = $("#dropzone");
@@ -220,7 +244,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   for (const name of ["dragleave", "drop"]) dropzone.addEventListener(name, (event) => { event.preventDefault(); dropzone.classList.remove("dragging"); });
   dropzone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
   $("#resume-plan").addEventListener("click", () => runAction("resume", $("#resume-plan"), "Retomando…", "failed"));
-  $("#approve-project").addEventListener("click", () => runAction("approve-project", $("#approve-project"), "Aprovando…", "project_proposed"));
+  $("#approve-project").addEventListener("click", () => { const provisional = state.currentStatus === "provisional_project_proposed"; runAction(provisional ? "approve-provisional-project" : "approve-project", $("#approve-project"), provisional ? "Iniciando busca…" : "Aprovando…", state.currentStatus); });
+  $("#revise-provisional").addEventListener("click", reviseProvisional);
   $("#produce-text").addEventListener("click", () => runAction("produce-text", $("#produce-text"), "Gerando…", "project_approved"));
   $("#new-plan").addEventListener("click", newPlan); $("#back-to-form").addEventListener("click", newPlan);
   $("#history").addEventListener("click", (event) => { const item = event.target.closest(".history-item"); if (item) openExecution(item.dataset.id, item.dataset.title); });

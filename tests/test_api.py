@@ -191,6 +191,72 @@ def test_api_submits_generic_manifest_and_returns_stable_execution() -> None:
     assert stored == payload
 
 
+def test_zero_source_mode_is_explicit_and_dispatches_normally() -> None:
+    storage, dispatcher = Storage(), Dispatcher()
+    api = client(storage, dispatcher)
+    payload = request()
+    payload["source_mode"] = "find_for_me"
+    payload["sources"] = []
+
+    response = api.post("/v1/plans", json=payload)
+
+    assert response.status_code == 202
+    stored = json.loads(next(
+        value for key, value in storage.values.items()
+        if key.endswith("input-request.json")
+    ))
+    assert stored["source_mode"] == "find_for_me"
+    assert stored["sources"] == []
+
+
+def test_zero_sources_are_rejected_without_find_for_me_mode() -> None:
+    api = client(Storage(), Dispatcher())
+    payload = request()
+    payload["sources"] = []
+    assert api.post("/v1/plans", json=payload).status_code == 422
+
+
+def test_provisional_approval_dispatches_internal_source_search() -> None:
+    storage, dispatcher, access = Storage(), Dispatcher(), Access()
+    receipt = {"status": "provisional_project_proposed"}
+    api = client(storage, dispatcher, receipt=receipt, access=access)
+    payload = request()
+    payload.update({"source_mode": "find_for_me", "sources": []})
+    execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
+
+    response = api.post(f"/v1/plans/{execution_id}/approve-provisional-project")
+
+    assert response.status_code == 202
+    assert dispatcher.calls[-1] == [
+        "source-search", f"--execution-run-id={execution_id}",
+    ]
+
+
+def test_provisional_chat_dispatches_revision_with_immutable_instruction() -> None:
+    storage, dispatcher, access = Storage(), Dispatcher(), Access()
+    receipt = {"status": "provisional_project_proposed"}
+    api = client(storage, dispatcher, receipt=receipt, access=access)
+    payload = request()
+    payload.update({"source_mode": "find_for_me", "sources": []})
+    execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
+
+    response = api.post(
+        f"/v1/plans/{execution_id}/revise-provisional-project",
+        json={"message": "Aprofunde o segundo assunto"},
+    )
+
+    assert response.status_code == 202
+    assert dispatcher.calls[-1][0:2] == [
+        "revise-provisional", f"--execution-run-id={execution_id}",
+    ]
+    assert dispatcher.calls[-1][2].startswith("--instruction=gs://product/")
+    instruction = json.loads(next(
+        value for key, value in storage.values.items()
+        if "/provisional-revisions/" in key
+    ))
+    assert instruction == {"message": "Aprofunde o segundo assunto"}
+
+
 def test_cloud_run_dispatch_uses_job_override_contract(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

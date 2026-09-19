@@ -5,11 +5,17 @@ Hefesto é um produto de planejamento editorial orientado pelas fontes e pela in
 O serviço web com login é a única entrada de uso editorial. Nele, o usuário:
 
 1. envia PDFs e/ou informa URLs públicas;
+   alternativamente, escolhe **Procure as fontes para mim** e começa com zero fontes;
 2. define tema, abordagem, público, produto, idioma e duração;
 3. acompanha ingestão, triagem, compreensão e uso de modelo;
 4. recebe o Projeto Editorial com o Eixo Narrativo em destaque;
 5. aprova o conjunto em uma única decisão editorial;
 6. recebe o texto final produzido numa esteira contínua de redação de conteúdo, revisão editorial, correção pontual, estilo do produto e verificação de preservação.
+
+No fluxo de zero fontes, o usuário aprova primeiro um Projeto Editorial
+provisório (ou pede alterações pelo chat). O editor então faz Search interno,
+seleciona as fontes pelo eixo editorial, executa a cascata de Acquire, redigere o
+material adquirido e apresenta um segundo Projeto Editorial para aprovação.
 
 O processamento é assíncrono e persistido. Uma atualização da página não perde a execução. Cada usuário só acessa seus próprios uploads e planejamentos. Falhas mostram a etapa e o erro real, e trabalhos retomáveis podem ser continuados sem repetir trabalho concluído.
 
@@ -20,6 +26,12 @@ O processamento é assíncrono e persistido. Uma atualização da página não p
 - PostgreSQL: estado canônico, propriedade, estrutura das fontes, artefatos, etapas e consumo.
 - Cloud Storage: PDFs, solicitações e recibos imutáveis.
 - Vertex AI: triagem por flags, compreensão editorial, redação, revisão, estilo e verificação final limitadas por tokens.
+- You e OpenAlex: descoberta interna de candidatos a fonte.
+- You Contents, Jina Reader e Browser Use: rotas sucessivas de aquisição pública.
+
+As chaves `YOU_API_KEY`, `OPENALEX_API_KEY`, `JINA_API_KEY` e
+`BROWSER_USE_API_KEY` são injetadas apenas no Cloud Run Job pelos secrets
+`you-api-key`, `openalex-api-key`, `jina-api-key` e `browser-use-api-key`.
 
 O deploy ocorre em `main`. O workflow testa o contrato completo, constrói uma única imagem, aplica migrações, implanta Job e aplicação web, configura autenticação e publica o recibo na issue canônica.
 

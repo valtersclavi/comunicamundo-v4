@@ -10,10 +10,117 @@ from .contracts import (
     EditorialProjectProposal,
     FinalTextProposal,
     Passage,
+    ProvisionalEditorialProject,
+    SourceCandidate,
 )
 
 
 SYSTEM = """You are Hefesto, an attentive and disciplined editor. Understand the supplied material faithfully. The brief guides editorial attention but never changes what a source says. Return only the requested JSON object."""
+
+
+def provisional_project_prompt(brief: EditorialBrief) -> str:
+    return f"""
+Create the provisional Editorial Project that will guide an internal source
+search. At this point there are zero sources. Decide the Narrative Axis and the
+subjects from the user's editorial intention, balancing depth, generality and
+available time. Do not invent facts, evidence, source names or citations.
+
+The user-facing meaning is explicitly provisional:
+- "Eixo editorial pensado: [axis], a ser sustentado pelas fontes encontradas"
+- "Projeto editorial [subjects], a ser sustentado pelas fontes encontradas"
+
+Allocate the complete requested duration across the subjects. The disclaimer
+must say that both the axis and project will be sustained by the sources found.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+""".strip()
+
+
+def source_search_plan_prompt(
+    brief: EditorialBrief,
+    project: ProvisionalEditorialProject,
+) -> str:
+    return f"""
+Plan the internal search needed to sustain this provisional Editorial Project.
+Queries are tools, not a public deliverable. Cover the Narrative Axis and the
+subjects with enough depth and useful diversity for the editor to judge the
+eventual source set. Do not impose a fixed number of final sources and do not
+name preferred providers.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+PROVISIONAL EDITORIAL PROJECT:
+{project.model_dump_json(indent=2)}
+    """.strip()
+
+
+def provisional_revision_prompt(
+    brief: EditorialBrief,
+    project: ProvisionalEditorialProject,
+    instruction: str,
+) -> str:
+    return f"""
+Revise the provisional Editorial Project according to the user's chat request.
+The result still has zero sources: do not invent facts, evidence, source names
+or citations. Preserve everything the request does not change. Rebalance the
+subjects and duration coherently when needed, while keeping the whole duration
+allocated. The disclaimer must continue to say that the axis and project will
+be sustained by the sources found.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+CURRENT PROVISIONAL EDITORIAL PROJECT:
+{project.model_dump_json(indent=2)}
+
+USER CHANGE REQUEST:
+{instruction}
+""".strip()
+
+
+def source_selection_prompt(
+    brief: EditorialBrief,
+    project: ProvisionalEditorialProject,
+    candidates: Sequence[SourceCandidate],
+    *,
+    acquired_candidate_ids: Sequence[str] = (),
+    failed_candidate_ids: Sequence[str] = (),
+) -> str:
+    rendered = json.dumps(
+        [item.model_dump(mode="json") for item in candidates],
+        ensure_ascii=False,
+        indent=2,
+    )
+    return f"""
+Act as the source editor. Judge candidates against the Narrative Axis and the
+provisional subjects. Select the exact sources worth acquiring; provider rank
+is evidence for discovery, never the editorial decision. Balance depth,
+generality, authority, complementarity, contradiction and the user's available
+time. There is no fixed provider quota and no target number of sources.
+
+Return coverage_complete only when the selected and already acquired set is
+editorially sufficient. If it is not sufficient, explain the gap and return
+specific follow_up_queries. Never select a failed candidate again. Use only
+candidate IDs present below. This judgment remains internal and source names
+must not later appear in the user-facing Editorial Project.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+PROVISIONAL EDITORIAL PROJECT:
+{project.model_dump_json(indent=2)}
+
+ALREADY ACQUIRED CANDIDATE IDS:
+{json.dumps(list(acquired_candidate_ids), ensure_ascii=False)}
+
+FAILED CANDIDATE IDS:
+{json.dumps(list(failed_candidate_ids), ensure_ascii=False)}
+
+CANDIDATES:
+{rendered}
+""".strip()
 
 
 def selection_prompt(
@@ -104,12 +211,14 @@ govern the complete future piece. It is not merely the topic, an outline, a
 generic source summary, or an invented opinion. Its rationale must explain why
 this direction carries the user's intention through the material.
 
-The source-supported subjects must operationalize that Axis, fill exactly the
-requested {brief.duration_minutes} minutes with real depth, and avoid superficial
-coverage of everything. Do not pre-write the final piece. Keep three classes
-separate: source-supported subjects, optional suggestions coming mainly from
-model knowledge, and opportunities that require additional sources. Never
-present model knowledge as source-supported content.
+The subjects must operationalize that Axis with real depth and avoid superficial
+coverage of everything. Start from the requested {brief.duration_minutes}
+minutes. If incorporating an additional subject discovered through source or
+model enrichment, preserve every existing subject and increase the total
+duration enough to develop the new subject; never cut a subject merely to keep
+the original duration. Do not pre-write the final piece. Return empty arrays for
+model_knowledge_suggestions and source_enrichment_opportunities: this Editorial
+Project is closed for approval and must not initiate another enrichment spiral.
 
 Synthesize relationships among all sources, including convergence,
 complementarity, contradiction, context, qualification, and limitation when

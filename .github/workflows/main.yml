@@ -80,7 +80,7 @@ jobs:
             --args=--help \
             --cpu=4 --memory=8Gi --task-timeout=7200s --max-retries=0 \
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET}" \
-            --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" \
+            --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest,YOU_API_KEY=you-api-key:latest,OPENALEX_API_KEY=openalex-api-key:latest,JINA_API_KEY=jina-api-key:latest,BROWSER_USE_API_KEY=browser-use-api-key:latest" \
             --quiet
       - name: Migrate PostgreSQL
         run: |

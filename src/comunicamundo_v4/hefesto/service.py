@@ -701,8 +701,8 @@ class Hefesto:
             max_output_tokens=16_384,
             thinking_tokens=4_000,
         )
-        if result.value.duration_minutes != run.request.brief.duration_minutes:
-            raise ValueError("Editorial Project changed the requested duration")
+        if result.value.duration_minutes < run.request.brief.duration_minutes:
+            raise ValueError("Editorial Project shortened the requested duration")
         if result.value.editorial_corpus is None:
             raise ValueError("Editorial Project omitted the canonical editorial corpus")
         project = EditorialProjectRecord(
@@ -1031,5 +1031,4 @@ def _section_targets(
         }
         for subject, words in zip(subjects, targets, strict=True)
     ]
-
 

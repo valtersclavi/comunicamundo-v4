@@ -26,16 +26,93 @@ class EditorialBrief(StrictModel):
     product: str = Field(min_length=1)
 
 
+class SourceMode(StrEnum):
+    PROVIDED = "provided"
+    FIND_FOR_ME = "find_for_me"
+
+
 class SourceInput(StrictModel):
     uri: str = Field(pattern=r"^(gs://|https://)", min_length=8)
     title: str | None = None
     language: str = Field(default="und", min_length=2)
+    doi: str | None = None
+    publisher: str | None = None
 
 
 class EditorialInputRequest(StrictModel):
     project_id: UUID = Field(default_factory=uuid4)
     brief: EditorialBrief
-    sources: list[SourceInput] = Field(min_length=1, max_length=64)
+    source_mode: SourceMode = SourceMode.PROVIDED
+    sources: list[SourceInput] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def source_mode_matches_sources(self) -> "EditorialInputRequest":
+        if self.source_mode is SourceMode.PROVIDED and not self.sources:
+            raise ValueError("provided source mode requires at least one source")
+        if self.source_mode is SourceMode.FIND_FOR_ME and self.sources:
+            raise ValueError("find-for-me source mode starts with zero sources")
+        return self
+
+
+class SourceSearchPlan(StrictModel):
+    queries: list[str] = Field(min_length=1, max_length=12)
+    editorial_coverage: list[str] = Field(min_length=1)
+
+
+class SourceCandidate(StrictModel):
+    candidate_id: Sha256
+    provider: str = Field(pattern=r"^(provided|you|openalex)$")
+    query: str = Field(min_length=1)
+    rank: int = Field(ge=1)
+    title: str = Field(min_length=1)
+    url: str = Field(pattern=r"^https://")
+    acquisition_url: str = Field(pattern=r"^https://")
+    publisher: str | None = None
+    doi: str | None = None
+    published_at: str | None = None
+    description: str | None = None
+
+
+class SourceSelectionProposal(StrictModel):
+    selected_candidate_ids: list[Sha256] = Field(default_factory=list, max_length=64)
+    coverage_judgment: str = Field(min_length=1)
+    coverage_complete: bool
+    follow_up_queries: list[str] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def completion_is_actionable(self) -> "SourceSelectionProposal":
+        if self.coverage_complete and not self.selected_candidate_ids:
+            raise ValueError("complete coverage requires at least one selected source")
+        if not self.coverage_complete and not self.follow_up_queries:
+            raise ValueError("incomplete coverage requires follow-up queries")
+        return self
+
+
+class AcquisitionAttempt(StrictModel):
+    route: str = Field(pattern=r"^(direct|you_contents|jina_reader|browser_use)$")
+    ok: bool
+    duration_ms: int = Field(ge=0)
+    final_url: str | None = None
+    content_type: str | None = None
+    content_characters: int = Field(default=0, ge=0)
+    error: str | None = None
+
+
+class AcquiredSource(StrictModel):
+    candidate: SourceCandidate
+    status: str = Field(pattern=r"^(acquired|partial|human_action_required|failed)$")
+    selected_route: str | None = Field(
+        default=None,
+        pattern=r"^(direct|you_contents|jina_reader|browser_use)$",
+    )
+    final_url: str | None = None
+    normalized_text: str | None = None
+    original_uri: str | None = None
+    content_type: str | None = None
+    binary_sha256: Sha256 | None = None
+    normalized_text_sha256: Sha256 | None = None
+    attempts: list[AcquisitionAttempt] = Field(default_factory=list)
+    failure_reason: str | None = None
 
 
 class NormalizedSource(StrictModel):
@@ -59,12 +136,13 @@ class IngestedSource(StrictModel):
     original_uri: str = Field(pattern=r"^gs://")
     content_type: str
     bytes: int = Field(ge=1)
-    pages: int = Field(ge=1)
+    pages: int | None = Field(default=None, ge=1)
     characters: int = Field(ge=1)
     paragraphs: int = Field(ge=1)
     sentences: int = Field(ge=1)
     binary_sha256: Sha256
     normalized_text_sha256: Sha256
+    acquisition: AcquiredSource | None = None
 
 
 class IngestionReceipt(StrictModel):
@@ -76,6 +154,7 @@ class IngestionReceipt(StrictModel):
     sentence_count: int = Field(ge=1)
     model_invocations: int = Field(default=0, ge=0)
     sources: list[IngestedSource] = Field(min_length=1)
+    failed_acquisitions: list[AcquiredSource] = Field(default_factory=list)
 
 
 class Sentence(StrictModel):
@@ -136,6 +215,29 @@ class EditorialCondensation(StrictModel):
 class NarrativeAxisProposal(StrictModel):
     statement: str = Field(min_length=1)
     rationale: str = Field(min_length=1)
+
+
+class ProvisionalEditorialSubject(StrictModel):
+    title: str = Field(min_length=1)
+    editorial_role: str = Field(min_length=1)
+    desired_depth: str = Field(min_length=1)
+    allocated_minutes: float = Field(ge=0.01)
+
+
+class ProvisionalEditorialProject(StrictModel):
+    working_title: str = Field(min_length=1)
+    editorial_promise: str = Field(min_length=1)
+    narrative_axis: NarrativeAxisProposal
+    duration_minutes: int = Field(ge=1)
+    subjects: list[ProvisionalEditorialSubject] = Field(min_length=1)
+    disclaimer: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def duration_is_fully_allocated(self) -> "ProvisionalEditorialProject":
+        allocated = sum(item.allocated_minutes for item in self.subjects)
+        if not isclose(allocated, float(self.duration_minutes), rel_tol=0, abs_tol=0.01):
+            raise ValueError("provisional subjects must allocate the complete requested duration")
+        return self
 
 
 class EditorialEvidence(StrictModel):

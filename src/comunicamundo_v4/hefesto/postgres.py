@@ -16,6 +16,7 @@ from .contracts import (
     Paragraph,
     ProductRun,
     SelectionBatch,
+    EditorialInputRequest,
 )
 
 
@@ -206,6 +207,17 @@ class ProductRepository:
             )
             value = await row.fetchone()
         return dict(value[0]) if value and value[0] is not None else None
+
+    async def submission_request(
+        self, execution_run_id: UUID
+    ) -> EditorialInputRequest | None:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                "SELECT request_payload FROM hefesto_product.submissions WHERE execution_run_id=%s",
+                (execution_run_id,),
+            )
+            value = await row.fetchone()
+        return EditorialInputRequest.model_validate(value[0]) if value else None
 
     async def register_upload(
         self,

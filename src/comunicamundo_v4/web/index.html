@@ -86,6 +86,11 @@
 
           <fieldset class="sources">
             <legend>Fontes</legend>
+            <label class="source-choice">
+              <input id="find-sources" type="checkbox">
+              <span><strong>Procure as fontes para mim</strong><small>Começar com 0 fontes e aprovar primeiro a direção editorial.</small></span>
+            </label>
+            <div id="provided-sources">
             <p class="field-help">Adicione PDFs do seu computador e/ou URLs públicas. Até 64 fontes por planejamento.</p>
             <label id="dropzone" class="dropzone" for="files">
               <input id="files" type="file" accept="application/pdf,.pdf" multiple>
@@ -98,6 +103,7 @@
               <span>URLs públicas</span>
               <textarea id="urls" rows="3" placeholder="Uma URL por linha, começando com https://"></textarea>
             </label>
+            </div>
           </fieldset>
 
           <div id="form-error" class="notice error" role="alert" hidden></div>
@@ -141,11 +147,14 @@
           <h3>Eixo Narrativo</h3>
           <blockquote id="axis-statement"></blockquote>
           <p id="axis-rationale" class="artifact-copy"></p>
-          <h3>Estrutura sustentada pelas fontes</h3>
+          <h3>Assuntos</h3>
           <div id="subjects" class="subject-list"></div>
-          <div id="suggestions"></div>
           <div class="approval-row">
             <p id="project-approval-copy">Revise o projeto antes de concluir o planejamento.</p>
+            <div id="provisional-chat" hidden>
+              <label class="field"><span>O que você quer alterar?</span><textarea id="provisional-message" rows="3"></textarea></label>
+              <button id="revise-provisional" class="secondary-button" type="button">Enviar alterações</button>
+            </div>
             <button id="approve-project" class="primary-button" type="button">Aprovar Projeto Editorial</button>
             <button id="produce-text" class="primary-button" type="button" hidden>Gerar texto final</button>
           </div>

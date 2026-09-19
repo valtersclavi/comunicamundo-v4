@@ -174,6 +174,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=200)
 
 
+class ProvisionalRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    message: str = Field(min_length=1, max_length=10_000)
+
+
 def _required(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
@@ -190,7 +195,11 @@ def _default_dispatcher() -> Dispatcher:
 
 
 def _canonical_request(request: EditorialInputRequest) -> tuple[dict[str, Any], bytes]:
-    payload = request.model_dump(mode="json")
+    payload = request.model_dump(mode="json", exclude_none=True)
+    # Keep the byte identity of requests created before source modes existed.
+    # The explicit zero-source mode remains present when the user selects it.
+    if "source_mode" not in request.model_fields_set:
+        payload.pop("source_mode", None)
     data = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
@@ -270,11 +279,18 @@ class SubmissionService:
         )
         return accepted
 
-    def dispatch_action(self, execution_id: UUID, action: str) -> dict[str, Any]:
-        if action not in {"resume-plan", "approve-project", "produce-text"}:
+    def dispatch_action(
+        self,
+        execution_id: UUID,
+        action: str,
+        *,
+        extra_args: list[str] | None = None,
+        dispatch_key: str | None = None,
+    ) -> dict[str, Any]:
+        if action not in {"revise-provisional", "source-search", "resume-plan", "approve-project", "produce-text"}:
             raise ValueError("unsupported product action")
         blob = self._client.bucket(self._bucket_name).blob(
-            f"hefesto-product/executions/{execution_id}/{action}-dispatch.json"
+            f"hefesto-product/executions/{execution_id}/{dispatch_key or action}-dispatch.json"
         )
         claim = {
             "status": "dispatching",
@@ -298,7 +314,7 @@ class SubmissionService:
                 return existing
         try:
             operation = self._dispatcher.run([
-                action, f"--execution-run-id={execution_id}"
+                action, f"--execution-run-id={execution_id}", *(extra_args or [])
             ])
         except Exception as error:
             failed = {
@@ -652,6 +668,68 @@ def create_app(
         return receipt
 
     @app.post(
+        "/v1/plans/{execution_id}/revise-provisional-project",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def revise_provisional_project(
+        execution_id: UUID,
+        revision: ProvisionalRevisionRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
+        if receipt["status"] != "provisional_project_proposed":
+            raise HTTPException(
+                status_code=409,
+                detail=f"execution in {receipt['status']} is not awaiting provisional revision",
+            )
+        digest = sha256(revision.message.encode()).hexdigest()
+        revision_uri = persist_json_immutable(
+            client or storage.Client(project=_required("GOOGLE_CLOUD_PROJECT")),
+            bucket_name=bucket_name or _required("HEFESTO_GCS_BUCKET"),
+            name=f"hefesto-product/executions/{execution_id}/provisional-revisions/{digest}.json",
+            payload={"message": revision.message},
+        )
+        try:
+            return await asyncio.to_thread(
+                service().dispatch_action,
+                execution_id,
+                "revise-provisional",
+                extra_args=[f"--instruction={revision_uri}"],
+                dispatch_key=f"revise-provisional-{digest[:16]}",
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=503, detail=f"dispatch failed: {error}"
+            ) from error
+
+    @app.post(
+        "/v1/plans/{execution_id}/approve-provisional-project",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def approve_provisional_project(
+        execution_id: UUID, request: Request
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
+        if receipt["status"] not in {"provisional_project_proposed", "searching_sources"}:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"execution in {receipt['status']} has no provisional "
+                    "Editorial Project awaiting approval"
+                ),
+            )
+        if receipt["status"] == "searching_sources":
+            return receipt
+        try:
+            return await asyncio.to_thread(
+                service().dispatch_action, execution_id, "source-search"
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=503, detail=f"dispatch failed: {error}"
+            ) from error
+
+    @app.post(
         "/v1/plans/{execution_id}/resume",
         status_code=status.HTTP_202_ACCEPTED,
     )
@@ -671,7 +749,10 @@ def create_app(
                 ),
             )
         project = receipt.get("editorial_project") or {}
-        action = "produce-text" if project.get("approved") else "resume-plan"
+        if receipt.get("provisional_editorial_project") and not project:
+            action = "source-search"
+        else:
+            action = "produce-text" if project.get("approved") else "resume-plan"
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, action
