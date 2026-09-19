@@ -131,7 +131,10 @@ class VertexGateway:
         usage = _usage(task_type, response, latency)
         finish_reason = _finish_reason(response)
         if finish_reason not in {None, "STOP"}:
-            raise ModelCallError(f"provider output ended with {finish_reason}", usage)
+            raise ModelCallError(
+                f"{task_type}: provider output ended with {finish_reason}",
+                usage,
+            )
         try:
             parsed = getattr(response, "parsed", None)
             value = schema.model_validate(parsed) if parsed is not None else schema.model_validate_json(

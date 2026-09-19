@@ -249,23 +249,23 @@ class ProvisionalEditorialProject(StrictModel):
 
 class EditorialEvidence(StrictModel):
     source_ordinals: list[int] = Field(min_length=1)
-    contribution: str = Field(min_length=1)
-    verbatim_excerpt: str | None = None
+    contribution: str = Field(min_length=1, max_length=600)
+    verbatim_excerpt: str | None = Field(default=None, max_length=280)
 
 
 class EditorialKnowledgeUnit(StrictModel):
-    title: str = Field(min_length=1)
-    synthesis: str = Field(min_length=1)
-    essential_points: list[str] = Field(min_length=1)
-    tensions: list[str] = Field(default_factory=list)
-    qualifications: list[str] = Field(default_factory=list)
-    evidence: list[EditorialEvidence] = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=140)
+    synthesis: str = Field(min_length=1, max_length=1_200)
+    essential_points: list[str] = Field(min_length=1, max_length=6)
+    tensions: list[str] = Field(default_factory=list, max_length=4)
+    qualifications: list[str] = Field(default_factory=list, max_length=4)
+    evidence: list[EditorialEvidence] = Field(min_length=1, max_length=4)
 
 
 class EditorialCorpus(StrictModel):
-    governing_understanding: str = Field(min_length=1)
-    units: list[EditorialKnowledgeUnit] = Field(min_length=1)
-    forbidden_inferences: list[str] = Field(default_factory=list)
+    governing_understanding: str = Field(min_length=1, max_length=1_400)
+    units: list[EditorialKnowledgeUnit] = Field(min_length=1, max_length=8)
+    forbidden_inferences: list[str] = Field(default_factory=list, max_length=6)
 
 
 class EditorialSubject(StrictModel):
@@ -280,7 +280,7 @@ class EditorialProjectProposal(StrictModel):
     editorial_promise: str = Field(min_length=1)
     narrative_axis: NarrativeAxisProposal
     duration_minutes: int = Field(ge=1)
-    source_supported_subjects: list[EditorialSubject] = Field(min_length=1)
+    source_supported_subjects: list[EditorialSubject] = Field(min_length=1, max_length=12)
     # The key is required in newly generated projects. PostgreSQL normalizes
     # projects created before the editorial corpus existed to an explicit null.
     editorial_corpus: EditorialCorpus | None

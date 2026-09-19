@@ -291,17 +291,20 @@ Synthesize relationships among all sources, including convergence,
 complementarity, contradiction, context, qualification, and limitation when
 they matter. Do not reproduce internal passage coordinates in the result.
 
-Create the editorial_corpus in the same act as the Narrative Axis and Editorial
-Project. It is the complete, integrated body of knowledge that the future
-content writer will use instead of rereading the source material. Organize it
-into meaningful editorial units and preserve essential points, tensions,
-qualifications, forbidden inferences, and concise source support. It must carry
-the intellectual work that led to the project, not merely repeat its outline.
+Create a compact editorial_corpus in the same act as the Narrative Axis and
+Editorial Project. It is the integrated body of knowledge that the future
+content writer will use instead of rereading the source material, but it must
+be deliberately concise. Organize it into only the few meaningful editorial
+units needed for the approved subjects. Preserve essential points, tensions,
+qualifications, forbidden inferences, and concise source support. Do not
+include comprehensive notes, long summaries, or exhaustive evidence lists.
 Source ordinals are internal grounding metadata for the content editor; they
 must never be written into the final product.
 For evidence that may be quoted or whose exact wording materially matters,
-preserve a short exact source excerpt in verbatim_excerpt. Otherwise use null;
-do not copy source prose merely for completeness.
+preserve one short exact source excerpt in verbatim_excerpt. Otherwise use
+null; do not copy source prose merely for completeness. Keep every string short
+enough to fit the schema; if a nuance needs more room, synthesize it instead of
+expanding the output.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
