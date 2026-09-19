@@ -130,6 +130,66 @@ CANDIDATES:
 """.strip()
 
 
+def source_selection_merge_prompt(
+    brief: EditorialBrief,
+    project: ProvisionalEditorialProject,
+    proposals: Sequence[SourceSelectionProposal],
+    candidates: Sequence[SourceCandidate],
+    *,
+    acquired_candidate_ids: Sequence[str] = (),
+    failed_candidate_ids: Sequence[str] = (),
+) -> str:
+    candidate_by_id = {item.candidate_id: item for item in candidates}
+    selected_ids = {
+        item
+        for proposal in proposals
+        for item in proposal.selected_candidate_ids
+        if item in candidate_by_id
+    }
+    selected_candidates = [
+        candidate_by_id[item].model_dump(mode="json")
+        for item in sorted(selected_ids)
+    ]
+    rendered_proposals = json.dumps(
+        [item.model_dump(mode="json") for item in proposals],
+        ensure_ascii=False,
+        indent=2,
+    )
+    rendered_candidates = json.dumps(
+        selected_candidates,
+        ensure_ascii=False,
+        indent=2,
+    )
+    return f"""
+Consolidate these bounded source-selection judgments into one internal source
+decision. Work only with candidate IDs that appeared in the batch judgments.
+Never select a failed candidate again.
+
+Return coverage_complete only when the already acquired sources plus selected
+candidates are editorially sufficient for the Narrative Axis and provisional
+subjects. If coverage is incomplete, explain the gap and return specific
+follow_up_queries. Keep the output compact.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+PROVISIONAL EDITORIAL PROJECT:
+{project.model_dump_json(indent=2)}
+
+ALREADY ACQUIRED CANDIDATE IDS:
+{json.dumps(list(acquired_candidate_ids), ensure_ascii=False)}
+
+FAILED CANDIDATE IDS:
+{json.dumps(list(failed_candidate_ids), ensure_ascii=False)}
+
+BATCH JUDGMENTS:
+{rendered_proposals}
+
+SELECTED CANDIDATE DETAILS:
+{rendered_candidates}
+""".strip()
+
+
 def selection_prompt(
     brief: EditorialBrief,
     passages: Sequence[Passage],

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from decimal import Decimal
 
 from .contracts import (
+    CallUsage,
     EditorialBrief,
     ProvisionalEditorialProject,
     SourceCandidate,
@@ -14,9 +16,12 @@ from .prompts import (
     SYSTEM,
     provisional_project_prompt,
     provisional_revision_prompt,
+    source_selection_merge_prompt,
     source_search_plan_prompt,
     source_selection_prompt,
 )
+
+_SOURCE_SELECTION_BATCH_SIZE = 12
 
 
 class EditorialSourceEditor:
@@ -75,6 +80,15 @@ class EditorialSourceEditor:
         acquired_candidate_ids: Sequence[str] = (),
         failed_candidate_ids: Sequence[str] = (),
     ) -> ModelResult[SourceSelectionProposal]:
+        if len(candidates) > _SOURCE_SELECTION_BATCH_SIZE:
+            return await self._select_in_batches(
+                brief,
+                project,
+                candidates,
+                acquired_candidate_ids=acquired_candidate_ids,
+                failed_candidate_ids=failed_candidate_ids,
+            )
+
         result = await self._gateway.generate(
             task_type="source_editor_selection",
             prompt=source_selection_prompt(
@@ -100,3 +114,100 @@ class EditorialSourceEditor:
         if forbidden.intersection(selected):
             raise ValueError("source editor selected a previously failed candidate")
         return result
+
+    async def _select_in_batches(
+        self,
+        brief: EditorialBrief,
+        project: ProvisionalEditorialProject,
+        candidates: Sequence[SourceCandidate],
+        *,
+        acquired_candidate_ids: Sequence[str] = (),
+        failed_candidate_ids: Sequence[str] = (),
+    ) -> ModelResult[SourceSelectionProposal]:
+        proposals: list[SourceSelectionProposal] = []
+        usages = []
+        for index in range(0, len(candidates), _SOURCE_SELECTION_BATCH_SIZE):
+            batch = candidates[index:index + _SOURCE_SELECTION_BATCH_SIZE]
+            result = await self._gateway.generate(
+                task_type="source_editor_selection_batch",
+                prompt=source_selection_prompt(
+                    brief,
+                    project,
+                    batch,
+                    acquired_candidate_ids=acquired_candidate_ids,
+                    failed_candidate_ids=failed_candidate_ids,
+                ),
+                schema=SourceSelectionProposal,
+                system_instruction=SYSTEM,
+                max_output_tokens=2_048,
+                thinking_tokens=1_500,
+            )
+            self._validate_selection(
+                result.value,
+                batch,
+                failed_candidate_ids=failed_candidate_ids,
+            )
+            proposals.append(result.value)
+            usages.append(result.usage)
+
+        result = await self._gateway.generate(
+            task_type="source_editor_selection_merge",
+            prompt=source_selection_merge_prompt(
+                brief,
+                project,
+                proposals,
+                candidates,
+                acquired_candidate_ids=acquired_candidate_ids,
+                failed_candidate_ids=failed_candidate_ids,
+            ),
+            schema=SourceSelectionProposal,
+            system_instruction=SYSTEM,
+            max_output_tokens=2_048,
+            thinking_tokens=1_500,
+        )
+        self._validate_selection(
+            result.value,
+            candidates,
+            failed_candidate_ids=failed_candidate_ids,
+        )
+        usages.append(result.usage)
+        return ModelResult(
+            value=result.value,
+            usage=_combined_usage("source_editor_selection", usages),
+        )
+
+    def _validate_selection(
+        self,
+        selection: SourceSelectionProposal,
+        candidates: Sequence[SourceCandidate],
+        *,
+        failed_candidate_ids: Sequence[str] = (),
+    ) -> None:
+        known = {item.candidate_id for item in candidates}
+        selected = selection.selected_candidate_ids
+        if len(selected) != len(set(selected)):
+            raise ValueError("source editor selected a candidate more than once")
+        unknown = sorted(set(selected) - known)
+        if unknown:
+            raise ValueError(f"source editor selected unknown candidate IDs: {unknown}")
+        forbidden = set(failed_candidate_ids)
+        if forbidden.intersection(selected):
+            raise ValueError("source editor selected a previously failed candidate")
+
+
+def _combined_usage(task_type: str, usages: Sequence[CallUsage]) -> CallUsage:
+    rated_cost = sum(
+        (Decimal(item.rated_cost_usd) for item in usages if item.rated_cost_usd),
+        Decimal("0"),
+    )
+    return CallUsage(
+        task_type=task_type,
+        prompt_tokens=sum(item.prompt_tokens for item in usages),
+        cached_tokens=sum(item.cached_tokens for item in usages),
+        output_tokens=sum(item.output_tokens for item in usages),
+        reasoning_tokens=sum(item.reasoning_tokens for item in usages),
+        total_tokens=sum(item.total_tokens for item in usages),
+        latency_ms=sum(item.latency_ms for item in usages),
+        rated_cost_usd=f"{rated_cost:.9f}" if rated_cost else None,
+        status="succeeded",
+    )

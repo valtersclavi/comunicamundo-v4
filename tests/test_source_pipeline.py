@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+import re
 from typing import Any
 
 import pytest
@@ -19,6 +20,7 @@ from comunicamundo_v4.hefesto.contracts import (
 )
 from comunicamundo_v4.hefesto.gateway import ModelResult
 from comunicamundo_v4.hefesto.source_research import SourceResearch
+from comunicamundo_v4.hefesto.source_editor import EditorialSourceEditor
 from comunicamundo_v4.hefesto.source_pipeline import (
     AcquisitionPayload,
     OpenAlexSearchProvider,
@@ -270,6 +272,66 @@ def usage(task: str) -> CallUsage:
         task_type=task, prompt_tokens=1, output_tokens=1, reasoning_tokens=0,
         total_tokens=2, latency_ms=1, status="succeeded",
     )
+
+
+@pytest.mark.asyncio
+async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
+    brief = EditorialBrief(
+        theme="Theme", approach="Approach", duration_minutes=10,
+        output_language="pt-BR", audience="Audience", product="article",
+    )
+    project = ProvisionalEditorialProject(
+        working_title="Project",
+        editorial_promise="Promise",
+        narrative_axis=NarrativeAxisProposal(statement="Axis", rationale="Why"),
+        duration_minutes=10,
+        subjects=[ProvisionalEditorialSubject(
+            title="Subject", editorial_role="Role", desired_depth="Depth",
+            allocated_minutes=10,
+        )],
+        disclaimer="To be sustained by found sources.",
+    )
+    candidates = [
+        candidate(
+            candidate_id=candidate_identity(doi=None, url=f"https://example.org/{index}"),
+            title=f"Candidate {index}",
+            url=f"https://example.org/{index}",
+            acquisition_url=f"https://example.org/{index}",
+            rank=index,
+        )
+        for index in range(1, 26)
+    ]
+
+    class Gateway:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def generate(self, **kwargs):
+            self.calls.append(kwargs)
+            ids = re.findall(r'"candidate_id":\s*"([0-9a-f]{64})"', kwargs["prompt"])
+            selected = ids[:1] if kwargs["task_type"].endswith("_batch") else ids[:2]
+            return ModelResult(
+                value=SourceSelectionProposal(
+                    selected_candidate_ids=selected,
+                    coverage_judgment="enough after bounded review",
+                    coverage_complete=kwargs["task_type"].endswith("_merge"),
+                    follow_up_queries=[] if kwargs["task_type"].endswith("_merge") else ["gap"],
+                ),
+                usage=usage(kwargs["task_type"]),
+            )
+
+    gateway = Gateway()
+    result = await EditorialSourceEditor(gateway).select(brief, project, candidates)
+
+    assert result.value.coverage_complete is True
+    assert [item["task_type"] for item in gateway.calls] == [
+        "source_editor_selection_batch",
+        "source_editor_selection_batch",
+        "source_editor_selection_batch",
+        "source_editor_selection_merge",
+    ]
+    assert all(item in {candidate.candidate_id for candidate in candidates}
+               for item in result.value.selected_candidate_ids)
 
 
 @pytest.mark.asyncio
