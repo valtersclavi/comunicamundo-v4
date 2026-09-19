@@ -71,6 +71,16 @@ jobs:
           docker push "${IMAGE}"
           digest="$(gcloud artifacts docker images describe "${IMAGE}" --project="${PROJECT_ID}" --format='value(image_summary.digest)')"
           echo "PINNED_IMAGE=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${JOB_NAME}@${digest}" >> "${GITHUB_ENV}"
+      - name: Grant job access to source secrets
+        run: |
+          set -euo pipefail
+          for secret in you-api-key openalex-api-key jina-api-key browser-use-api-key; do
+            gcloud secrets add-iam-policy-binding "${secret}" \
+              --project="${PROJECT_ID}" \
+              --member="serviceAccount:${RUNTIME_SA}" \
+              --role="roles/secretmanager.secretAccessor" \
+              --quiet >/dev/null
+          done
       - name: Deploy product job
         run: |
           set -euo pipefail
