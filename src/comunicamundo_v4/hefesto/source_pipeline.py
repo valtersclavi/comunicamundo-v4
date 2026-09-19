@@ -25,6 +25,9 @@ _TRACKING_PARAMETERS = {
     "utm_campaign", "utm_content", "utm_medium", "utm_source", "utm_term",
 }
 _TERMINAL_BROWSER_STATUSES = {"completed", "failed", "stopped", "cancelled"}
+_SEARCH_TIMEOUT = (5, 25)
+_OPEN_TIMEOUT = (5, 120)
+_SERVICE_EXTRACTION_TIMEOUT = (5, 90)
 
 
 class SourceProvider(Protocol):
@@ -87,7 +90,7 @@ class YouSearchProvider:
             "https://ydc-index.io/v1/search",
             headers={"X-API-Key": self._api_key, "Content-Type": "application/json"},
             json={"query": query, "count": count},
-            timeout=75,
+            timeout=_SEARCH_TIMEOUT,
         )
         response.raise_for_status()
         web = response.json().get("results", {}).get("web", [])
@@ -122,7 +125,7 @@ class OpenAlexSearchProvider:
         response = self._session.get(
             "https://api.openalex.org/works",
             params={"search": query, "per-page": count, "api_key": self._api_key},
-            timeout=75,
+            timeout=_SEARCH_TIMEOUT,
         )
         response.raise_for_status()
         result: list[SourceCandidate] = []
@@ -266,7 +269,7 @@ class SourceAcquirer:
             response = self._session.get(
                 candidate.acquisition_url,
                 headers={"User-Agent": "ComunicAmundo-Acquire/1.0"},
-                timeout=20,
+                timeout=_OPEN_TIMEOUT,
                 allow_redirects=True,
             )
             response.raise_for_status()
@@ -292,10 +295,10 @@ class SourceAcquirer:
                 json={
                     "urls": [candidate.acquisition_url],
                     "formats": ["markdown", "metadata"],
-                    "crawl_timeout": 20,
+                    "crawl_timeout": 60,
                     "max_age": 0,
                 },
-                timeout=30,
+                timeout=_SERVICE_EXTRACTION_TIMEOUT,
             )
             response.raise_for_status()
             values = response.json()
@@ -316,9 +319,9 @@ class SourceAcquirer:
                 headers={
                     "Authorization": f"Bearer {self._jina_api_key}",
                     "Accept": "text/markdown",
-                    "X-Timeout": "20",
+                    "X-Timeout": "60",
                 },
-                timeout=30,
+                timeout=_SERVICE_EXTRACTION_TIMEOUT,
             )
             response.raise_for_status()
             text = response.text.strip()
