@@ -123,6 +123,18 @@
 
         <div id="run-error" class="notice error" role="alert" hidden></div>
         <button id="resume-plan" class="secondary-button" type="button" hidden>Retomar processamento</button>
+        <section id="summary-panel" class="summary-panel panel" hidden>
+          <div class="section-heading">
+            <div><p class="eyebrow">Resumo operacional</p><h2>Custo, tempo e entregáveis</h2></div>
+          </div>
+          <div class="summary-grid">
+            <div><span>Custo acumulado</span><strong id="summary-cost">US$ 0</strong></div>
+            <div><span>Tempo processado</span><strong id="summary-time">0 s</strong></div>
+            <div><span>Chamadas LLM</span><strong id="summary-calls">0</strong></div>
+            <div><span>Tokens totais</span><strong id="summary-tokens">0</strong></div>
+          </div>
+          <div id="deliverables" class="deliverable-list"></div>
+        </section>
         <section class="panel">
           <div class="section-heading">
             <div><p class="eyebrow">Acompanhamento</p><h2>Etapas</h2></div>

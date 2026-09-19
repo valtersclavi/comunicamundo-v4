@@ -29,6 +29,50 @@ const stageNames = {
 };
 const expectedStages = ["ingestion", "relational_structure", "selection", "editorial_comprehension", "content_draft", "content_review", "content_revision", "product_styling", "final_verification"];
 
+function formatSeconds(totalSeconds) {
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)} s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+  return `${minutes} min ${seconds.toString().padStart(2, "0")} s`;
+}
+
+function stageCompleted(known, name) { return known.get(name)?.status === "completed"; }
+
+function deliverable(label, available, detail = "") {
+  return `<div class="deliverable ${available ? "available" : "pending"}"><strong>${escapeHtml(label)}</strong><span>${available ? "Disponível" : "Pendente"}${detail ? ` · ${escapeHtml(detail)}` : ""}</span></div>`;
+}
+
+function renderSummary(run, known, project) {
+  const usage = run.usage || {};
+  const stages = run.stages || [];
+  const elapsedMs = stages.reduce((sum, item) => sum + Number(item.duration_ms || 0), 0);
+  const finalProject = run.editorial_project?.proposal;
+  const finalText = run.final_text?.proposal;
+  const sourceResearch = known.get("source_research");
+  const acquisition = known.get("source_acquisition");
+  $("#summary-panel").hidden = false;
+  $("#summary-cost").textContent = `US$ ${Number(usage.rated_cost_usd || 0).toFixed(6)}`;
+  $("#summary-time").textContent = formatSeconds(elapsedMs / 1000);
+  $("#summary-calls").textContent = formatter.format(usage.call_count || 0);
+  $("#summary-tokens").textContent = formatter.format(usage.total_tokens || 0);
+  $("#deliverables").innerHTML = [
+    deliverable("Eixo editorial", Boolean(project?.narrative_axis), project?.narrative_axis?.statement || ""),
+    deliverable("Projeto Editorial", Boolean(project), project?.duration_minutes ? `${project.duration_minutes} min` : ""),
+    deliverable(
+      "Fontes encontradas",
+      stageCompleted(known, "source_research"),
+      sourceResearch?.candidate_count != null ? `${sourceResearch.candidate_count} candidatas · ${sourceResearch.selected_count || 0} selecionadas` : ""
+    ),
+    deliverable(
+      "Fontes adquiridas",
+      stageCompleted(known, "source_acquisition"),
+      acquisition?.acquired_count != null ? `${acquisition.acquired_count} adquiridas · ${acquisition.failed_count || 0} falhas` : ""
+    ),
+    deliverable("Projeto Editorial final", Boolean(finalProject), finalProject?.duration_minutes ? `${finalProject.duration_minutes} min` : ""),
+    deliverable("Texto final", Boolean(finalText), run.final_text?.word_count ? `${formatter.format(run.final_text.word_count)} palavras` : ""),
+  ].join("");
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { ...(options.body && typeof options.body === "string" ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) } });
   if (!response.ok) {
@@ -128,6 +172,8 @@ function renderRun(run) {
   const zeroSource = ["provisional_project_proposed", "searching_sources"].includes(status) || known.has("source_research") || known.has("redigestion");
   const baseStages = zeroSource ? ["provisional_editorial_project", "source_research", "source_acquisition", "redigestion", ...expectedStages.slice(1)] : expectedStages;
   const displayedStages = [...baseStages, ...(run.stages || []).map((item) => item.stage).filter((name) => !baseStages.includes(name))];
+  const project = run.editorial_project?.proposal || run.provisional_editorial_project;
+  renderSummary(run, known, project);
   let activeFound = false;
   $("#stages").innerHTML = displayedStages.map((name) => {
     const item = known.get(name); let kind = item ? statusClass(item.status) : "pending";
@@ -156,7 +202,6 @@ function renderRun(run) {
   else if (actionError) $("#run-error").textContent = `${actionError.error_class || "Falha na ação"}: ${actionError.error_message || "Não foi possível concluir esta ação."}`;
   $("#resume-plan").hidden = status !== "failed" || state.pendingStatus === "failed";
   const provisional = status === "provisional_project_proposed" || status === "searching_sources";
-  const project = run.editorial_project?.proposal || run.provisional_editorial_project;
   state.currentProjectSignature = project ? JSON.stringify(project) : null;
   $("#project-panel").hidden = !project;
   if (project) renderProject(project, provisional);
