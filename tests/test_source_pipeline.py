@@ -252,12 +252,30 @@ def test_acquire_reports_human_action_without_claiming_success() -> None:
     }))
     result = SourceAcquirer(
         you_api_key="you", jina_api_key="jina", browser_use_api_key="browser",
-        session=session, browser_poll_seconds=0,
+        session=session, browser_poll_seconds=0, use_browser=True,
     ).acquire(candidate())
 
     assert result.record.status == "human_action_required"
     assert result.record.selected_route is None
     assert result.record.failure_reason == "public acquisition requires human action"
+
+
+def test_acquire_skips_browser_by_default_and_fails_fast() -> None:
+    session = Session()
+    session.queue("GET", "https://example.org/article", Response(status=403))
+    session.queue("POST", "https://ydc-index.io/v1/contents", Response(payload=[]))
+    session.queue("GET", "https://r.jina.ai/https://example.org/article", Response(status=403))
+
+    result = SourceAcquirer(
+        you_api_key="you", jina_api_key="jina", browser_use_api_key="browser",
+        session=session,
+    ).acquire(candidate())
+
+    assert result.record.status == "failed"
+    assert [item.route for item in result.record.attempts] == [
+        "direct", "you_contents", "jina_reader",
+    ]
+    assert not any(url.startswith("https://api.browser-use.com") for url, _ in session.posts)
 
 
 @pytest.mark.parametrize("value", [

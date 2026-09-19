@@ -42,7 +42,7 @@ class SourceResearch:
         acquirer: SourceAcquirer,
         *,
         max_search_rounds: int = 4,
-        acquisition_concurrency: int = 4,
+        acquisition_concurrency: int = 2,
     ) -> None:
         if max_search_rounds < 1 or acquisition_concurrency < 1:
             raise ValueError("source research limits must be positive")

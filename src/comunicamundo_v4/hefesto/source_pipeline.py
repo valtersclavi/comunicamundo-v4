@@ -201,7 +201,8 @@ class SourceAcquirer:
         browser_use_api_key: str,
         session: requests.Session | None = None,
         browser_poll_seconds: float = 5,
-        browser_timeout_seconds: int = 900,
+        browser_timeout_seconds: int = 90,
+        use_browser: bool = False,
     ) -> None:
         self._you_api_key = you_api_key
         self._jina_api_key = jina_api_key
@@ -209,6 +210,7 @@ class SourceAcquirer:
         self._session = session or requests.Session()
         self._browser_poll_seconds = browser_poll_seconds
         self._browser_timeout_seconds = browser_timeout_seconds
+        self._use_browser = use_browser
 
     def acquire(self, candidate: SourceCandidate) -> AcquisitionPayload:
         attempts: list[AcquisitionAttempt] = []
@@ -235,20 +237,21 @@ class SourceAcquirer:
                 original_bytes=original_bytes, original_content_type=original_content_type,
             )
 
-        browser_text, browser_original, browser_type, browser_url, browser_status = self._browser(candidate, attempts)
-        if browser_status == "human_action_required":
-            record = AcquiredSource(
-                candidate=candidate, status=browser_status, attempts=attempts,
-                failure_reason="public acquisition requires human action",
-            )
-            return AcquisitionPayload(record=record, original_bytes=original_bytes, original_content_type=original_content_type)
-        if browser_text and _acceptable(candidate, browser_text, None):
-            return self._success(
-                candidate, "browser_use", browser_text, attempts,
-                final_url=browser_url,
-                original_bytes=browser_original or original_bytes,
-                original_content_type=browser_type or original_content_type,
-            )
+        if self._use_browser:
+            browser_text, browser_original, browser_type, browser_url, browser_status = self._browser(candidate, attempts)
+            if browser_status == "human_action_required":
+                record = AcquiredSource(
+                    candidate=candidate, status=browser_status, attempts=attempts,
+                    failure_reason="public acquisition requires human action",
+                )
+                return AcquisitionPayload(record=record, original_bytes=original_bytes, original_content_type=original_content_type)
+            if browser_text and _acceptable(candidate, browser_text, None):
+                return self._success(
+                    candidate, "browser_use", browser_text, attempts,
+                    final_url=browser_url,
+                    original_bytes=browser_original or original_bytes,
+                    original_content_type=browser_type or original_content_type,
+                )
         record = AcquiredSource(
             candidate=candidate,
             status="failed",
@@ -263,7 +266,7 @@ class SourceAcquirer:
             response = self._session.get(
                 candidate.acquisition_url,
                 headers={"User-Agent": "ComunicAmundo-Acquire/1.0"},
-                timeout=90,
+                timeout=20,
                 allow_redirects=True,
             )
             response.raise_for_status()
@@ -289,10 +292,10 @@ class SourceAcquirer:
                 json={
                     "urls": [candidate.acquisition_url],
                     "formats": ["markdown", "metadata"],
-                    "crawl_timeout": 60,
+                    "crawl_timeout": 20,
                     "max_age": 0,
                 },
-                timeout=75,
+                timeout=30,
             )
             response.raise_for_status()
             values = response.json()
@@ -313,9 +316,9 @@ class SourceAcquirer:
                 headers={
                     "Authorization": f"Bearer {self._jina_api_key}",
                     "Accept": "text/markdown",
-                    "X-Timeout": "60",
+                    "X-Timeout": "20",
                 },
-                timeout=75,
+                timeout=30,
             )
             response.raise_for_status()
             text = response.text.strip()
