@@ -298,13 +298,6 @@ class EditorialProjectScaffold(StrictModel):
     model_knowledge_suggestions: list[str] = Field(default_factory=list)
     source_enrichment_opportunities: list[str] = Field(default_factory=list)
 
-    @model_validator(mode="after")
-    def duration_is_fully_allocated(self) -> "EditorialProjectScaffold":
-        allocated = sum(item.allocated_minutes for item in self.source_supported_subjects)
-        if not isclose(allocated, float(self.duration_minutes), rel_tol=0, abs_tol=0.01):
-            raise ValueError("source-supported subjects must allocate the complete requested duration")
-        return self
-
 
 class SubjectEditorialCorpus(StrictModel):
     units: list[EditorialKnowledgeUnit] = Field(min_length=1, max_length=3)
@@ -321,13 +314,6 @@ class EditorialProjectProposal(StrictModel):
     editorial_corpus: EditorialCorpus | None
     model_knowledge_suggestions: list[str] = Field(default_factory=list)
     source_enrichment_opportunities: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def duration_is_fully_allocated(self) -> "EditorialProjectProposal":
-        allocated = sum(item.allocated_minutes for item in self.source_supported_subjects)
-        if not isclose(allocated, float(self.duration_minutes), rel_tol=0, abs_tol=0.01):
-            raise ValueError("source-supported subjects must allocate the complete requested duration")
-        return self
 
 
 class EditorialProjectRecord(StrictModel):

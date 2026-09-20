@@ -24,6 +24,7 @@ from .contracts import (
     EditorialProjectProposal,
     EditorialProjectRecord,
     EditorialProjectScaffold,
+    EditorialSubject,
     FinalTextProposal,
     FinalTextRecord,
     Paragraph,
@@ -711,18 +712,24 @@ class Hefesto:
             max_output_tokens=8_192,
             thinking_tokens=3_000,
         )
-        if scaffold_result.value.duration_minutes < run.request.brief.duration_minutes:
+        scaffold = scaffold_result.value
+        if scaffold.duration_minutes < run.request.brief.duration_minutes:
             raise ValueError("Editorial Project shortened the requested duration")
+        subjects = _normalize_subject_minutes(
+            scaffold.source_supported_subjects,
+            scaffold.duration_minutes,
+        )
         units: list[EditorialKnowledgeUnit] = []
         material = _selected_material_from_project_prompt(prompt)
         material_kind = _material_kind_from_project_prompt(prompt)
-        for subject in scaffold_result.value.source_supported_subjects:
+        scaffold = scaffold.model_copy(update={"source_supported_subjects": subjects})
+        for subject in subjects:
             corpus_result = await self._call(
                 run,
                 task_type="editorial_subject_corpus",
                 prompt=subject_corpus_prompt(
                     run.request.brief,
-                    scaffold_result.value,
+                    scaffold,
                     subject,
                     material,
                     material_kind=material_kind,
@@ -733,18 +740,18 @@ class Hefesto:
             )
             units.extend(corpus_result.value.units)
         value = EditorialProjectProposal(
-            working_title=scaffold_result.value.working_title,
-            editorial_promise=scaffold_result.value.editorial_promise,
-            narrative_axis=scaffold_result.value.narrative_axis,
-            duration_minutes=scaffold_result.value.duration_minutes,
-            source_supported_subjects=scaffold_result.value.source_supported_subjects,
+            working_title=scaffold.working_title,
+            editorial_promise=scaffold.editorial_promise,
+            narrative_axis=scaffold.narrative_axis,
+            duration_minutes=scaffold.duration_minutes,
+            source_supported_subjects=subjects,
             editorial_corpus=EditorialCorpus(
-                governing_understanding=scaffold_result.value.corpus_governing_understanding,
+                governing_understanding=scaffold.corpus_governing_understanding,
                 units=units,
-                forbidden_inferences=scaffold_result.value.forbidden_inferences,
+                forbidden_inferences=scaffold.forbidden_inferences,
             ),
-            model_knowledge_suggestions=scaffold_result.value.model_knowledge_suggestions,
-            source_enrichment_opportunities=scaffold_result.value.source_enrichment_opportunities,
+            model_knowledge_suggestions=scaffold.model_knowledge_suggestions,
+            source_enrichment_opportunities=scaffold.source_enrichment_opportunities,
         )
         project = EditorialProjectRecord(
             execution_run_id=run.execution_run_id,
@@ -1027,6 +1034,29 @@ def _selected_material_from_project_prompt(prompt: str) -> str:
     if marker not in prompt:
         return prompt
     return prompt.split(marker, 1)[1]
+
+
+def _normalize_subject_minutes(
+    subjects: Sequence[EditorialSubject],
+    duration_minutes: int,
+) -> list[EditorialSubject]:
+    total = sum(item.allocated_minutes for item in subjects)
+    if not subjects:
+        return []
+    if total <= 0:
+        share = round(duration_minutes / len(subjects), 2)
+        values = [share for _ in subjects]
+    else:
+        values = [
+            round(duration_minutes * item.allocated_minutes / total, 2)
+            for item in subjects
+        ]
+    drift = round(duration_minutes - sum(values), 2)
+    values[-1] = round(values[-1] + drift, 2)
+    return [
+        subject.model_copy(update={"allocated_minutes": max(value, 0.01)})
+        for subject, value in zip(subjects, values, strict=True)
+    ]
 
 
 def _validated_flags(flags: SelectionFlags, allowed: set[int]) -> SelectionFlags:
