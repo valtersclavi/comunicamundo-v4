@@ -328,10 +328,8 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
             self.calls.append(kwargs)
             return ModelResult(
                 value=SourceCandidateJudgment(
-                    worth_acquiring=True,
+                    decision="acquire",
                     coverage_complete_if_acquired=True,
-                    coverage_judgment="enough after single-candidate review",
-                    follow_up_queries=[],
                 ),
                 usage=usage(kwargs["task_type"]),
             )
@@ -348,7 +346,7 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
 
 
 @pytest.mark.asyncio
-async def test_source_editor_returns_follow_up_when_candidate_is_not_worth_acquiring() -> None:
+async def test_source_editor_skips_candidate_without_free_text_decision() -> None:
     brief = EditorialBrief(
         theme="Theme", approach="Approach", duration_minutes=10,
         output_language="pt-BR", audience="Audience", product="article",
@@ -370,10 +368,8 @@ async def test_source_editor_returns_follow_up_when_candidate_is_not_worth_acqui
         async def generate(self, **kwargs):
             return ModelResult(
                 value=SourceCandidateJudgment(
-                    worth_acquiring=False,
+                    decision="skip",
                     coverage_complete_if_acquired=False,
-                    coverage_judgment="candidate is adjacent but not useful enough",
-                    follow_up_queries=["better source for the axis"],
                 ),
                 usage=usage(kwargs["task_type"]),
             )
@@ -382,7 +378,9 @@ async def test_source_editor_returns_follow_up_when_candidate_is_not_worth_acqui
 
     assert result.value.selected_candidate_ids == []
     assert result.value.coverage_complete is False
-    assert result.value.follow_up_queries == ["better source for the axis"]
+    assert result.value.follow_up_queries == [
+        "buscar mais candidatos para os assuntos ainda sem fonte"
+    ]
 
 
 @pytest.mark.asyncio

@@ -79,8 +79,6 @@ class EditorialSourceEditor:
         failed_candidate_ids: Sequence[str] = (),
     ) -> ModelResult[SourceSelectionProposal]:
         selected: list[str] = []
-        follow_up_queries: list[str] = []
-        judgments: list[str] = []
         usages: list[CallUsage] = []
         complete_if_acquired = False
         failed = set(failed_candidate_ids)
@@ -104,28 +102,21 @@ class EditorialSourceEditor:
             )
             usages.append(result.usage)
             judgment = result.value
-            judgments.append(judgment.coverage_judgment)
-            if judgment.worth_acquiring and candidate.candidate_id not in selected:
+            if judgment.decision == "acquire" and candidate.candidate_id not in selected:
                 selected.append(candidate.candidate_id)
-            for query in judgment.follow_up_queries:
-                if query not in follow_up_queries:
-                    follow_up_queries.append(query)
             if judgment.coverage_complete_if_acquired and selected:
                 complete_if_acquired = True
-                follow_up_queries = []
                 break
 
         coverage_complete = bool(selected) and complete_if_acquired
-        if not coverage_complete and not follow_up_queries:
-            follow_up_queries = [
-                "buscar fontes adicionais para cobrir lacunas do eixo editorial"
-            ]
         return ModelResult(
             value=SourceSelectionProposal(
                 selected_candidate_ids=selected,
-                coverage_judgment=" | ".join(judgments) or "No candidate was judged actionable.",
+                coverage_judgment=_selection_status(selected, coverage_complete),
                 coverage_complete=coverage_complete,
-                follow_up_queries=follow_up_queries,
+                follow_up_queries=[] if coverage_complete else [
+                    "buscar mais candidatos para os assuntos ainda sem fonte"
+                ],
             ),
             usage=_combined_usage("source_editor_selection", usages),
         )
@@ -147,3 +138,11 @@ def _combined_usage(task_type: str, usages: Sequence[CallUsage]) -> CallUsage:
         rated_cost_usd=f"{rated_cost:.9f}" if rated_cost else None,
         status="succeeded",
     )
+
+
+def _selection_status(selected: Sequence[str], coverage_complete: bool) -> str:
+    if coverage_complete:
+        return "selected candidate completes source coverage"
+    if selected:
+        return "selected candidate contributes to source coverage"
+    return "no candidate selected"

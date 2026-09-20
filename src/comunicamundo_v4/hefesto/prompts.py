@@ -98,15 +98,19 @@ def source_candidate_judgment_prompt(
     failed_candidate_ids: Sequence[str] = (),
 ) -> str:
     return f"""
-Judge this single source candidate against the Narrative Axis and provisional
-subjects. Decide whether it is worth acquiring now. Provider rank is evidence
-for discovery, never the editorial decision. Balance depth, generality,
-authority, complementarity, contradiction and available time.
+Judge this single source candidate only by whether its visible content summary
+appears to contribute to the Narrative Axis or provisional subjects.
 
-Return coverage_complete_if_acquired only if this candidate plus already
-acquired sources would be editorially sufficient. If not sufficient, return up
-to three specific follow_up_queries. Never ask to acquire a failed candidate.
-Keep the judgment short.
+Return only operational signals:
+- decision: "acquire" if the candidate appears to contribute; otherwise "skip".
+- coverage_complete_if_acquired: true only if this candidate plus already
+  acquired sources would be enough to proceed to digestion.
+
+Do not explain the decision. Do not justify. Do not rank pedigree. Do not prefer
+DOI, PDF, provider, publisher or academic status by themselves. Use those only
+as metadata that may help identify what the candidate is about. If the visible
+title/description/abstract does not show contribution to the subjects, skip.
+Never acquire a failed candidate.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}

@@ -92,17 +92,7 @@ class SourceResearch:
                 )
                 usages.append(result.usage)
                 selection = result.value
-                if _selected_is_available(selection, acquired):
-                    if selection.coverage_complete:
-                        return SourceResearchResult(
-                            search_plan=planned.value,
-                            candidates=tuple(candidates),
-                            selection=selection,
-                            acquisitions=tuple(acquired.values()),
-                            usages=tuple(usages),
-                        )
-                queries = list(selection.follow_up_queries)
-                if acquired and selection.coverage_complete:
+                if acquired and (selection.coverage_complete or _has_minimum_sources(acquired)):
                     return SourceResearchResult(
                         search_plan=planned.value,
                         candidates=tuple(candidates),
@@ -154,10 +144,5 @@ class SourceResearch:
         return judged
 
 
-def _selected_is_available(
-    selection: SourceSelectionProposal,
-    acquired: dict[str, AcquisitionPayload],
-) -> bool:
-    return bool(selection.selected_candidate_ids) and all(
-        item in acquired for item in selection.selected_candidate_ids
-    )
+def _has_minimum_sources(acquired: dict[str, AcquisitionPayload]) -> bool:
+    return len(acquired) >= 2

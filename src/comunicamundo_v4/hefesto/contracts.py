@@ -89,10 +89,8 @@ class SourceSelectionProposal(StrictModel):
 
 
 class SourceCandidateJudgment(StrictModel):
-    worth_acquiring: bool
+    decision: str = Field(pattern=r"^(acquire|skip)$")
     coverage_complete_if_acquired: bool
-    coverage_judgment: str = Field(min_length=1, max_length=500)
-    follow_up_queries: list[str] = Field(default_factory=list, max_length=3)
 
 
 class AcquisitionAttempt(StrictModel):
