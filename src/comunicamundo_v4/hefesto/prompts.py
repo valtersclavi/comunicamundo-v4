@@ -97,12 +97,24 @@ def source_candidate_judgment_prompt(
     acquired_candidate_ids: Sequence[str] = (),
     failed_candidate_ids: Sequence[str] = (),
 ) -> str:
+    subjects = [
+        {
+            "index": index,
+            "title": subject.title,
+            "editorial_role": subject.editorial_role,
+            "desired_depth": subject.desired_depth,
+        }
+        for index, subject in enumerate(project.subjects)
+    ]
     return f"""
 Judge this single source candidate only by whether its visible content summary
 appears to contribute to the Narrative Axis or provisional subjects.
 
 Return only operational signals:
 - decision: "acquire" if the candidate appears to contribute; otherwise "skip".
+- covered_subject_indexes: every provisional subject index this candidate can
+  materially sustain or enrich. It may cover more than one subject. Use [] when
+  decision is "skip".
 - coverage_complete_if_acquired: true only if this candidate plus already
   acquired sources would be enough to proceed to digestion.
 
@@ -111,12 +123,17 @@ DOI, PDF, provider, publisher or academic status by themselves. Use those only
 as metadata that may help identify what the candidate is about. If the visible
 title/description/abstract does not show contribution to the subjects, skip.
 Never acquire a failed candidate.
+If you choose "acquire", covered_subject_indexes must be non-empty and must only
+contain indexes from PROVISIONAL SUBJECTS.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
 
-PROVISIONAL EDITORIAL PROJECT:
-{project.model_dump_json(indent=2)}
+NARRATIVE AXIS:
+{project.narrative_axis.model_dump_json(indent=2)}
+
+PROVISIONAL SUBJECTS:
+{json.dumps(subjects, ensure_ascii=False, indent=2)}
 
 ALREADY ACQUIRED CANDIDATE IDS:
 {json.dumps(list(acquired_candidate_ids), ensure_ascii=False)}

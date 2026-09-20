@@ -62,6 +62,7 @@ class SourceResearch:
         candidates: list[SourceCandidate] = []
         acquired: dict[str, AcquisitionPayload] = {}
         failed: dict[str, AcquisitionPayload] = {}
+        subject_coverage: dict[str, list[int]] = {}
         queries = list(planned.value.queries)
         selection: SourceSelectionProposal | None = None
 
@@ -89,10 +90,14 @@ class SourceResearch:
                     candidates,
                     acquired,
                     failed,
+                    subject_coverage,
                 )
                 usages.append(result.usage)
                 selection = result.value
-                if acquired and (selection.coverage_complete or _has_minimum_sources(acquired)):
+                if acquired and _coverage_complete(
+                    subject_coverage,
+                    len(project.subjects),
+                ):
                     return SourceResearchResult(
                         search_plan=planned.value,
                         candidates=tuple(candidates),
@@ -105,8 +110,16 @@ class SourceResearch:
                 raise ValueError("source search returned no candidates")
 
         acquired_count = len(acquired)
+        if acquired and selection is not None:
+            return SourceResearchResult(
+                search_plan=planned.value,
+                candidates=tuple(candidates),
+                selection=selection,
+                acquisitions=tuple(acquired.values()),
+                usages=tuple(usages),
+            )
         raise ValueError(
-            "source editor did not reach adequate coverage after "
+            "source editor did not acquire usable sources after "
             f"{self._max_search_rounds} rounds ({acquired_count} sources acquired)"
         )
 
@@ -117,6 +130,7 @@ class SourceResearch:
         candidates: Sequence[SourceCandidate],
         acquired: dict[str, AcquisitionPayload],
         failed: dict[str, AcquisitionPayload],
+        subject_coverage: dict[str, list[int]],
     ) -> ModelResult[SourceSelectionProposal]:
         judged = await self._editor.select(
             brief,
@@ -124,6 +138,7 @@ class SourceResearch:
             candidates,
             acquired_candidate_ids=tuple(acquired),
             failed_candidate_ids=tuple(failed),
+            subject_coverage=subject_coverage,
         )
         by_id = {item.candidate_id: item for item in candidates}
         fresh = [
@@ -139,10 +154,37 @@ class SourceResearch:
                     return await asyncio.to_thread(self._acquirer.acquire, item)
 
             for payload in await asyncio.gather(*(acquire(item) for item in fresh)):
-                target = acquired if payload.record.status == "acquired" else failed
-                target[payload.record.candidate.candidate_id] = payload
-        return judged
+                candidate_id = payload.record.candidate.candidate_id
+                if payload.record.status == "acquired":
+                    acquired[candidate_id] = payload
+                    subject_coverage[candidate_id] = (
+                        judged.value.subject_coverage[candidate_id]
+                    )
+                else:
+                    failed[candidate_id] = payload
+        complete = _coverage_complete(subject_coverage, len(project.subjects))
+        return judged.model_copy(update={
+            "value": SourceSelectionProposal(
+                selected_candidate_ids=list(acquired),
+                subject_coverage=dict(subject_coverage),
+                coverage_complete=complete,
+                follow_up_queries=[] if complete else [
+                    "buscar mais candidatos para os assuntos ainda sem fonte"
+                ],
+            )
+        })
 
 
-def _has_minimum_sources(acquired: dict[str, AcquisitionPayload]) -> bool:
-    return len(acquired) >= 2
+def _coverage_complete(
+    subject_coverage: dict[str, list[int]],
+    subject_count: int,
+) -> bool:
+    if subject_count < 1:
+        return False
+    covered = {
+        index
+        for indexes in subject_coverage.values()
+        for index in indexes
+        if 0 <= index < subject_count
+    }
+    return all(index in covered for index in range(subject_count))

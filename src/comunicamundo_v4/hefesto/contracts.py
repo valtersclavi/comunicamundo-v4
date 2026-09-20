@@ -75,12 +75,20 @@ class SourceCandidate(StrictModel):
 
 class SourceSelectionProposal(StrictModel):
     selected_candidate_ids: list[Sha256] = Field(default_factory=list, max_length=64)
-    coverage_judgment: str = Field(min_length=1)
+    subject_coverage: dict[Sha256, list[int]] = Field(default_factory=dict)
     coverage_complete: bool
     follow_up_queries: list[str] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def completion_is_actionable(self) -> "SourceSelectionProposal":
+        unknown = set(self.subject_coverage) - set(self.selected_candidate_ids)
+        if unknown:
+            raise ValueError("subject coverage references unselected candidates")
+        for candidate_id, indexes in self.subject_coverage.items():
+            if not indexes:
+                raise ValueError(f"selected candidate {candidate_id} has no subject coverage")
+            if any(index < 0 for index in indexes):
+                raise ValueError("subject coverage indexes must be non-negative")
         if self.coverage_complete and not self.selected_candidate_ids:
             raise ValueError("complete coverage requires at least one selected source")
         if not self.coverage_complete and not self.follow_up_queries:
@@ -90,7 +98,18 @@ class SourceSelectionProposal(StrictModel):
 
 class SourceCandidateJudgment(StrictModel):
     decision: str = Field(pattern=r"^(acquire|skip)$")
+    covered_subject_indexes: list[int] = Field(default_factory=list, max_length=16)
     coverage_complete_if_acquired: bool
+
+    @model_validator(mode="after")
+    def decision_matches_subject_coverage(self) -> "SourceCandidateJudgment":
+        if any(index < 0 for index in self.covered_subject_indexes):
+            raise ValueError("covered subject indexes must be non-negative")
+        if self.decision == "acquire" and not self.covered_subject_indexes:
+            raise ValueError("acquire requires at least one covered subject")
+        if self.decision == "skip" and self.covered_subject_indexes:
+            raise ValueError("skip cannot cover subjects")
+        return self
 
 
 class AcquisitionAttempt(StrictModel):

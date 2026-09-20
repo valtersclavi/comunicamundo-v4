@@ -329,6 +329,7 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
             return ModelResult(
                 value=SourceCandidateJudgment(
                     decision="acquire",
+                    covered_subject_indexes=[0],
                     coverage_complete_if_acquired=True,
                 ),
                 usage=usage(kwargs["task_type"]),
@@ -405,13 +406,13 @@ async def test_source_research_replaces_failed_selection_until_editor_has_covera
             value = (
                 SourceSelectionProposal(
                     selected_candidate_ids=[first.candidate_id],
-                    coverage_judgment="first candidate should cover it",
+                    subject_coverage={first.candidate_id: [0]},
                     coverage_complete=True,
                 )
                 if self.selections == 1 else
                 SourceSelectionProposal(
                     selected_candidate_ids=[second.candidate_id],
-                    coverage_judgment="replacement provides sufficient coverage",
+                    subject_coverage={second.candidate_id: [0]},
                     coverage_complete=True,
                 )
             )
@@ -477,7 +478,7 @@ async def test_source_research_stops_after_first_query_with_acquired_coverage() 
             return ModelResult(
                 value=SourceSelectionProposal(
                     selected_candidate_ids=[found.candidate_id],
-                    coverage_judgment="first query covered the need",
+                    subject_coverage={found.candidate_id: [0]},
                     coverage_complete=True,
                 ),
                 usage=usage("source_editor_selection"),

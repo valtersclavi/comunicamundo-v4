@@ -246,7 +246,8 @@ async def source_search(execution_id: UUID) -> None:
             "duration_ms": int((perf_counter() - started) * 1000),
             "candidate_count": len(result.candidates),
             "selected_count": len(result.selection.selected_candidate_ids),
-            "coverage_judgment": result.selection.coverage_judgment,
+            "subject_coverage": result.selection.subject_coverage,
+            "coverage_complete": result.selection.coverage_complete,
         })
         stages.append({
             "stage": "source_acquisition", "status": "completed",

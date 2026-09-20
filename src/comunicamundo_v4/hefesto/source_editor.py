@@ -77,12 +77,15 @@ class EditorialSourceEditor:
         *,
         acquired_candidate_ids: Sequence[str] = (),
         failed_candidate_ids: Sequence[str] = (),
+        subject_coverage: dict[str, list[int]] | None = None,
     ) -> ModelResult[SourceSelectionProposal]:
         selected: list[str] = []
+        selected_coverage: dict[str, list[int]] = {}
         usages: list[CallUsage] = []
         complete_if_acquired = False
         failed = set(failed_candidate_ids)
         acquired = set(acquired_candidate_ids)
+        already_covered = _covered_subject_indexes(subject_coverage or {})
         for candidate in candidates:
             if candidate.candidate_id in failed or candidate.candidate_id in acquired:
                 continue
@@ -104,15 +107,23 @@ class EditorialSourceEditor:
             judgment = result.value
             if judgment.decision == "acquire" and candidate.candidate_id not in selected:
                 selected.append(candidate.candidate_id)
+                covered = _valid_subject_indexes(
+                    judgment.covered_subject_indexes,
+                    len(project.subjects),
+                )
+                selected_coverage[candidate.candidate_id] = covered
+                already_covered.update(covered)
             if judgment.coverage_complete_if_acquired and selected:
                 complete_if_acquired = True
                 break
 
-        coverage_complete = bool(selected) and complete_if_acquired
+        coverage_complete = _coverage_complete(already_covered, len(project.subjects))
+        if selected and complete_if_acquired:
+            coverage_complete = True
         return ModelResult(
             value=SourceSelectionProposal(
                 selected_candidate_ids=selected,
-                coverage_judgment=_selection_status(selected, coverage_complete),
+                subject_coverage=selected_coverage,
                 coverage_complete=coverage_complete,
                 follow_up_queries=[] if coverage_complete else [
                     "buscar mais candidatos para os assuntos ainda sem fonte"
@@ -140,9 +151,19 @@ def _combined_usage(task_type: str, usages: Sequence[CallUsage]) -> CallUsage:
     )
 
 
-def _selection_status(selected: Sequence[str], coverage_complete: bool) -> str:
-    if coverage_complete:
-        return "selected candidate completes source coverage"
-    if selected:
-        return "selected candidate contributes to source coverage"
-    return "no candidate selected"
+def _covered_subject_indexes(subject_coverage: dict[str, list[int]]) -> set[int]:
+    covered: set[int] = set()
+    for indexes in subject_coverage.values():
+        covered.update(index for index in indexes if index >= 0)
+    return covered
+
+
+def _valid_subject_indexes(indexes: Sequence[int], subject_count: int) -> list[int]:
+    valid = sorted({index for index in indexes if 0 <= index < subject_count})
+    if not valid:
+        raise ValueError("acquired candidate did not cover a valid provisional subject")
+    return valid
+
+
+def _coverage_complete(covered: set[int], subject_count: int) -> bool:
+    return subject_count > 0 and all(index in covered for index in range(subject_count))
