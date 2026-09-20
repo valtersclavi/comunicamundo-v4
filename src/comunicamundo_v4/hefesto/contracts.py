@@ -7,7 +7,7 @@ from math import isclose
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -247,17 +247,31 @@ class ProvisionalEditorialProject(StrictModel):
 
 class EditorialEvidence(StrictModel):
     source_ordinals: list[int] = Field(min_length=1)
-    contribution: str = Field(min_length=1, max_length=600)
-    verbatim_excerpt: str | None = Field(default=None, max_length=280)
+    contribution: str = Field(min_length=1, max_length=1_000)
+    verbatim_excerpt: str | None = Field(default=None, max_length=1_000)
+
+    @field_validator("contribution", "verbatim_excerpt", mode="before")
+    @classmethod
+    def trim_long_evidence_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return _truncate_text(value, 1_000)
 
 
 class EditorialKnowledgeUnit(StrictModel):
     title: str = Field(min_length=1, max_length=140)
-    synthesis: str = Field(min_length=1, max_length=1_200)
+    synthesis: str = Field(min_length=1, max_length=2_000)
     essential_points: list[str] = Field(min_length=1, max_length=6)
     tensions: list[str] = Field(default_factory=list, max_length=4)
     qualifications: list[str] = Field(default_factory=list, max_length=4)
     evidence: list[EditorialEvidence] = Field(min_length=1, max_length=4)
+
+    @field_validator("synthesis", mode="before")
+    @classmethod
+    def trim_long_synthesis(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return _truncate_text(value, 2_000)
 
 
 class EditorialCorpus(StrictModel):
@@ -431,3 +445,10 @@ class CallUsage(StrictModel):
 
 def content_hash(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    text = value.strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit - 1].rstrip()}…"
