@@ -89,31 +89,24 @@ USER CHANGE REQUEST:
 """.strip()
 
 
-def source_selection_prompt(
+def source_candidate_judgment_prompt(
     brief: EditorialBrief,
     project: ProvisionalEditorialProject,
-    candidates: Sequence[SourceCandidate],
+    candidate: SourceCandidate,
     *,
     acquired_candidate_ids: Sequence[str] = (),
     failed_candidate_ids: Sequence[str] = (),
 ) -> str:
-    rendered = json.dumps(
-        [item.model_dump(mode="json") for item in candidates],
-        ensure_ascii=False,
-        indent=2,
-    )
     return f"""
-Act as the source editor. Judge candidates against the Narrative Axis and the
-provisional subjects. Select the exact sources worth acquiring; provider rank
-is evidence for discovery, never the editorial decision. Balance depth,
-generality, authority, complementarity, contradiction and the user's available
-time. There is no fixed provider quota and no target number of sources.
+Judge this single source candidate against the Narrative Axis and provisional
+subjects. Decide whether it is worth acquiring now. Provider rank is evidence
+for discovery, never the editorial decision. Balance depth, generality,
+authority, complementarity, contradiction and available time.
 
-Return coverage_complete only when the selected and already acquired set is
-editorially sufficient. If it is not sufficient, explain the gap and return
-specific follow_up_queries. Never select a failed candidate again. Use only
-candidate IDs present below. This judgment remains internal and source names
-must not later appear in the user-facing Editorial Project.
+Return coverage_complete_if_acquired only if this candidate plus already
+acquired sources would be editorially sufficient. If not sufficient, return up
+to three specific follow_up_queries. Never ask to acquire a failed candidate.
+Keep the judgment short.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
@@ -127,68 +120,8 @@ ALREADY ACQUIRED CANDIDATE IDS:
 FAILED CANDIDATE IDS:
 {json.dumps(list(failed_candidate_ids), ensure_ascii=False)}
 
-CANDIDATES:
-{rendered}
-""".strip()
-
-
-def source_selection_merge_prompt(
-    brief: EditorialBrief,
-    project: ProvisionalEditorialProject,
-    proposals: Sequence[SourceSelectionProposal],
-    candidates: Sequence[SourceCandidate],
-    *,
-    acquired_candidate_ids: Sequence[str] = (),
-    failed_candidate_ids: Sequence[str] = (),
-) -> str:
-    candidate_by_id = {item.candidate_id: item for item in candidates}
-    selected_ids = {
-        item
-        for proposal in proposals
-        for item in proposal.selected_candidate_ids
-        if item in candidate_by_id
-    }
-    selected_candidates = [
-        candidate_by_id[item].model_dump(mode="json")
-        for item in sorted(selected_ids)
-    ]
-    rendered_proposals = json.dumps(
-        [item.model_dump(mode="json") for item in proposals],
-        ensure_ascii=False,
-        indent=2,
-    )
-    rendered_candidates = json.dumps(
-        selected_candidates,
-        ensure_ascii=False,
-        indent=2,
-    )
-    return f"""
-Consolidate these bounded source-selection judgments into one internal source
-decision. Work only with candidate IDs that appeared in the batch judgments.
-Never select a failed candidate again.
-
-Return coverage_complete only when the already acquired sources plus selected
-candidates are editorially sufficient for the Narrative Axis and provisional
-subjects. If coverage is incomplete, explain the gap and return specific
-follow_up_queries. Keep the output compact.
-
-BRIEF:
-{brief.model_dump_json(indent=2)}
-
-PROVISIONAL EDITORIAL PROJECT:
-{project.model_dump_json(indent=2)}
-
-ALREADY ACQUIRED CANDIDATE IDS:
-{json.dumps(list(acquired_candidate_ids), ensure_ascii=False)}
-
-FAILED CANDIDATE IDS:
-{json.dumps(list(failed_candidate_ids), ensure_ascii=False)}
-
-BATCH JUDGMENTS:
-{rendered_proposals}
-
-SELECTED CANDIDATE DETAILS:
-{rendered_candidates}
+CANDIDATE:
+{candidate.model_dump_json(indent=2)}
 """.strip()
 
 

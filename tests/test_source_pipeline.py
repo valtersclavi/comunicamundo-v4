@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-import re
 from typing import Any
 
 import pytest
@@ -16,7 +15,7 @@ from comunicamundo_v4.hefesto.contracts import (
     NarrativeAxisProposal,
     ProvisionalEditorialProject,
     ProvisionalEditorialSubject,
-    RawSourceSelectionProposal,
+    SourceCandidateJudgment,
     SourceSelectionProposal,
 )
 from comunicamundo_v4.hefesto.gateway import ModelResult
@@ -327,13 +326,11 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
 
         async def generate(self, **kwargs):
             self.calls.append(kwargs)
-            ids = re.findall(r'"candidate_id":\s*"([0-9a-f]{64})"', kwargs["prompt"])
-            selected = ids[:1]
             return ModelResult(
-                value=SourceSelectionProposal(
-                    selected_candidate_ids=selected,
-                    coverage_judgment="enough after bounded review",
-                    coverage_complete=True,
+                value=SourceCandidateJudgment(
+                    worth_acquiring=True,
+                    coverage_complete_if_acquired=True,
+                    coverage_judgment="enough after single-candidate review",
                     follow_up_queries=[],
                 ),
                 usage=usage(kwargs["task_type"]),
@@ -344,16 +341,14 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
 
     assert result.value.coverage_complete is True
     assert [item["task_type"] for item in gateway.calls] == [
-        "source_editor_selection_batch",
-        "source_editor_selection_batch",
-        "source_editor_selection_batch",
+        "source_candidate_judgment",
     ]
     assert all(item in {candidate.candidate_id for candidate in candidates}
                for item in result.value.selected_candidate_ids)
 
 
 @pytest.mark.asyncio
-async def test_source_editor_discards_malformed_selected_candidate_ids() -> None:
+async def test_source_editor_returns_follow_up_when_candidate_is_not_worth_acquiring() -> None:
     brief = EditorialBrief(
         theme="Theme", approach="Approach", duration_minutes=10,
         output_language="pt-BR", audience="Audience", product="article",
@@ -374,22 +369,20 @@ async def test_source_editor_discards_malformed_selected_candidate_ids() -> None
     class Gateway:
         async def generate(self, **kwargs):
             return ModelResult(
-                value=RawSourceSelectionProposal(
-                    selected_candidate_ids=[
-                        valid.candidate_id,
-                        f"{valid.candidate_id}{valid.candidate_id[:6]}",
-                        "not-a-candidate-id",
-                    ],
-                    coverage_judgment="valid source plus malformed model output",
-                    coverage_complete=True,
+                value=SourceCandidateJudgment(
+                    worth_acquiring=False,
+                    coverage_complete_if_acquired=False,
+                    coverage_judgment="candidate is adjacent but not useful enough",
+                    follow_up_queries=["better source for the axis"],
                 ),
                 usage=usage(kwargs["task_type"]),
             )
 
     result = await EditorialSourceEditor(Gateway()).select(brief, project, [valid])
 
-    assert result.value.selected_candidate_ids == [valid.candidate_id]
-    assert result.value.coverage_complete is True
+    assert result.value.selected_candidate_ids == []
+    assert result.value.coverage_complete is False
+    assert result.value.follow_up_queries == ["better source for the axis"]
 
 
 @pytest.mark.asyncio

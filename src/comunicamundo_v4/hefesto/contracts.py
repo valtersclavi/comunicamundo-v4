@@ -88,11 +88,11 @@ class SourceSelectionProposal(StrictModel):
         return self
 
 
-class RawSourceSelectionProposal(StrictModel):
-    selected_candidate_ids: list[str] = Field(default_factory=list, max_length=64)
-    coverage_judgment: str = Field(min_length=1)
-    coverage_complete: bool
-    follow_up_queries: list[str] = Field(default_factory=list, max_length=8)
+class SourceCandidateJudgment(StrictModel):
+    worth_acquiring: bool
+    coverage_complete_if_acquired: bool
+    coverage_judgment: str = Field(min_length=1, max_length=500)
+    follow_up_queries: list[str] = Field(default_factory=list, max_length=3)
 
 
 class AcquisitionAttempt(StrictModel):
