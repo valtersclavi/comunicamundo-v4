@@ -248,12 +248,21 @@ async def source_search(execution_id: UUID) -> None:
             "selected_count": len(result.selection.selected_candidate_ids),
             "subject_coverage": result.selection.subject_coverage,
             "coverage_complete": result.selection.coverage_complete,
+            "attempts_by_subject": result.attempts_by_subject,
+            "unsupported_subject_indexes": sorted(
+                set(range(len(provisional.subjects)))
+                - {
+                    index
+                    for indexes in result.selection.subject_coverage.values()
+                    for index in indexes
+                }
+            ),
         })
         stages.append({
             "stage": "source_acquisition", "status": "completed",
             "duration_ms": 0,
             "acquired_count": len(result.acquired),
-            "failed_count": len(result.failures),
+            "failed_count": result.failed_acquisition_count,
             "sources": [item.record.model_dump(mode="json") for item in result.acquisitions],
         })
         started = perf_counter()
@@ -263,6 +272,12 @@ async def source_search(execution_id: UUID) -> None:
             list(result.acquisitions),
             client=client,
             bucket_name=bucket_name,
+            provisional_project=provisional,
+            supported_subject_indexes=sorted({
+                index
+                for indexes in result.selection.subject_coverage.values()
+                for index in indexes
+            }),
         )
         stages.append({
             "stage": "redigestion", "status": "completed",
@@ -422,7 +437,8 @@ async def _continue_to_project(
                 {
                     "editorial_comprehension_part",
                     "editorial_comprehension_merge",
-                    "editorial_project",
+                    "editorial_project_scaffold",
+                    "editorial_subject_corpus",
                 },
             ),
         })

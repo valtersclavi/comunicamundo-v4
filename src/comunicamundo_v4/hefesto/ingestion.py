@@ -15,6 +15,7 @@ from .contracts import (
     IngestionReceipt,
     NormalizedSource,
     PlanningRequest,
+    ProvisionalEditorialProject,
 )
 from .segmentation import segment_sources
 from .normalization import extract_pdf, normalize_pdf_pages
@@ -245,6 +246,8 @@ def ingest_acquired(
     *,
     client: storage.Client,
     bucket_name: str,
+    provisional_project: ProvisionalEditorialProject,
+    supported_subject_indexes: list[int],
 ) -> IngestionResult:
     """Redigest successfully acquired public sources into the frozen core input."""
     # Local import keeps the normalization layer independent of transport routes.
@@ -323,6 +326,8 @@ def ingest_acquired(
         project_id=input_request.project_id,
         brief=input_request.brief,
         sources=normalized,
+        provisional_project=provisional_project,
+        supported_provisional_subject_indexes=supported_subject_indexes,
     )
     request_uri = persist_json_immutable(
         client,

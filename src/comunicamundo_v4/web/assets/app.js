@@ -47,6 +47,7 @@ function renderSummary(run, known, project) {
   const stages = run.stages || [];
   const elapsedMs = stages.reduce((sum, item) => sum + Number(item.duration_ms || 0), 0);
   const finalProject = run.editorial_project?.proposal;
+  const provisionalProject = run.provisional_editorial_project;
   const finalText = run.final_text?.proposal;
   const sourceResearch = known.get("source_research");
   const acquisition = known.get("source_acquisition");
@@ -57,7 +58,7 @@ function renderSummary(run, known, project) {
   $("#summary-tokens").textContent = formatter.format(usage.total_tokens || 0);
   $("#deliverables").innerHTML = [
     deliverable("Eixo editorial", Boolean(project?.narrative_axis), project?.narrative_axis?.statement || ""),
-    deliverable("Projeto Editorial", Boolean(project), project?.duration_minutes ? `${project.duration_minutes} min` : ""),
+    deliverable("Pré-Projeto Editorial", Boolean(provisionalProject), provisionalProject?.duration_minutes ? `${provisionalProject.duration_minutes} min` : ""),
     deliverable(
       "Fontes encontradas",
       stageCompleted(known, "source_research"),

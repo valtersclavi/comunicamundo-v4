@@ -154,8 +154,24 @@ class OpenAlexSearchProvider:
                 publisher=source.get("display_name"),
                 doi=doi,
                 published_at=item.get("publication_date"),
+                description=_openalex_abstract(item.get("abstract_inverted_index")),
             ))
         return result
+
+
+def _openalex_abstract(value: object) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    positioned: list[tuple[int, str]] = []
+    for word, positions in value.items():
+        if not isinstance(word, str) or not isinstance(positions, list):
+            continue
+        positioned.extend(
+            (position, word) for position in positions if isinstance(position, int)
+        )
+    if not positioned:
+        return None
+    return " ".join(word for _, word in sorted(positioned))
 
 
 class SourceDiscovery:
@@ -164,18 +180,25 @@ class SourceDiscovery:
             raise ValueError("source discovery requires at least one provider")
         if not 1 <= results_per_query <= 100:
             raise ValueError("results_per_query must be between 1 and 100")
-        self._providers = providers
+        self._providers = {provider.name: provider for provider in providers}
         self._results_per_query = results_per_query
 
     def discover(self, plan: SourceSearchPlan) -> list[SourceCandidate]:
         candidates: list[SourceCandidate] = []
         for query in plan.queries:
-            for provider in self._providers:
-                try:
-                    candidates.extend(provider.search(query, count=self._results_per_query))
-                except Exception:
-                    continue
+            candidates.extend(self.discover_query(query.query, query.provider))
         return deduplicate_candidates(candidates)
+
+    def discover_query(self, query: str, provider: str) -> list[SourceCandidate]:
+        selected = self._providers.get(provider)
+        if selected is None:
+            raise ValueError(f"unknown source provider: {provider}")
+        try:
+            return deduplicate_candidates(
+                selected.search(query, count=self._results_per_query)
+            )
+        except Exception:
+            return []
 
 
 def deduplicate_candidates(candidates: Iterable[SourceCandidate]) -> list[SourceCandidate]:
@@ -218,7 +241,7 @@ class SourceAcquirer:
     def acquire(self, candidate: SourceCandidate) -> AcquisitionPayload:
         attempts: list[AcquisitionAttempt] = []
         original_bytes, original_content_type, direct_text = self._direct(candidate, attempts)
-        if direct_text and _acceptable(candidate, direct_text, None):
+        if direct_text and _acceptable(direct_text):
             return self._success(
                 candidate, "direct", direct_text, attempts,
                 final_url=candidate.acquisition_url,
@@ -226,15 +249,15 @@ class SourceAcquirer:
                 original_content_type=original_content_type,
             )
 
-        text, title, final_url = self._you_contents(candidate, attempts)
-        if text and _acceptable(candidate, text, title):
+        text, _, final_url = self._you_contents(candidate, attempts)
+        if text and _acceptable(text):
             return self._success(
                 candidate, "you_contents", text, attempts, final_url=final_url,
                 original_bytes=original_bytes, original_content_type=original_content_type,
             )
 
         text, final_url = self._jina(candidate, attempts)
-        if text and _acceptable(candidate, text, None):
+        if text and _acceptable(text):
             return self._success(
                 candidate, "jina_reader", text, attempts, final_url=final_url,
                 original_bytes=original_bytes, original_content_type=original_content_type,
@@ -248,7 +271,7 @@ class SourceAcquirer:
                     failure_reason="public acquisition requires human action",
                 )
                 return AcquisitionPayload(record=record, original_bytes=original_bytes, original_content_type=original_content_type)
-            if browser_text and _acceptable(candidate, browser_text, None):
+            if browser_text and _acceptable(browser_text):
                 return self._success(
                     candidate, "browser_use", browser_text, attempts,
                     final_url=browser_url,
@@ -452,22 +475,13 @@ def _attempt(
     )
 
 
-def _normalized_tokens(value: str) -> set[str]:
-    return {
-        item for item in re.sub(r"[^a-z0-9]+", " ", value.lower()).split()
-        if len(item) >= 4
-    }
-
-
-def _acceptable(candidate: SourceCandidate, text: str, extracted_title: str | None) -> bool:
+def _acceptable(text: str) -> bool:
     words = text.split()
-    if len(text.strip()) < 3_500 or len(words) < 500 or text.count("�") / max(len(text), 1) >= 0.005:
-        return False
-    haystack = f"{extracted_title or ''} {text[:12_000]}".lower()
-    if candidate.doi and candidate.doi.lower() in haystack:
-        return True
-    title_tokens = _normalized_tokens(candidate.title)
-    return bool(title_tokens) and len([item for item in title_tokens if item in haystack]) / len(title_tokens) >= 0.45
+    return (
+        len(text.strip()) >= 800
+        and len(words) >= 100
+        and text.count("�") / max(len(text), 1) < 0.005
+    )
 
 
 def _browser_task(candidate: SourceCandidate) -> str:

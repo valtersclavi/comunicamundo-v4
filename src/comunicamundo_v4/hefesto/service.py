@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from hashlib import sha256
+from math import ceil
 import re
 from time import perf_counter
 from typing import Protocol, TypeVar
@@ -196,7 +197,11 @@ class Hefesto:
                 material_kind="original selected source passages",
             )
             if await self._count_tokens(direct_prompt) <= self._comprehension_budget:
-                return await self._create_project(run, direct_prompt)
+                return await self._create_project(
+                    run,
+                    material,
+                    "original selected source passages",
+                )
 
             readings = await self._condense_passages(run, selected, titles)
             level = 2
@@ -208,7 +213,11 @@ class Hefesto:
                     material_kind="bounded editorial comprehensions of selected passages",
                 )
                 if await self._count_tokens(final_prompt) <= self._comprehension_budget:
-                    return await self._create_project(run, final_prompt)
+                    return await self._create_project(
+                        run,
+                        combined,
+                        "bounded editorial comprehensions of selected passages",
+                    )
                 readings = await self._condense_readings(run, readings, level)
                 level += 1
         except Exception as error:
@@ -374,6 +383,13 @@ class Hefesto:
             "status": run.state.value,
             "project_id": str(run.project_id),
             "execution_run_id": str(run.execution_run_id),
+            "provisional_editorial_project": (
+                run.request.provisional_project.model_dump(mode="json")
+                if run.request.provisional_project else None
+            ),
+            "supported_provisional_subject_indexes": (
+                run.request.supported_provisional_subject_indexes
+            ),
             "editorial_project": (
                 run.editorial_project.model_dump(mode="json")
                 if run.editorial_project else None
@@ -699,31 +715,55 @@ class Hefesto:
             *await self._measure_packet(right, render, budget),
         ]
 
-    async def _create_project(self, run: ProductRun, prompt: str) -> ProductRun:
+    async def _create_project(
+        self,
+        run: ProductRun,
+        material: str,
+        material_kind: str,
+    ) -> ProductRun:
         scaffold_result = await self._call(
             run,
             task_type="editorial_project_scaffold",
             prompt=project_scaffold_prompt(
                 run.request.brief,
-                _selected_material_from_project_prompt(prompt),
-                material_kind=_material_kind_from_project_prompt(prompt),
+                material,
+                material_kind=material_kind,
+                provisional_project=run.request.provisional_project,
+                supported_subject_indexes=(
+                    run.request.supported_provisional_subject_indexes
+                ),
+                existing_project=run.request.existing_editorial_project,
             ),
             schema=EditorialProjectScaffold,
             max_output_tokens=8_192,
             thinking_tokens=3_000,
         )
-        scaffold = scaffold_result.value
-        if scaffold.duration_minutes < run.request.brief.duration_minutes:
+        scaffold, corpus_subjects = _anchor_scaffold(
+            scaffold_result.value,
+            run.request,
+        )
+        if (
+            run.request.provisional_project is None
+            and run.request.existing_editorial_project is None
+            and scaffold.duration_minutes < run.request.brief.duration_minutes
+        ):
             raise ValueError("Editorial Project shortened the requested duration")
         subjects = _normalize_subject_minutes(
             scaffold.source_supported_subjects,
             scaffold.duration_minutes,
         )
-        units: list[EditorialKnowledgeUnit] = []
-        material = _selected_material_from_project_prompt(prompt)
-        material_kind = _material_kind_from_project_prompt(prompt)
+        corpus_titles = {item.title for item in corpus_subjects}
+        corpus_subjects = [item for item in subjects if item.title in corpus_titles]
+        existing_corpus = (
+            run.request.existing_editorial_project.editorial_corpus
+            if run.request.existing_editorial_project is not None
+            else None
+        )
+        units: list[EditorialKnowledgeUnit] = list(
+            existing_corpus.units if existing_corpus is not None else []
+        )
         scaffold = scaffold.model_copy(update={"source_supported_subjects": subjects})
-        for subject in subjects:
+        for subject in corpus_subjects:
             corpus_result = await self._call(
                 run,
                 task_type="editorial_subject_corpus",
@@ -746,12 +786,18 @@ class Hefesto:
             duration_minutes=scaffold.duration_minutes,
             source_supported_subjects=subjects,
             editorial_corpus=EditorialCorpus(
-                governing_understanding=scaffold.corpus_governing_understanding,
+                governing_understanding=_combined_governing_understanding(
+                    existing_corpus,
+                    scaffold.corpus_governing_understanding,
+                ),
                 units=units,
-                forbidden_inferences=scaffold.forbidden_inferences,
+                forbidden_inferences=_combined_forbidden_inferences(
+                    existing_corpus,
+                    scaffold.forbidden_inferences,
+                ),
             ),
-            model_knowledge_suggestions=scaffold.model_knowledge_suggestions,
-            source_enrichment_opportunities=scaffold.source_enrichment_opportunities,
+            model_knowledge_suggestions=[],
+            source_enrichment_opportunities=[],
         )
         project = EditorialProjectRecord(
             execution_run_id=run.execution_run_id,
@@ -1022,18 +1068,118 @@ class Hefesto:
         await self._repository.save_run(failed)
 
 
-def _material_kind_from_project_prompt(prompt: str) -> str:
-    marker = "\nINPUT KIND: "
-    if marker not in prompt:
-        return "selected source material"
-    return prompt.split(marker, 1)[1].split("\n\nSELECTED EDITORIAL MATERIAL:", 1)[0].strip()
+def _anchor_scaffold(
+    scaffold: EditorialProjectScaffold,
+    request: PlanningRequest,
+) -> tuple[EditorialProjectScaffold, list[EditorialSubject]]:
+    provisional = request.provisional_project
+    if provisional is not None:
+        supported = request.supported_provisional_subject_indexes
+        if not supported:
+            raise ValueError("no provisional subject was supported by acquired sources")
+        anchored_subjects: list[EditorialSubject] = []
+        for position, index in enumerate(supported):
+            original = provisional.subjects[index]
+            generated = (
+                scaffold.source_supported_subjects[position]
+                if position < len(scaffold.source_supported_subjects)
+                else None
+            )
+            anchored_subjects.append(EditorialSubject(
+                title=original.title,
+                editorial_role=_preserve_and_enrich(
+                    original.editorial_role,
+                    generated.editorial_role if generated else "",
+                ),
+                depth=_preserve_and_enrich(
+                    original.desired_depth,
+                    generated.depth if generated else "",
+                ),
+                allocated_minutes=original.allocated_minutes,
+            ))
+        duration = (
+            provisional.duration_minutes
+            if len(supported) == len(provisional.subjects)
+            else max(1, ceil(sum(item.allocated_minutes for item in anchored_subjects)))
+        )
+        anchored = scaffold.model_copy(update={
+            "working_title": provisional.working_title,
+            "editorial_promise": provisional.editorial_promise,
+            "narrative_axis": provisional.narrative_axis,
+            "duration_minutes": duration,
+            "source_supported_subjects": anchored_subjects,
+            "model_knowledge_suggestions": [],
+            "source_enrichment_opportunities": [],
+        })
+        return anchored, anchored_subjects
+
+    existing = request.existing_editorial_project
+    if existing is not None:
+        known_titles = {_subject_key(item.title) for item in existing.source_supported_subjects}
+        additions = [
+            item
+            for item in scaffold.source_supported_subjects
+            if _subject_key(item.title) not in known_titles
+        ]
+        subjects = [*existing.source_supported_subjects, *additions]
+        duration = max(
+            existing.duration_minutes,
+            ceil(
+                sum(item.allocated_minutes for item in existing.source_supported_subjects)
+                + sum(item.allocated_minutes for item in additions)
+            ),
+        )
+        anchored = scaffold.model_copy(update={
+            "working_title": existing.working_title,
+            "editorial_promise": existing.editorial_promise,
+            "narrative_axis": existing.narrative_axis,
+            "duration_minutes": duration,
+            "source_supported_subjects": subjects,
+            "model_knowledge_suggestions": [],
+            "source_enrichment_opportunities": [],
+        })
+        return anchored, additions
+
+    clean = scaffold.model_copy(update={
+        "model_knowledge_suggestions": [],
+        "source_enrichment_opportunities": [],
+    })
+    return clean, list(clean.source_supported_subjects)
 
 
-def _selected_material_from_project_prompt(prompt: str) -> str:
-    marker = "\nSELECTED EDITORIAL MATERIAL:\n"
-    if marker not in prompt:
-        return prompt
-    return prompt.split(marker, 1)[1]
+def _subject_key(value: str) -> str:
+    return re.sub(r"\W+", " ", value.casefold()).strip()
+
+
+def _preserve_and_enrich(original: str, enrichment: str) -> str:
+    original_key = _subject_key(original)
+    enrichment_key = _subject_key(enrichment)
+    if not enrichment_key or enrichment_key == original_key:
+        return original
+    if original_key in enrichment_key:
+        return enrichment
+    if enrichment_key in original_key:
+        return original
+    return f"{original} {enrichment}".strip()
+
+
+def _combined_governing_understanding(
+    existing: EditorialCorpus | None,
+    new_value: str,
+) -> str:
+    if existing is None:
+        return new_value
+    if new_value in existing.governing_understanding:
+        return existing.governing_understanding
+    return f"{existing.governing_understanding} {new_value}"[:1_400].strip()
+
+
+def _combined_forbidden_inferences(
+    existing: EditorialCorpus | None,
+    new_values: Sequence[str],
+) -> list[str]:
+    values = [*(existing.forbidden_inferences if existing else []), *new_values]
+    return list(dict.fromkeys(values))[:6]
 
 
 def _normalize_subject_minutes(

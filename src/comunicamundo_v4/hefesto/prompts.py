@@ -45,10 +45,16 @@ def source_search_plan_prompt(
 ) -> str:
     return f"""
 Plan the internal search needed to sustain this provisional Editorial Project.
-Queries are tools, not a public deliverable. Cover the Narrative Axis and the
-subjects with enough depth and useful diversity for the editor to judge the
-eventual source set. Do not impose a fixed number of final sources and do not
-name preferred providers.
+Queries are tools, not a public deliverable. Create exactly four distinct
+search attempts for every provisional subject. Each query must carry that
+subject's zero-based index and choose exactly one provider before search:
+- "openalex" for research literature and scholarly publications;
+- "you" for institutional guidance, reporting, public information and the web.
+
+The provider choice concerns the kind of material being sought. It is not a
+judgment about a candidate's prestige. Make later attempts for the same subject
+broader or differently phrased so that a difficult subject receives four real
+chances. Do not impose a fixed number of final sources.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
@@ -94,8 +100,7 @@ def source_candidate_judgment_prompt(
     project: ProvisionalEditorialProject,
     candidate: SourceCandidate,
     *,
-    acquired_candidate_ids: Sequence[str] = (),
-    failed_candidate_ids: Sequence[str] = (),
+    eligible_subject_indexes: Sequence[int],
 ) -> str:
     subjects = [
         {
@@ -105,6 +110,7 @@ def source_candidate_judgment_prompt(
             "desired_depth": subject.desired_depth,
         }
         for index, subject in enumerate(project.subjects)
+        if index in set(eligible_subject_indexes)
     ]
     return f"""
 Judge this single source candidate only by whether its visible content summary
@@ -115,14 +121,11 @@ Return only operational signals:
 - covered_subject_indexes: every provisional subject index this candidate can
   materially sustain or enrich. It may cover more than one subject. Use [] when
   decision is "skip".
-- coverage_complete_if_acquired: true only if this candidate plus already
-  acquired sources would be enough to proceed to digestion.
 
 Do not explain the decision. Do not justify. Do not rank pedigree. Do not prefer
 DOI, PDF, provider, publisher or academic status by themselves. Use those only
 as metadata that may help identify what the candidate is about. If the visible
 title/description/abstract does not show contribution to the subjects, skip.
-Never acquire a failed candidate.
 If you choose "acquire", covered_subject_indexes must be non-empty and must only
 contain indexes from PROVISIONAL SUBJECTS.
 
@@ -134,12 +137,6 @@ NARRATIVE AXIS:
 
 PROVISIONAL SUBJECTS:
 {json.dumps(subjects, ensure_ascii=False, indent=2)}
-
-ALREADY ACQUIRED CANDIDATE IDS:
-{json.dumps(list(acquired_candidate_ids), ensure_ascii=False)}
-
-FAILED CANDIDATE IDS:
-{json.dumps(list(failed_candidate_ids), ensure_ascii=False)}
 
 CANDIDATE:
 {candidate.model_dump_json(indent=2)}
@@ -277,7 +274,36 @@ def project_scaffold_prompt(
     material: str,
     *,
     material_kind: str,
+    provisional_project: ProvisionalEditorialProject | None = None,
+    supported_subject_indexes: Sequence[int] = (),
+    existing_project: EditorialProjectProposal | None = None,
 ) -> str:
+    if provisional_project is not None:
+        anchor = f"""
+APPROVED PROVISIONAL EDITORIAL PROJECT:
+{provisional_project.model_dump_json(indent=2)}
+
+SUPPORTED PROVISIONAL SUBJECT INDEXES:
+{json.dumps(list(supported_subject_indexes))}
+
+The approved provisional project is the editorial spine. Preserve its title,
+promise, Narrative Axis, subject order, editorial roles and intended depth.
+Include only the supported subject indexes above. Sources sustain and enrich
+those subjects; they do not authorize a replacement project. Do not add a new
+subject merely because it appears in a source.
+"""
+    elif existing_project is not None:
+        anchor = f"""
+EXISTING EDITORIAL PROJECT TO ENRICH:
+{existing_project.model_dump_json(indent=2)}
+
+Preserve the existing title, promise, Narrative Axis and every existing
+subject. In source_supported_subjects return only genuinely new subjects added
+by this enrichment. Do not restate or rename existing subjects. New material
+must add time; never compress or remove existing subjects.
+"""
+    else:
+        anchor = "There is no earlier Editorial Project anchor."
     return f"""
 Create the Editorial Project scaffold directly from the selected source
 material and the user's brief. Do not create the editorial_corpus units in this
@@ -302,6 +328,9 @@ passage coordinates must not appear in the user-facing project.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
+
+EDITORIAL CONTINUITY CONTRACT:
+{anchor}
 
 INPUT KIND: {material_kind}
 

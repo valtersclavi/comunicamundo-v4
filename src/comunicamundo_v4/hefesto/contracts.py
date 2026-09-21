@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from hashlib import sha256
-from math import isclose
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -54,8 +53,14 @@ class EditorialInputRequest(StrictModel):
         return self
 
 
+class SubjectSearchQuery(StrictModel):
+    subject_index: int = Field(ge=0)
+    query: str = Field(min_length=1)
+    provider: str = Field(pattern=r"^(you|openalex)$")
+
+
 class SourceSearchPlan(StrictModel):
-    queries: list[str] = Field(min_length=1, max_length=12)
+    queries: list[SubjectSearchQuery] = Field(min_length=1, max_length=48)
     editorial_coverage: list[str] = Field(min_length=1)
 
 
@@ -77,7 +82,6 @@ class SourceSelectionProposal(StrictModel):
     selected_candidate_ids: list[Sha256] = Field(default_factory=list, max_length=64)
     subject_coverage: dict[Sha256, list[int]] = Field(default_factory=dict)
     coverage_complete: bool
-    follow_up_queries: list[str] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def completion_is_actionable(self) -> "SourceSelectionProposal":
@@ -91,15 +95,12 @@ class SourceSelectionProposal(StrictModel):
                 raise ValueError("subject coverage indexes must be non-negative")
         if self.coverage_complete and not self.selected_candidate_ids:
             raise ValueError("complete coverage requires at least one selected source")
-        if not self.coverage_complete and not self.follow_up_queries:
-            raise ValueError("incomplete coverage requires follow-up queries")
         return self
 
 
 class SourceCandidateJudgment(StrictModel):
     decision: str = Field(pattern=r"^(acquire|skip)$")
     covered_subject_indexes: list[int] = Field(default_factory=list, max_length=16)
-    coverage_complete_if_acquired: bool
 
     @model_validator(mode="after")
     def decision_matches_subject_coverage(self) -> "SourceCandidateJudgment":
@@ -151,6 +152,22 @@ class PlanningRequest(StrictModel):
     project_id: UUID = Field(default_factory=uuid4)
     brief: EditorialBrief
     sources: list[NormalizedSource] = Field(min_length=1)
+    provisional_project: ProvisionalEditorialProject | None = None
+    supported_provisional_subject_indexes: list[int] = Field(default_factory=list)
+    existing_editorial_project: EditorialProjectProposal | None = None
+
+    @model_validator(mode="after")
+    def editorial_context_is_coherent(self) -> "PlanningRequest":
+        if self.supported_provisional_subject_indexes and self.provisional_project is None:
+            raise ValueError("supported provisional subjects require a provisional project")
+        if self.provisional_project is not None:
+            subject_count = len(self.provisional_project.subjects)
+            if any(
+                index < 0 or index >= subject_count
+                for index in self.supported_provisional_subject_indexes
+            ):
+                raise ValueError("supported provisional subject index is out of range")
+        return self
 
 
 class IngestedSource(StrictModel):
@@ -253,15 +270,8 @@ class ProvisionalEditorialProject(StrictModel):
     editorial_promise: str = Field(min_length=1)
     narrative_axis: NarrativeAxisProposal
     duration_minutes: int = Field(ge=1)
-    subjects: list[ProvisionalEditorialSubject] = Field(min_length=1)
+    subjects: list[ProvisionalEditorialSubject] = Field(min_length=1, max_length=12)
     disclaimer: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def duration_is_fully_allocated(self) -> "ProvisionalEditorialProject":
-        allocated = sum(item.allocated_minutes for item in self.subjects)
-        if not isclose(allocated, float(self.duration_minutes), rel_tol=0, abs_tol=0.01):
-            raise ValueError("provisional subjects must allocate the complete requested duration")
-        return self
 
 
 class EditorialEvidence(StrictModel):
@@ -446,6 +456,9 @@ class CallUsage(StrictModel):
     rated_cost_usd: str | None = None
     status: str
     error_message: str | None = None
+
+
+PlanningRequest.model_rebuild()
 
 
 def content_hash(value: str) -> str:

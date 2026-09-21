@@ -7,7 +7,11 @@ from typing import Any
 import pytest
 import requests
 
-from comunicamundo_v4.hefesto.contracts import SourceCandidate, SourceSearchPlan
+from comunicamundo_v4.hefesto.contracts import (
+    SourceCandidate,
+    SourceSearchPlan,
+    SubjectSearchQuery,
+)
 from comunicamundo_v4.hefesto.contracts import (
     CallUsage,
     AcquiredSource,
@@ -16,7 +20,6 @@ from comunicamundo_v4.hefesto.contracts import (
     ProvisionalEditorialProject,
     ProvisionalEditorialSubject,
     SourceCandidateJudgment,
-    SourceSelectionProposal,
 )
 from comunicamundo_v4.hefesto.gateway import ModelResult
 from comunicamundo_v4.hefesto.source_research import SourceResearch
@@ -135,7 +138,11 @@ def test_search_providers_normalize_and_discovery_deduplicates() -> None:
     ], results_per_query=5)
 
     found = discovery.discover(SourceSearchPlan(
-        queries=["query"], editorial_coverage=["coverage"],
+        queries=[
+            SubjectSearchQuery(subject_index=0, query="query", provider="you"),
+            SubjectSearchQuery(subject_index=0, query="query", provider="openalex"),
+        ],
+        editorial_coverage=["coverage"],
     ))
 
     assert [item.provider for item in found] == ["you", "openalex"]
@@ -168,7 +175,13 @@ def test_discovery_discards_unsafe_candidate_urls_and_keeps_valid_results() -> N
     found = SourceDiscovery([
         YouSearchProvider("you-key", session=session),
         OpenAlexSearchProvider("openalex-key", session=session),
-    ]).discover(SourceSearchPlan(queries=["query"], editorial_coverage=["axis"]))
+    ]).discover(SourceSearchPlan(
+        queries=[
+            SubjectSearchQuery(subject_index=0, query="query", provider="you"),
+            SubjectSearchQuery(subject_index=0, query="query", provider="openalex"),
+        ],
+        editorial_coverage=["axis"],
+    ))
 
     assert [item.title for item in found] == ["Good"]
     assert found[0].url == "https://example.org/good"
@@ -189,9 +202,9 @@ def test_discovery_ignores_provider_failure_when_another_provider_returns_source
         def search(self, query, *, count):
             return [good]
 
-    found = SourceDiscovery([BrokenProvider(), GoodProvider()]).discover(
-        SourceSearchPlan(queries=["query"], editorial_coverage=["axis"])
-    )
+    discovery = SourceDiscovery([BrokenProvider(), GoodProvider()])
+    assert discovery.discover_query("query", "broken") == []
+    found = discovery.discover_query("query", "good")
 
     assert found == [good]
 
@@ -330,20 +343,23 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
                 value=SourceCandidateJudgment(
                     decision="acquire",
                     covered_subject_indexes=[0],
-                    coverage_complete_if_acquired=True,
                 ),
                 usage=usage(kwargs["task_type"]),
             )
 
     gateway = Gateway()
-    result = await EditorialSourceEditor(gateway).select(brief, project, candidates)
+    result = await EditorialSourceEditor(gateway).judge_candidate(
+        brief,
+        project,
+        candidates[0],
+        eligible_subject_indexes=[0],
+    )
 
-    assert result.value.coverage_complete is True
+    assert result.value.decision == "acquire"
     assert [item["task_type"] for item in gateway.calls] == [
         "source_candidate_judgment",
     ]
-    assert all(item in {candidate.candidate_id for candidate in candidates}
-               for item in result.value.selected_candidate_ids)
+    assert result.value.covered_subject_indexes == [0]
 
 
 @pytest.mark.asyncio
@@ -370,18 +386,19 @@ async def test_source_editor_skips_candidate_without_free_text_decision() -> Non
             return ModelResult(
                 value=SourceCandidateJudgment(
                     decision="skip",
-                    coverage_complete_if_acquired=False,
                 ),
                 usage=usage(kwargs["task_type"]),
             )
 
-    result = await EditorialSourceEditor(Gateway()).select(brief, project, [valid])
+    result = await EditorialSourceEditor(Gateway()).judge_candidate(
+        brief,
+        project,
+        valid,
+        eligible_subject_indexes=[0],
+    )
 
-    assert result.value.selected_candidate_ids == []
-    assert result.value.coverage_complete is False
-    assert result.value.follow_up_queries == [
-        "buscar mais candidatos para os assuntos ainda sem fonte"
-    ]
+    assert result.value.decision == "skip"
+    assert result.value.covered_subject_indexes == []
 
 
 @pytest.mark.asyncio
@@ -393,33 +410,26 @@ async def test_source_research_replaces_failed_selection_until_editor_has_covera
     )
 
     class Editor:
-        selections = 0
-
         async def search_plan(self, brief, project):
             return ModelResult(
-                value=SourceSearchPlan(queries=["initial"], editorial_coverage=["axis"]),
+                value=SourceSearchPlan(queries=[
+                    SubjectSearchQuery(subject_index=0, query="initial", provider="you"),
+                    SubjectSearchQuery(subject_index=0, query="replacement", provider="you"),
+                ], editorial_coverage=["axis"]),
                 usage=usage("source_search_plan"),
             )
 
-        async def select(self, brief, project, candidates, **kwargs):
-            self.selections += 1
-            value = (
-                SourceSelectionProposal(
-                    selected_candidate_ids=[first.candidate_id],
-                    subject_coverage={first.candidate_id: [0]},
-                    coverage_complete=True,
-                )
-                if self.selections == 1 else
-                SourceSelectionProposal(
-                    selected_candidate_ids=[second.candidate_id],
-                    subject_coverage={second.candidate_id: [0]},
-                    coverage_complete=True,
-                )
+        async def judge_candidate(self, brief, project, candidate, **kwargs):
+            return ModelResult(
+                value=SourceCandidateJudgment(
+                    decision="acquire",
+                    covered_subject_indexes=[0],
+                ),
+                usage=usage("source_candidate_judgment"),
             )
-            return ModelResult(value=value, usage=usage("source_editor_selection"))
 
     class Discovery:
-        def discover(self, plan):
+        def discover_query(self, query, provider):
             return [first, second]
 
     class Acquirer:
@@ -455,7 +465,7 @@ async def test_source_research_replaces_failed_selection_until_editor_has_covera
     ).run(brief, project)
 
     assert [item.record.status for item in result.acquisitions] == ["acquired"]
-    assert result.failures == ()
+    assert result.failed_acquisition_count == 1
     assert result.selection.selected_candidate_ids == [second.candidate_id]
     assert len(result.usages) == 3
 
@@ -468,28 +478,30 @@ async def test_source_research_stops_after_first_query_with_acquired_coverage() 
         async def search_plan(self, brief, project):
             return ModelResult(
                 value=SourceSearchPlan(
-                    queries=["first query", "second query"],
+                    queries=[
+                        SubjectSearchQuery(subject_index=0, query=f"query {index}", provider="you")
+                        for index in range(4)
+                    ],
                     editorial_coverage=["axis"],
                 ),
                 usage=usage("source_search_plan"),
             )
 
-        async def select(self, brief, project, candidates, **kwargs):
+        async def judge_candidate(self, brief, project, candidate, **kwargs):
             return ModelResult(
-                value=SourceSelectionProposal(
-                    selected_candidate_ids=[found.candidate_id],
-                    subject_coverage={found.candidate_id: [0]},
-                    coverage_complete=True,
+                value=SourceCandidateJudgment(
+                    decision="acquire",
+                    covered_subject_indexes=[0],
                 ),
-                usage=usage("source_editor_selection"),
+                usage=usage("source_candidate_judgment"),
             )
 
     class Discovery:
         def __init__(self) -> None:
             self.queries: list[str] = []
 
-        def discover(self, plan):
-            self.queries.extend(plan.queries)
+        def discover_query(self, query, provider):
+            self.queries.append(query)
             return [found]
 
     class Acquirer:
@@ -519,6 +531,6 @@ async def test_source_research_stops_after_first_query_with_acquired_coverage() 
 
     result = await SourceResearch(Editor(), discovery, Acquirer()).run(brief, project)
 
-    assert discovery.queries == ["first query"]
+    assert discovery.queries == ["query 0"]
     assert result.selection.coverage_complete is True
     assert [item.record.status for item in result.acquisitions] == ["acquired"]
