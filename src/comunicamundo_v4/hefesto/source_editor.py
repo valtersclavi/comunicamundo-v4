@@ -36,9 +36,10 @@ class EditorialSourceEditor:
             max_output_tokens=8_192,
             thinking_tokens=3_000,
         )
-        return result.model_copy(update={
-            "value": _normalize_provisional_duration(result.value)
-        })
+        return ModelResult(
+            value=_normalize_provisional_duration(result.value),
+            usage=result.usage,
+        )
 
     async def search_plan(
         self,
@@ -68,9 +69,10 @@ class EditorialSourceEditor:
             max_output_tokens=8_192,
             thinking_tokens=3_000,
         )
-        return result.model_copy(update={
-            "value": _normalize_provisional_duration(result.value)
-        })
+        return ModelResult(
+            value=_normalize_provisional_duration(result.value),
+            usage=result.usage,
+        )
 
     async def judge_candidate(
         self,
