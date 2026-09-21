@@ -121,6 +121,7 @@ async def test_short_corpus_goes_from_flags_directly_to_one_complete_project() -
     task_types = [item["task_type"] for item in gateway.calls]
     assert task_types.count("source_selection") == 2
     assert task_types.count("editorial_project_scaffold") == 1
+    assert task_types.count("editorial_subject_routing") == 1
     assert task_types.count("editorial_subject_corpus") == 1
     assert not any(value.startswith("editorial_comprehension") for value in task_types)
     assert run.state is RunState.PROJECT_PROPOSED
@@ -153,12 +154,23 @@ async def test_long_corpus_uses_measured_bounded_comprehension_packets() -> None
         )
     )
     assert "editorial_comprehension_part" in task_types
-    assert task_types[-2:] == ["editorial_project_scaffold", "editorial_subject_corpus"]
+    assert task_types.index("editorial_project_scaffold") < task_types.index(
+        "editorial_subject_routing"
+    )
+    assert task_types.index("editorial_subject_routing") < task_types.index(
+        "editorial_subject_corpus"
+    )
     assert completed.state is RunState.PROJECT_PROPOSED
     assert all(
         item.prompt_tokens <= (2_000 if item.task_type == "source_selection" else 1_000)
         for item in repository.usage[run.execution_run_id]
-        if item.task_type not in {"editorial_project_scaffold", "editorial_subject_corpus"}
+        if item.task_type not in {
+            "editorial_project_scaffold",
+            "editorial_subject_routing",
+            "editorial_subject_digest",
+            "editorial_subject_digest_merge",
+            "editorial_subject_corpus",
+        }
     )
     assert await repository.condensations(run.execution_run_id)
 

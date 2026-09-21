@@ -21,6 +21,8 @@ from comunicamundo_v4.hefesto.contracts import (
     PreservationReviewProposal,
     SelectionBatch,
     SelectionFlags,
+    SubjectMaterialDigest,
+    SubjectPassageRouting,
     SubjectEditorialCorpus,
 )
 from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
@@ -186,6 +188,31 @@ class FakeGateway:
         }:
             value = EditorialCondensationProposal(
                 reading="A compact editorial reading preserving source tensions and limits."
+            )
+        elif task_type == "editorial_subject_routing":
+            pairs = [
+                (int(source), int(passage))
+                for source, passage in re.findall(
+                    r"SOURCE (\d+):[\s\S]*?\[passage (\d+);", prompt
+                )
+            ]
+            if not pairs:
+                pairs = [(1, 1)]
+            value = SubjectPassageRouting.model_validate({
+                "assignments": [
+                    {
+                        "source_ordinal": source,
+                        "passage_ordinal": passage,
+                        "subject_indexes": [0],
+                    }
+                    for source, passage in pairs
+                ]
+            })
+        elif task_type in {
+            "editorial_subject_digest", "editorial_subject_digest_merge"
+        }:
+            value = SubjectMaterialDigest(
+                reading="A compact subject-specific reading with its source grounding."
             )
         elif task_type == "editorial_project_scaffold":
             duration = int(re.search(r'"duration_minutes":\s*(\d+)', prompt).group(1))

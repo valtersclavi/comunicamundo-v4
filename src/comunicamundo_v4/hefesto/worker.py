@@ -278,6 +278,7 @@ async def source_search(execution_id: UUID) -> None:
                 for indexes in result.selection.subject_coverage.values()
                 for index in indexes
             }),
+            subject_coverage=result.selection.subject_coverage,
         )
         stages.append({
             "stage": "redigestion", "status": "completed",
@@ -438,6 +439,9 @@ async def _continue_to_project(
                     "editorial_comprehension_part",
                     "editorial_comprehension_merge",
                     "editorial_project_scaffold",
+                    "editorial_subject_routing",
+                    "editorial_subject_digest",
+                    "editorial_subject_digest_merge",
                     "editorial_subject_corpus",
                 },
             ),

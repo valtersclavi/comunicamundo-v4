@@ -248,6 +248,7 @@ def ingest_acquired(
     bucket_name: str,
     provisional_project: ProvisionalEditorialProject,
     supported_subject_indexes: list[int],
+    subject_coverage: dict[str, list[int]],
 ) -> IngestionResult:
     """Redigest successfully acquired public sources into the frozen core input."""
     # Local import keeps the normalization layer independent of transport routes.
@@ -302,6 +303,9 @@ def ingest_acquired(
                 "normalized_text_sha256": text_digest,
                 "normalizer": "hefesto-acquired-text-v1",
                 "acquisition_route": record.selected_route,
+                "covered_subject_indexes": subject_coverage.get(
+                    record.candidate.candidate_id, []
+                ),
             },
         )
         structure = segment_sources([value])

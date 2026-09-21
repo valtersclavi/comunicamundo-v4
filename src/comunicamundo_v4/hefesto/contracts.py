@@ -244,6 +244,27 @@ class EditorialCondensationProposal(StrictModel):
     reading: str = Field(min_length=1)
 
 
+class SubjectPassageAssignment(StrictModel):
+    source_ordinal: int = Field(ge=1)
+    passage_ordinal: int = Field(ge=1)
+    subject_indexes: list[int] = Field(min_length=1, max_length=12)
+
+
+class SubjectPassageRouting(StrictModel):
+    assignments: list[SubjectPassageAssignment] = Field(default_factory=list)
+
+
+class SubjectMaterialDigest(StrictModel):
+    reading: str = Field(min_length=1, max_length=4_000)
+
+    @field_validator("reading", mode="before")
+    @classmethod
+    def trim_long_reading(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return _truncate_text(value, 4_000)
+
+
 class EditorialCondensation(StrictModel):
     unit_id: Sha256
     level: int = Field(ge=1)

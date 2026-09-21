@@ -374,6 +374,79 @@ SELECTED EDITORIAL MATERIAL:
 """.strip()
 
 
+def subject_passage_routing_prompt(
+    brief: EditorialBrief,
+    scaffold: EditorialProjectScaffold,
+    passages: Sequence[Passage],
+    titles: dict[int, str | None],
+    eligible_subjects_by_source: dict[int, list[int]],
+) -> str:
+    subjects = [
+        {
+            "index": index,
+            "title": subject.title,
+            "editorial_role": subject.editorial_role,
+            "depth": subject.depth,
+        }
+        for index, subject in enumerate(scaffold.source_supported_subjects)
+    ]
+    eligibility = {
+        str(source): indexes
+        for source, indexes in eligible_subjects_by_source.items()
+        if indexes
+    }
+    return f"""
+Route each passage only to the Editorial Project subjects it materially
+supports or enriches. This is classification, not summarization. Return no
+explanation.
+
+A passage may serve several subjects. Omit passages that serve none. Use only
+the exact source_ordinal, passage_ordinal and subject indexes shown below.
+When SOURCE ELIGIBILITY supplies indexes for a source, that source may only be
+routed to those subjects. Eligibility means the source was acquired for those
+subjects; it does not mean every passage belongs to all of them.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+SUBJECTS:
+{json.dumps(subjects, ensure_ascii=False, indent=2)}
+
+SOURCE ELIGIBILITY:
+{json.dumps(eligibility, ensure_ascii=False, indent=2)}
+
+PASSAGES:
+{render_passages(passages, titles)}
+""".strip()
+
+
+def subject_material_digest_prompt(
+    brief: EditorialBrief,
+    subject: EditorialSubject,
+    material: str,
+    *,
+    material_kind: str,
+) -> str:
+    return f"""
+Condense only what this bounded material contributes to the named subject.
+Preserve substantive points, relationships, tensions, qualifications, limits,
+and the source ordinals needed for grounding. Do not outline the complete
+piece, discuss other subjects, or add model knowledge. Return one compact
+reading of at most 4,000 characters.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+SUBJECT:
+{subject.model_dump_json(indent=2)}
+
+INPUT KIND: {material_kind}
+
+MATERIAL:
+{material}
+""".strip()
+
+
 def content_draft_prompt(
     brief: EditorialBrief,
     project: EditorialProjectProposal,

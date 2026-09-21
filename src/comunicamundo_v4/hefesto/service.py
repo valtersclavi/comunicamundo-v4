@@ -36,6 +36,8 @@ from .contracts import (
     RunState,
     SelectionBatch,
     SelectionFlags,
+    SubjectMaterialDigest,
+    SubjectPassageRouting,
     SubjectEditorialCorpus,
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
@@ -53,6 +55,8 @@ from .prompts import (
     render_passages,
     selection_prompt,
     subject_corpus_prompt,
+    subject_material_digest_prompt,
+    subject_passage_routing_prompt,
 )
 from .segmentation import segment_sources
 
@@ -104,6 +108,7 @@ class Hefesto:
         selection_input_tokens: int = 24_000,
         comprehension_input_tokens: int = 120_000,
         condensation_input_tokens: int = 60_000,
+        subject_input_tokens: int = 24_000,
     ) -> None:
         if concurrency <= 0:
             raise ValueError("concurrency must be positive")
@@ -111,6 +116,7 @@ class Hefesto:
             selection_input_tokens,
             comprehension_input_tokens,
             condensation_input_tokens,
+            subject_input_tokens,
         ) < 1_000:
             raise ValueError("token budgets must leave room for a complete semantic unit")
         self._repository = repository
@@ -119,6 +125,7 @@ class Hefesto:
         self._selection_budget = selection_input_tokens
         self._comprehension_budget = comprehension_input_tokens
         self._condensation_budget = condensation_input_tokens
+        self._subject_budget = subject_input_tokens
         self._passage_target = min(8_000, selection_input_tokens // 3)
 
     async def prepare(
@@ -201,6 +208,8 @@ class Hefesto:
                     run,
                     material,
                     "original selected source passages",
+                    selected,
+                    titles,
                 )
 
             readings = await self._condense_passages(run, selected, titles)
@@ -217,6 +226,8 @@ class Hefesto:
                         run,
                         combined,
                         "bounded editorial comprehensions of selected passages",
+                        selected,
+                        titles,
                     )
                 readings = await self._condense_readings(run, readings, level)
                 level += 1
@@ -715,11 +726,282 @@ class Hefesto:
             *await self._measure_packet(right, render, budget),
         ]
 
+    def _subject_eligibility_by_source(
+        self,
+        run: ProductRun,
+        scaffold: EditorialProjectScaffold,
+    ) -> tuple[dict[int, list[int]], set[int]]:
+        provisional_indexes = run.request.supported_provisional_subject_indexes
+        scaffold_index_by_provisional = {
+            provisional_index: scaffold_index
+            for scaffold_index, provisional_index in enumerate(provisional_indexes)
+        }
+        eligibility: dict[int, list[int]] = {}
+        restricted_sources: set[int] = set()
+        for source_ordinal, source in enumerate(run.request.sources, start=1):
+            if "covered_subject_indexes" not in source.metadata:
+                continue
+            restricted_sources.add(source_ordinal)
+            raw_indexes = source.metadata.get("covered_subject_indexes")
+            if not isinstance(raw_indexes, list):
+                eligibility[source_ordinal] = []
+                continue
+            eligibility[source_ordinal] = sorted({
+                scaffold_index_by_provisional[index]
+                for index in raw_indexes
+                if isinstance(index, int)
+                and index in scaffold_index_by_provisional
+                and scaffold_index_by_provisional[index]
+                < len(scaffold.source_supported_subjects)
+            })
+        return eligibility, restricted_sources
+
+    async def _route_passages_by_subject(
+        self,
+        run: ProductRun,
+        scaffold: EditorialProjectScaffold,
+        passages: Sequence[Passage],
+        titles: dict[int, str | None],
+    ) -> dict[int, list[Passage]]:
+        eligibility, restricted_sources = self._subject_eligibility_by_source(
+            run, scaffold
+        )
+        routable = [
+            passage
+            for passage in passages
+            if passage.source_ordinal not in restricted_sources
+            or eligibility.get(passage.source_ordinal)
+        ]
+        if not routable:
+            return {}
+
+        def render(items: Sequence[Passage]) -> str:
+            return subject_passage_routing_prompt(
+                run.request.brief,
+                scaffold,
+                items,
+                titles,
+                eligibility,
+            )
+
+        packets: list[tuple[list[Passage], str, int]] = []
+        for offset in range(0, len(routable), 40):
+            window = routable[offset:offset + 40]
+            candidates = candidate_packets(
+                window,
+                token_budget=self._subject_budget * 3 // 4,
+                render=render,
+            )
+            for candidate in candidates:
+                packets.extend(
+                    await self._measure_packet(candidate, render, self._subject_budget)
+                )
+
+        semaphore = asyncio.Semaphore(self._concurrency)
+
+        async def execute(
+            items: list[Passage], prompt: str
+        ) -> tuple[list[Passage], SubjectPassageRouting]:
+            async with semaphore:
+                result = await self._call(
+                    run,
+                    task_type="editorial_subject_routing",
+                    prompt=prompt,
+                    schema=SubjectPassageRouting,
+                    max_output_tokens=4_096,
+                    thinking_tokens=0,
+                )
+            return items, result.value
+
+        results = await asyncio.gather(
+            *(execute(items, prompt) for items, prompt, _ in packets)
+        )
+        routed: dict[int, list[Passage]] = defaultdict(list)
+        seen: dict[int, set[str]] = defaultdict(set)
+        subject_count = len(scaffold.source_supported_subjects)
+        for items, response in results:
+            allowed = {
+                (item.source_ordinal, item.ordinal): item for item in items
+            }
+            for assignment in response.assignments:
+                key = (assignment.source_ordinal, assignment.passage_ordinal)
+                passage = allowed.get(key)
+                if passage is None:
+                    continue
+                for subject_index in assignment.subject_indexes:
+                    if subject_index < 0 or subject_index >= subject_count:
+                        continue
+                    eligible = eligibility.get(assignment.source_ordinal)
+                    if (
+                        assignment.source_ordinal in restricted_sources
+                        and subject_index not in (eligible or [])
+                    ):
+                        continue
+                    if passage.passage_id in seen[subject_index]:
+                        continue
+                    seen[subject_index].add(passage.passage_id)
+                    routed[subject_index].append(passage)
+        return dict(routed)
+
+    async def _create_subject_corpus(
+        self,
+        run: ProductRun,
+        scaffold: EditorialProjectScaffold,
+        subject: EditorialSubject,
+        passages: Sequence[Passage],
+        titles: dict[int, str | None],
+    ) -> SubjectEditorialCorpus:
+        raw_material = render_passages(passages, titles)
+        direct = subject_corpus_prompt(
+            run.request.brief,
+            scaffold,
+            subject,
+            raw_material,
+            material_kind="passages routed only to this subject",
+        )
+        if await self._count_tokens(direct) <= self._subject_budget:
+            result = await self._call(
+                run,
+                task_type="editorial_subject_corpus",
+                prompt=direct,
+                schema=SubjectEditorialCorpus,
+                max_output_tokens=8_192,
+                thinking_tokens=1_000,
+            )
+            return result.value
+
+        def render_raw(items: Sequence[Passage]) -> str:
+            return subject_material_digest_prompt(
+                run.request.brief,
+                subject,
+                render_passages(items, titles),
+                material_kind="passages routed only to this subject",
+            )
+
+        candidates = candidate_packets(
+            passages,
+            token_budget=self._subject_budget * 3 // 4,
+            render=render_raw,
+        )
+        packets: list[tuple[list[Passage], str, int]] = []
+        for candidate in candidates:
+            packets.extend(
+                await self._measure_packet(candidate, render_raw, self._subject_budget)
+            )
+
+        semaphore = asyncio.Semaphore(self._concurrency)
+
+        async def digest_raw(
+            ordinal: int, items: list[Passage], prompt: str, tokens: int
+        ) -> EditorialCondensation:
+            async with semaphore:
+                result = await self._call(
+                    run,
+                    task_type="editorial_subject_digest",
+                    prompt=prompt,
+                    schema=SubjectMaterialDigest,
+                    max_output_tokens=4_096,
+                    thinking_tokens=1_000,
+                )
+            identity = "subject-digest-v1:" + _subject_key(subject.title) + ":" + ":".join(
+                item.passage_id for item in items
+            )
+            return EditorialCondensation(
+                unit_id=sha256(identity.encode()).hexdigest(),
+                level=1,
+                ordinal=ordinal,
+                source_ordinals=sorted({item.source_ordinal for item in items}),
+                input_tokens=tokens,
+                reading=result.value.reading,
+            )
+
+        readings = list(await asyncio.gather(*(
+            digest_raw(ordinal, items, prompt, tokens)
+            for ordinal, (items, prompt, tokens) in enumerate(packets, start=1)
+        )))
+        level = 2
+        while True:
+            combined = render_condensations(readings)
+            final_prompt = subject_corpus_prompt(
+                run.request.brief,
+                scaffold,
+                subject,
+                combined,
+                material_kind="bounded readings routed only to this subject",
+            )
+            if await self._count_tokens(final_prompt) <= self._subject_budget:
+                result = await self._call(
+                    run,
+                    task_type="editorial_subject_corpus",
+                    prompt=final_prompt,
+                    schema=SubjectEditorialCorpus,
+                    max_output_tokens=8_192,
+                    thinking_tokens=1_000,
+                )
+                return result.value
+
+            def render_readings(items: Sequence[EditorialCondensation]) -> str:
+                return subject_material_digest_prompt(
+                    run.request.brief,
+                    subject,
+                    render_condensations(items),
+                    material_kind="bounded readings for this subject",
+                )
+
+            candidates = candidate_packets(
+                readings,
+                token_budget=self._subject_budget * 3 // 4,
+                render=render_readings,
+            )
+            merge_packets: list[
+                tuple[list[EditorialCondensation], str, int]
+            ] = []
+            for candidate in candidates:
+                merge_packets.extend(
+                    await self._measure_packet(
+                        candidate, render_readings, self._subject_budget
+                    )
+                )
+            if len(merge_packets) >= len(readings):
+                raise ValueError(
+                    "subject material cannot be reduced within the token budget"
+                )
+            merged: list[EditorialCondensation] = []
+            for ordinal, (items, prompt, tokens) in enumerate(
+                merge_packets, start=1
+            ):
+                result = await self._call(
+                    run,
+                    task_type="editorial_subject_digest_merge",
+                    prompt=prompt,
+                    schema=SubjectMaterialDigest,
+                    max_output_tokens=4_096,
+                    thinking_tokens=1_000,
+                )
+                identity = (
+                    f"subject-digest-v1:{_subject_key(subject.title)}:{level}:"
+                    + ":".join(item.unit_id for item in items)
+                )
+                merged.append(EditorialCondensation(
+                    unit_id=sha256(identity.encode()).hexdigest(),
+                    level=level,
+                    ordinal=ordinal,
+                    source_ordinals=sorted({
+                        source for item in items for source in item.source_ordinals
+                    }),
+                    input_tokens=tokens,
+                    reading=result.value.reading,
+                ))
+            readings = merged
+            level += 1
+
     async def _create_project(
         self,
         run: ProductRun,
         material: str,
         material_kind: str,
+        selected_passages: Sequence[Passage],
+        titles: dict[int, str | None],
     ) -> ProductRun:
         scaffold_result = await self._call(
             run,
@@ -763,22 +1045,38 @@ class Hefesto:
             existing_corpus.units if existing_corpus is not None else []
         )
         scaffold = scaffold.model_copy(update={"source_supported_subjects": subjects})
-        for subject in corpus_subjects:
-            corpus_result = await self._call(
+        routed = await self._route_passages_by_subject(
+            run, scaffold, selected_passages, titles
+        )
+        retained_subjects: list[EditorialSubject] = []
+        for subject_index, subject in enumerate(subjects):
+            if subject not in corpus_subjects:
+                retained_subjects.append(subject)
+                continue
+            subject_passages = routed.get(subject_index, [])
+            if not subject_passages:
+                continue
+            corpus_result = await self._create_subject_corpus(
                 run,
-                task_type="editorial_subject_corpus",
-                prompt=subject_corpus_prompt(
-                    run.request.brief,
-                    scaffold,
-                    subject,
-                    material,
-                    material_kind=material_kind,
-                ),
-                schema=SubjectEditorialCorpus,
-                max_output_tokens=4_096,
-                thinking_tokens=2_000,
+                scaffold,
+                subject,
+                subject_passages,
+                titles,
             )
-            units.extend(corpus_result.value.units)
+            units.extend(corpus_result.units)
+            retained_subjects.append(subject)
+        if not retained_subjects:
+            raise ValueError("acquired material did not support any Editorial Project subject")
+        subjects = _normalize_subject_minutes(
+            retained_subjects,
+            max(1, ceil(sum(item.allocated_minutes for item in retained_subjects))),
+        )
+        scaffold = scaffold.model_copy(update={
+            "duration_minutes": max(
+                1, ceil(sum(item.allocated_minutes for item in subjects))
+            ),
+            "source_supported_subjects": subjects,
+        })
         value = EditorialProjectProposal(
             working_title=scaffold.working_title,
             editorial_promise=scaffold.editorial_promise,
