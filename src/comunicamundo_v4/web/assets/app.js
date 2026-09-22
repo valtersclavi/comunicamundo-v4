@@ -112,6 +112,7 @@ function showError(element, error) { element.textContent = error instanceof Erro
 function clearError(element) { element.hidden = true; element.textContent = ""; }
 function bytes(value) { if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`; return `${(value / 1024 / 1024).toFixed(1)} MB`; }
 function escapeHtml(value) { const node = document.createElement("span"); node.textContent = value ?? ""; return node.innerHTML; }
+function escapeAttribute(value) { return escapeHtml(value).replaceAll('"', "&quot;").replaceAll("'", "&#39;"); }
 
 function renderFiles() {
   $("#file-list").innerHTML = state.files.map((file, index) => `<div class="file-item"><span>PDF</span><strong>${escapeHtml(file.name)}</strong><span>${bytes(file.size)}</span><button type="button" data-remove="${index}" aria-label="Remover ${escapeHtml(file.name)}">×</button></div>`).join("");
@@ -164,6 +165,34 @@ async function submitPlan(event) {
 }
 
 function statusClass(status) { return ["failed", "input_failed"].includes(status) ? "failed" : "completed"; }
+
+function renderSourceManifest(known, provisionalProject) {
+  const research = known.get("source_research");
+  const acquisition = known.get("source_acquisition");
+  const records = Array.isArray(acquisition?.sources) ? acquisition.sources : [];
+  const coverage = research?.subject_coverage || {};
+  const subjects = provisionalProject?.subjects || provisionalProject?.source_supported_subjects || [];
+  const panel = $("#sources-panel");
+  panel.hidden = records.length === 0;
+  if (!records.length) { $("#source-manifest").innerHTML = ""; return; }
+  $("#source-manifest").innerHTML = records.map((record, ordinal) => {
+    const candidate = record.candidate || {};
+    const indexes = Array.isArray(coverage[candidate.candidate_id]) ? coverage[candidate.candidate_id] : [];
+    const covered = indexes.map((index) => subjects[index]?.title || `Assunto ${index + 1}`);
+    const status = record.status === "acquired" ? "Adquirida" : record.status === "partial" ? "Parcial" : "Falhou";
+    const route = record.selected_route ? ` · ${record.selected_route}` : "";
+    const url = record.final_url || candidate.url;
+    const safeUrl = typeof url === "string" && url.startsWith("https://") ? url : null;
+    const link = safeUrl ? `<a href="${escapeAttribute(safeUrl)}" target="_blank" rel="noopener noreferrer">Abrir fonte</a>` : "";
+    return `<article class="source-record">
+      <div class="source-record-head"><span>Fonte ${ordinal + 1}</span><strong class="source-status ${escapeHtml(record.status || "failed")}">${status}${escapeHtml(route)}</strong></div>
+      <h3>${escapeHtml(candidate.title || "Fonte sem título")}</h3>
+      <p class="source-meta">${escapeHtml(candidate.publisher || candidate.provider || "Origem não informada")}${candidate.doi ? ` · DOI ${escapeHtml(candidate.doi)}` : ""} ${link}</p>
+      <div class="source-coverage"><span>Cobre</span>${covered.length ? covered.map((title) => `<em>${escapeHtml(title)}</em>`).join("") : "<em>Cobertura não registrada</em>"}</div>
+    </article>`;
+  }).join("");
+}
+
 function renderRun(run) {
   const status = run.status || "queued";
   state.currentStatus = status;
@@ -175,6 +204,7 @@ function renderRun(run) {
   const displayedStages = [...baseStages, ...(run.stages || []).map((item) => item.stage).filter((name) => !baseStages.includes(name))];
   const project = run.editorial_project?.proposal || run.provisional_editorial_project;
   renderSummary(run, known, project);
+  renderSourceManifest(known, run.provisional_editorial_project);
   let activeFound = false;
   $("#stages").innerHTML = displayedStages.map((name) => {
     const item = known.get(name); let kind = item ? statusClass(item.status) : "pending";

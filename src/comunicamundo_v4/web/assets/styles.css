@@ -108,6 +108,18 @@ input:focus, textarea:focus, select:focus { border-color: var(--green); box-shad
 .deliverable.pending { opacity: .72; }
 .deliverable strong, .deliverable span { display: block; }
 .deliverable span { margin-top: 4px; color: var(--soft-ink); font-size: 12px; line-height: 1.45; }
+.source-manifest { display: grid; gap: 12px; margin-top: 22px; }
+.source-record { padding: 18px; border: 1px solid var(--line); background: #f8f7f2; }
+.source-record-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--soft-ink); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.source-record h3 { margin: 10px 0 6px; font: 500 20px/1.3 Georgia, serif; }
+.source-meta { margin: 0; color: var(--soft-ink); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.source-meta a { margin-left: 7px; color: var(--green); font-weight: 700; }
+.source-status { color: var(--soft-ink); }
+.source-status.acquired { color: var(--green); }
+.source-status.failed { color: var(--danger); }
+.source-coverage { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 14px; }
+.source-coverage > span { margin-right: 2px; color: var(--soft-ink); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.source-coverage em { padding: 5px 8px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 11px; font-style: normal; }
 .artifact h2 { margin: 7px 0 20px; font-family: Georgia, serif; font-size: 36px; font-weight: 500; }
 blockquote { margin: 28px 0; padding-left: 24px; border-left: 4px solid var(--ember); font-family: Georgia, serif; font-size: clamp(24px, 3vw, 34px); line-height: 1.3; }
 .artifact-copy { max-width: 760px; color: var(--soft-ink); line-height: 1.7; }

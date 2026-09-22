@@ -339,41 +339,6 @@ SELECTED EDITORIAL MATERIAL:
 """.strip()
 
 
-def subject_corpus_prompt(
-    brief: EditorialBrief,
-    scaffold: EditorialProjectScaffold,
-    subject: EditorialSubject,
-    material: str,
-    *,
-    material_kind: str,
-) -> str:
-    return f"""
-Create only the editorial_corpus units for this one subject. Do not revise the
-Narrative Axis, title, promise, duration, or subject list. Keep the output
-compact: at most three units, concise synthesis, concise evidence, and only
-short verbatim excerpts when exact wording materially matters.
-
-The units must serve the named subject inside the approved scaffold and preserve
-essential points, tensions, qualifications, forbidden inferences, and concise
-source support. Source ordinals are internal grounding metadata for the content
-editor; they must never be written into the final product.
-
-BRIEF:
-{brief.model_dump_json(indent=2)}
-
-EDITORIAL PROJECT SCAFFOLD:
-{scaffold.model_dump_json(indent=2)}
-
-SUBJECT:
-{subject.model_dump_json(indent=2)}
-
-INPUT KIND: {material_kind}
-
-SELECTED EDITORIAL MATERIAL:
-{material}
-""".strip()
-
-
 def subject_passage_routing_prompt(
     brief: EditorialBrief,
     scaffold: EditorialProjectScaffold,
@@ -430,9 +395,10 @@ def subject_material_digest_prompt(
     return f"""
 Condense only what this bounded material contributes to the named subject.
 Preserve substantive points, relationships, tensions, qualifications, limits,
-and the source ordinals needed for grounding. Do not outline the complete
-piece, discuss other subjects, or add model knowledge. Return one compact
-reading of at most 4,000 characters.
+and the source ordinals needed for grounding. Preserve at most four short exact
+source excerpts only when their wording may be quoted or materially matters.
+Do not outline the complete piece, discuss other subjects, or add model
+knowledge. Return one compact reading of at most 4,000 characters.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
@@ -444,6 +410,74 @@ INPUT KIND: {material_kind}
 
 MATERIAL:
 {material}
+""".strip()
+
+
+def subject_corpus_core_prompt(
+    brief: EditorialBrief,
+    subject: EditorialSubject,
+    digest: str,
+) -> str:
+    return f"""
+Create only the core of one editorial knowledge unit for the named subject.
+Return a short title, a concise synthesis and at most six essential points.
+Do not return tensions, qualifications or evidence in this call. Do not add
+model knowledge or discuss other subjects.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+SUBJECT:
+{subject.model_dump_json(indent=2)}
+
+BOUNDED SUBJECT READING:
+{digest}
+""".strip()
+
+
+def subject_corpus_nuance_prompt(
+    brief: EditorialBrief,
+    subject: EditorialSubject,
+    digest: str,
+) -> str:
+    return f"""
+Extract only the tensions and qualifications that the future writer must
+preserve for this subject. Return at most four of each. Use empty arrays when
+the bounded reading contains none. Do not return synthesis, essential points or
+evidence. Do not add model knowledge.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+SUBJECT:
+{subject.model_dump_json(indent=2)}
+
+BOUNDED SUBJECT READING:
+{digest}
+""".strip()
+
+
+def subject_corpus_evidence_prompt(
+    brief: EditorialBrief,
+    subject: EditorialSubject,
+    digest: str,
+) -> str:
+    return f"""
+Create only the concise source evidence for this subject. Return at most four
+evidence items. Every item must identify its source ordinals and state its
+contribution briefly. Preserve a short verbatim excerpt only when the bounded
+reading contains exact wording that may be quoted or materially matters;
+otherwise use null. Do not invent or reconstruct quotations. Do not return
+synthesis, essential points, tensions or qualifications.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+SUBJECT:
+{subject.model_dump_json(indent=2)}
+
+BOUNDED SUBJECT READING:
+{digest}
 """.strip()
 
 

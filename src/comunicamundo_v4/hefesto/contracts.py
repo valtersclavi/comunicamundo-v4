@@ -265,6 +265,24 @@ class SubjectMaterialDigest(StrictModel):
         return _truncate_text(value, 4_000)
 
 
+class SubjectCorpusCore(StrictModel):
+    title: str = Field(min_length=1, max_length=140)
+    synthesis: str = Field(min_length=1, max_length=2_000)
+    essential_points: list[str] = Field(min_length=1, max_length=6)
+
+    @field_validator("synthesis", mode="before")
+    @classmethod
+    def trim_long_synthesis(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return _truncate_text(value, 2_000)
+
+
+class SubjectCorpusNuance(StrictModel):
+    tensions: list[str] = Field(default_factory=list, max_length=4)
+    qualifications: list[str] = Field(default_factory=list, max_length=4)
+
+
 class EditorialCondensation(StrictModel):
     unit_id: Sha256
     level: int = Field(ge=1)
@@ -308,6 +326,10 @@ class EditorialEvidence(StrictModel):
         return _truncate_text(value, 1_000)
 
 
+class SubjectCorpusEvidence(StrictModel):
+    evidence: list[EditorialEvidence] = Field(min_length=1, max_length=4)
+
+
 class EditorialKnowledgeUnit(StrictModel):
     title: str = Field(min_length=1, max_length=140)
     synthesis: str = Field(min_length=1, max_length=2_000)
@@ -347,10 +369,6 @@ class EditorialProjectScaffold(StrictModel):
     forbidden_inferences: list[str] = Field(default_factory=list, max_length=6)
     model_knowledge_suggestions: list[str] = Field(default_factory=list)
     source_enrichment_opportunities: list[str] = Field(default_factory=list)
-
-
-class SubjectEditorialCorpus(StrictModel):
-    units: list[EditorialKnowledgeUnit] = Field(min_length=1, max_length=3)
 
 
 class EditorialProjectProposal(StrictModel):

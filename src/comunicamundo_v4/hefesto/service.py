@@ -36,9 +36,11 @@ from .contracts import (
     RunState,
     SelectionBatch,
     SelectionFlags,
+    SubjectCorpusCore,
+    SubjectCorpusEvidence,
+    SubjectCorpusNuance,
     SubjectMaterialDigest,
     SubjectPassageRouting,
-    SubjectEditorialCorpus,
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
 from .prompts import (
@@ -54,7 +56,9 @@ from .prompts import (
     render_condensations,
     render_passages,
     selection_prompt,
-    subject_corpus_prompt,
+    subject_corpus_core_prompt,
+    subject_corpus_evidence_prompt,
+    subject_corpus_nuance_prompt,
     subject_material_digest_prompt,
     subject_passage_routing_prompt,
 )
@@ -108,7 +112,7 @@ class Hefesto:
         selection_input_tokens: int = 24_000,
         comprehension_input_tokens: int = 120_000,
         condensation_input_tokens: int = 60_000,
-        subject_input_tokens: int = 24_000,
+        subject_input_tokens: int = 5_000,
     ) -> None:
         if concurrency <= 0:
             raise ValueError("concurrency must be positive")
@@ -846,30 +850,10 @@ class Hefesto:
     async def _create_subject_corpus(
         self,
         run: ProductRun,
-        scaffold: EditorialProjectScaffold,
         subject: EditorialSubject,
         passages: Sequence[Passage],
         titles: dict[int, str | None],
-    ) -> SubjectEditorialCorpus:
-        raw_material = render_passages(passages, titles)
-        direct = subject_corpus_prompt(
-            run.request.brief,
-            scaffold,
-            subject,
-            raw_material,
-            material_kind="passages routed only to this subject",
-        )
-        if await self._count_tokens(direct) <= self._subject_budget:
-            result = await self._call(
-                run,
-                task_type="editorial_subject_corpus",
-                prompt=direct,
-                schema=SubjectEditorialCorpus,
-                max_output_tokens=8_192,
-                thinking_tokens=1_000,
-            )
-            return result.value
-
+    ) -> EditorialKnowledgeUnit:
         def render_raw(items: Sequence[Passage]) -> str:
             return subject_material_digest_prompt(
                 run.request.brief,
@@ -900,7 +884,7 @@ class Hefesto:
                     task_type="editorial_subject_digest",
                     prompt=prompt,
                     schema=SubjectMaterialDigest,
-                    max_output_tokens=4_096,
+                    max_output_tokens=2_048,
                     thinking_tokens=1_000,
                 )
             identity = "subject-digest-v1:" + _subject_key(subject.title) + ":" + ":".join(
@@ -920,26 +904,7 @@ class Hefesto:
             for ordinal, (items, prompt, tokens) in enumerate(packets, start=1)
         )))
         level = 2
-        while True:
-            combined = render_condensations(readings)
-            final_prompt = subject_corpus_prompt(
-                run.request.brief,
-                scaffold,
-                subject,
-                combined,
-                material_kind="bounded readings routed only to this subject",
-            )
-            if await self._count_tokens(final_prompt) <= self._subject_budget:
-                result = await self._call(
-                    run,
-                    task_type="editorial_subject_corpus",
-                    prompt=final_prompt,
-                    schema=SubjectEditorialCorpus,
-                    max_output_tokens=8_192,
-                    thinking_tokens=1_000,
-                )
-                return result.value
-
+        while len(readings) > 1:
             def render_readings(items: Sequence[EditorialCondensation]) -> str:
                 return subject_material_digest_prompt(
                     run.request.brief,
@@ -975,7 +940,7 @@ class Hefesto:
                     task_type="editorial_subject_digest_merge",
                     prompt=prompt,
                     schema=SubjectMaterialDigest,
-                    max_output_tokens=4_096,
+                    max_output_tokens=2_048,
                     thinking_tokens=1_000,
                 )
                 identity = (
@@ -994,6 +959,48 @@ class Hefesto:
                 ))
             readings = merged
             level += 1
+
+        digest = readings[0].reading
+        core_result, nuance_result, evidence_result = await asyncio.gather(
+            self._call(
+                run,
+                task_type="editorial_subject_core",
+                prompt=subject_corpus_core_prompt(
+                    run.request.brief, subject, digest
+                ),
+                schema=SubjectCorpusCore,
+                max_output_tokens=2_048,
+                thinking_tokens=0,
+            ),
+            self._call(
+                run,
+                task_type="editorial_subject_nuance",
+                prompt=subject_corpus_nuance_prompt(
+                    run.request.brief, subject, digest
+                ),
+                schema=SubjectCorpusNuance,
+                max_output_tokens=2_048,
+                thinking_tokens=0,
+            ),
+            self._call(
+                run,
+                task_type="editorial_subject_evidence",
+                prompt=subject_corpus_evidence_prompt(
+                    run.request.brief, subject, digest
+                ),
+                schema=SubjectCorpusEvidence,
+                max_output_tokens=3_072,
+                thinking_tokens=0,
+            ),
+        )
+        return EditorialKnowledgeUnit(
+            title=core_result.value.title,
+            synthesis=core_result.value.synthesis,
+            essential_points=core_result.value.essential_points,
+            tensions=nuance_result.value.tensions,
+            qualifications=nuance_result.value.qualifications,
+            evidence=evidence_result.value.evidence,
+        )
 
     async def _create_project(
         self,
@@ -1056,14 +1063,13 @@ class Hefesto:
             subject_passages = routed.get(subject_index, [])
             if not subject_passages:
                 continue
-            corpus_result = await self._create_subject_corpus(
+            corpus_unit = await self._create_subject_corpus(
                 run,
-                scaffold,
                 subject,
                 subject_passages,
                 titles,
             )
-            units.extend(corpus_result.units)
+            units.append(corpus_unit)
             retained_subjects.append(subject)
         if not retained_subjects:
             raise ValueError("acquired material did not support any Editorial Project subject")

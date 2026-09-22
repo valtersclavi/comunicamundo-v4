@@ -442,7 +442,9 @@ async def _continue_to_project(
                     "editorial_subject_routing",
                     "editorial_subject_digest",
                     "editorial_subject_digest_merge",
-                    "editorial_subject_corpus",
+                    "editorial_subject_core",
+                    "editorial_subject_nuance",
+                    "editorial_subject_evidence",
                 },
             ),
         })

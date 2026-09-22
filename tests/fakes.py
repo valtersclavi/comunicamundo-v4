@@ -23,7 +23,9 @@ from comunicamundo_v4.hefesto.contracts import (
     SelectionFlags,
     SubjectMaterialDigest,
     SubjectPassageRouting,
-    SubjectEditorialCorpus,
+    SubjectCorpusCore,
+    SubjectCorpusEvidence,
+    SubjectCorpusNuance,
 )
 from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
 
@@ -245,27 +247,29 @@ class FakeGateway:
                     ],
                 }
             )
-        elif task_type == "editorial_subject_corpus":
-            value = SubjectEditorialCorpus.model_validate(
+        elif task_type == "editorial_subject_core":
+            value = SubjectCorpusCore(
+                title="Core subject",
+                synthesis="The complete source-grounded synthesis.",
+                essential_points=[
+                    "The central supported point",
+                    "The relevant qualification",
+                ],
+            )
+        elif task_type == "editorial_subject_nuance":
+            value = SubjectCorpusNuance(
+                tensions=["A meaningful source tension"],
+                qualifications=["Do not overstate causality"],
+            )
+        elif task_type == "editorial_subject_evidence":
+            value = SubjectCorpusEvidence.model_validate(
                 {
-                    "units": [
+                    "evidence": [
                         {
-                            "title": "Core subject",
-                            "synthesis": "The complete source-grounded synthesis.",
-                            "essential_points": [
-                                "The central supported point",
-                                "The relevant qualification",
-                            ],
-                            "tensions": ["A meaningful source tension"],
-                            "qualifications": ["Do not overstate causality"],
-                            "evidence": [
-                                {
-                                    "source_ordinals": [1, 2],
-                                    "contribution": (
-                                        "Both sources support and qualify the point."
-                                    ),
-                                }
-                            ],
+                            "source_ordinals": [1, 2],
+                            "contribution": (
+                                "Both sources support and qualify the point."
+                            ),
                         }
                     ]
                 }

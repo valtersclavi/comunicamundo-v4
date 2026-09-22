@@ -122,7 +122,10 @@ async def test_short_corpus_goes_from_flags_directly_to_one_complete_project() -
     assert task_types.count("source_selection") == 2
     assert task_types.count("editorial_project_scaffold") == 1
     assert task_types.count("editorial_subject_routing") == 1
-    assert task_types.count("editorial_subject_corpus") == 1
+    assert task_types.count("editorial_subject_digest") == 1
+    assert task_types.count("editorial_subject_core") == 1
+    assert task_types.count("editorial_subject_nuance") == 1
+    assert task_types.count("editorial_subject_evidence") == 1
     assert not any(value.startswith("editorial_comprehension") for value in task_types)
     assert run.state is RunState.PROJECT_PROPOSED
     assert run.editorial_project is not None
@@ -158,7 +161,10 @@ async def test_long_corpus_uses_measured_bounded_comprehension_packets() -> None
         "editorial_subject_routing"
     )
     assert task_types.index("editorial_subject_routing") < task_types.index(
-        "editorial_subject_corpus"
+        "editorial_subject_digest"
+    )
+    assert task_types.index("editorial_subject_digest") < task_types.index(
+        "editorial_subject_core"
     )
     assert completed.state is RunState.PROJECT_PROPOSED
     assert all(
@@ -169,7 +175,9 @@ async def test_long_corpus_uses_measured_bounded_comprehension_packets() -> None
             "editorial_subject_routing",
             "editorial_subject_digest",
             "editorial_subject_digest_merge",
-            "editorial_subject_corpus",
+            "editorial_subject_core",
+            "editorial_subject_nuance",
+            "editorial_subject_evidence",
         }
     )
     assert await repository.condensations(run.execution_run_id)
