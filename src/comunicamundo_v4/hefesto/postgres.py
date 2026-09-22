@@ -14,8 +14,10 @@ from .contracts import (
     CallUsage,
     EditorialCondensation,
     Paragraph,
+    ParagraphAssetLink,
     ProductRun,
     SelectionBatch,
+    SourceAsset,
     EditorialInputRequest,
 )
 
@@ -332,7 +334,13 @@ class ProductRepository:
                 proposal.setdefault("editorial_corpus", None)
         return ProductRun.model_validate(payload)
 
-    async def save_structure(self, execution_run_id: UUID, paragraphs: Sequence[Paragraph]) -> None:
+    async def save_structure(
+        self,
+        execution_run_id: UUID,
+        paragraphs: Sequence[Paragraph],
+        assets: Sequence[SourceAsset] = (),
+        asset_links: Sequence[ParagraphAssetLink] = (),
+    ) -> None:
         async with self._pool.connection() as connection:
             async with connection.cursor() as cursor:
                 await cursor.executemany(
@@ -358,6 +366,35 @@ class ProductRepository:
                             for sentence in paragraph.sentences
                         ],
                     )
+                if assets:
+                    await cursor.executemany(
+                        """INSERT INTO hefesto_product.source_assets
+                           (execution_run_id,asset_id,source_id,source_ordinal,
+                            asset_ordinal,kind,role,page_no,caption,text_representation,
+                            blob_uri,structured_uri,binary_sha256,payload)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                           ON CONFLICT DO NOTHING""",
+                        [(
+                            execution_run_id, asset.asset_id, asset.source_id,
+                            asset.source_ordinal, asset.ordinal, asset.kind, asset.role,
+                            asset.page_no, asset.caption, asset.text_representation,
+                            asset.blob_uri, asset.structured_uri, asset.binary_sha256,
+                            asset.model_dump_json(),
+                        ) for asset in assets],
+                    )
+                if asset_links:
+                    await cursor.executemany(
+                        """INSERT INTO hefesto_product.paragraph_assets
+                           (execution_run_id,paragraph_id,asset_id,relation,distance,
+                            is_primary,payload)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb)
+                           ON CONFLICT DO NOTHING""",
+                        [(
+                            execution_run_id, link.paragraph_id, link.asset_id,
+                            link.relation, link.distance, link.primary,
+                            link.model_dump_json(),
+                        ) for link in asset_links],
+                    )
 
     async def save_selection_batch(
         self, execution_run_id: UUID, batch: SelectionBatch
@@ -375,6 +412,17 @@ class ProductRepository:
                     batch.model_dump_json(),
                 ),
             )
+
+    async def structure(self, execution_run_id: UUID) -> list[Paragraph]:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT payload FROM hefesto_product.paragraphs
+                   WHERE execution_run_id=%s
+                   ORDER BY source_ordinal,paragraph_ordinal""",
+                (execution_run_id,),
+            )
+            values = await rows.fetchall()
+        return [Paragraph.model_validate(item[0]) for item in values]
 
     async def selection_batches(
         self, execution_run_id: UUID

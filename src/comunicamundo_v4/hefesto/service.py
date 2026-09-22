@@ -29,6 +29,7 @@ from .contracts import (
     FinalTextProposal,
     FinalTextRecord,
     Paragraph,
+    ParagraphAssetLink,
     Passage,
     PlanningRequest,
     ProductRun,
@@ -41,6 +42,7 @@ from .contracts import (
     SubjectCorpusNuance,
     SubjectMaterialDigest,
     SubjectPassageRouting,
+    SourceAsset,
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
 from .prompts import (
@@ -72,8 +74,13 @@ class Repository(Protocol):
     async def save_run(self, run: ProductRun) -> None: ...
     async def get_run(self, execution_run_id: UUID) -> ProductRun | None: ...
     async def save_structure(
-        self, execution_run_id: UUID, paragraphs: Sequence[Paragraph]
+        self,
+        execution_run_id: UUID,
+        paragraphs: Sequence[Paragraph],
+        assets: Sequence[SourceAsset] = (),
+        asset_links: Sequence[ParagraphAssetLink] = (),
     ) -> None: ...
+    async def structure(self, execution_run_id: UUID) -> list[Paragraph]: ...
     async def save_selection_batch(
         self, execution_run_id: UUID, batch: SelectionBatch
     ) -> None: ...
@@ -100,6 +107,9 @@ class Repository(Protocol):
     async def record_product_receipt(
         self, execution_run_id: UUID, payload: dict[str, object]
     ) -> None: ...
+    async def product_receipt(
+        self, execution_run_id: UUID
+    ) -> dict[str, object] | None: ...
 
 
 class Hefesto:
@@ -138,9 +148,23 @@ class Hefesto:
         *,
         execution_run_id: UUID | None = None,
     ) -> ProductRun:
-        run = await self._load_or_create(request, execution_run_id)
+        paragraphs = segment_sources(request.sources)
+        assets = [asset for source in request.sources for asset in source.assets]
+        asset_links = [link for source in request.sources for link in source.asset_links]
+        clean_request = request.model_copy(update={
+            "sources": [
+                source.model_copy(update={
+                    "paragraphs": [], "assets": [], "asset_links": [],
+                })
+                for source in request.sources
+            ]
+        })
+        run = await self._load_or_create(clean_request, execution_run_id)
         await self._repository.save_structure(
-            run.execution_run_id, segment_sources(request.sources)
+            run.execution_run_id,
+            paragraphs,
+            assets,
+            asset_links,
         )
         return run
 
@@ -149,7 +173,7 @@ class Hefesto:
         if run.editorial_project is not None:
             return run
         run = await self._activate(run, RunState.SELECTING)
-        paragraphs = segment_sources(run.request.sources)
+        paragraphs = await self._paragraphs(run)
         passages = passages_from_paragraphs(
             paragraphs, passage_token_target=self._passage_target
         )
@@ -191,7 +215,7 @@ class Hefesto:
             return run
         if run.state is not RunState.COMPREHENDING:
             raise ValueError("Editorial Project requires completed source selection")
-        paragraphs = segment_sources(run.request.sources)
+        paragraphs = await self._paragraphs(run)
         passages = passages_from_paragraphs(
             paragraphs, passage_token_target=self._passage_target
         )
@@ -451,6 +475,11 @@ class Hefesto:
         self, execution_run_id: UUID, payload: dict[str, object]
     ) -> None:
         await self._repository.record_product_receipt(execution_run_id, payload)
+
+    async def stored_product_receipt(
+        self, execution_run_id: UUID
+    ) -> dict[str, object] | None:
+        return await self._repository.product_receipt(execution_run_id)
 
     async def usage_report(self, execution_run_id: UUID) -> dict[str, object]:
         return await self._repository.usage_report(execution_run_id)
@@ -1345,6 +1374,12 @@ class Hefesto:
         if run is None:
             raise KeyError(f"unknown execution {execution_run_id}")
         return run
+
+    async def _paragraphs(self, run: ProductRun) -> list[Paragraph]:
+        paragraphs = await self._repository.structure(run.execution_run_id)
+        if paragraphs:
+            return paragraphs
+        return segment_sources(run.request.sources)
 
     async def _activate(self, run: ProductRun, state: RunState) -> ProductRun:
         if run.state is state:

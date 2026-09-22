@@ -6,17 +6,20 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
-from uuid import uuid5
+from uuid import UUID, uuid5
 
 from google.cloud import storage
 from .contracts import (
+    AcquiredSource,
     EditorialInputRequest,
     IngestedSource,
     IngestionReceipt,
     NormalizedSource,
     PlanningRequest,
     ProvisionalEditorialProject,
+    SourceNormalizationFailure,
 )
+from .document_normalization import normalize_pdf_document
 from .segmentation import segment_sources
 from .normalization import extract_pdf, normalize_pdf_pages
 from .storage import parse_gs_uri, persist_bytes_immutable, persist_json_immutable
@@ -71,139 +74,94 @@ def ingest(
     normalized: list[NormalizedSource] = []
     source_receipts: list[IngestedSource] = []
     failed_acquisitions = []
+    failed_normalizations: list[SourceNormalizationFailure] = []
     for ordinal, source_input in enumerate(input_request.sources, start=1):
-        if source_input.uri.startswith("https://") and acquirer is not None:
-            from .source_pipeline import SourceAcquirer, candidate_identity
-            from .contracts import SourceCandidate
+        try:
+            acquisition = None
+            if source_input.uri.startswith("https://") and acquirer is not None:
+                from .source_pipeline import SourceAcquirer, candidate_identity
+                from .contracts import SourceCandidate
 
-            if not isinstance(acquirer, SourceAcquirer):
-                raise TypeError("acquirer must be a SourceAcquirer")
-            title = source_input.title or source_input.doi or source_input.uri
-            candidate = SourceCandidate(
-                candidate_id=candidate_identity(
-                    doi=source_input.doi, url=source_input.uri
-                ),
-                provider="provided",
-                query="user-provided source",
-                rank=1,
-                title=title,
-                url=source_input.uri,
-                acquisition_url=source_input.uri,
-                publisher=source_input.publisher,
-                doi=source_input.doi,
-            )
-            payload = acquirer.acquire(candidate)
-            if payload.record.status != "acquired":
-                failed_acquisitions.append(payload.record)
-                continue
-            record = payload.record
-            text = record.normalized_text or ""
-            original = payload.original_bytes or text.encode("utf-8")
-            content_type = payload.original_content_type or record.content_type or "text/markdown"
+                if not isinstance(acquirer, SourceAcquirer):
+                    raise TypeError("acquirer must be a SourceAcquirer")
+                candidate = SourceCandidate(
+                    candidate_id=candidate_identity(
+                        doi=source_input.doi, url=source_input.uri
+                    ),
+                    provider="provided",
+                    query="user-provided source",
+                    rank=1,
+                    title=source_input.title or source_input.doi or source_input.uri,
+                    url=source_input.uri,
+                    acquisition_url=source_input.uri,
+                    publisher=source_input.publisher,
+                    doi=source_input.doi,
+                )
+                payload = acquirer.acquire(candidate)
+                if payload.record.status != "acquired":
+                    failed_acquisitions.append(payload.record)
+                    continue
+                acquisition = payload.record
+                acquired_text = acquisition.normalized_text or ""
+                original = payload.original_bytes or acquired_text.encode("utf-8")
+                content_type = (
+                    payload.original_content_type
+                    or acquisition.content_type
+                    or "text/markdown"
+                )
+            else:
+                acquired_text = ""
+                original = source_reader.read(source_input.uri)
+                content_type = "application/pdf"
+
             binary_digest = sha256(original).hexdigest()
-            text_digest = sha256(text.encode()).hexdigest()
+            identity = (
+                acquisition.candidate.candidate_id if acquisition is not None else binary_digest
+            )
             source_id = uuid5(
                 input_request.project_id,
-                f"source:{ordinal}:{record.candidate.candidate_id}:{binary_digest}",
+                f"source:{ordinal}:{identity}:{binary_digest}",
             )
-            extension = ".pdf" if content_type == "application/pdf" else ".md"
-            original_uri = persist_bytes_immutable(
-                client,
-                bucket_name=bucket_name,
-                name=(
-                    f"hefesto-product/projects/{input_request.project_id}/sources/"
-                    f"{source_id}/original{extension}"
-                ),
-                data=original,
-                content_type=content_type,
-            )
-            value = NormalizedSource(
-                source_id=source_id,
-                title=record.candidate.title,
-                language=source_input.language,
-                text=text,
-                metadata={
-                    "input_uri": source_input.uri,
-                    "final_url": record.final_url,
-                    "original_gcs_uri": original_uri,
-                    "content_type": content_type,
-                    "bytes": len(original),
-                    "binary_sha256": binary_digest,
-                    "normalized_text_sha256": text_digest,
-                    "normalizer": "hefesto-acquired-text-v1",
-                    "acquisition_route": record.selected_route,
-                },
-            )
-            structure = segment_sources([value])
+            if _is_pdf(original, content_type):
+                value, source_receipt = _normalize_pdf_source(
+                    input_request=input_request,
+                    source_id=source_id,
+                    source_ordinal=len(normalized) + 1,
+                    input_uri=source_input.uri,
+                    title=(
+                        acquisition.candidate.title
+                        if acquisition is not None else source_input.title
+                    ),
+                    language=source_input.language,
+                    original=original,
+                    client=client,
+                    bucket_name=bucket_name,
+                    acquisition=acquisition,
+                )
+            else:
+                value, source_receipt = _normalize_text_source(
+                    input_request=input_request,
+                    source_id=source_id,
+                    source_ordinal=len(normalized) + 1,
+                    input_uri=source_input.uri,
+                    title=acquisition.candidate.title if acquisition else source_input.title,
+                    language=source_input.language,
+                    text=acquired_text,
+                    original=original,
+                    content_type=content_type,
+                    client=client,
+                    bucket_name=bucket_name,
+                    acquisition=acquisition,
+                )
             normalized.append(value)
-            source_receipts.append(IngestedSource(
-                source_id=source_id,
-                source_ordinal=len(source_receipts) + 1,
+            source_receipts.append(source_receipt)
+        except Exception as error:
+            failed_normalizations.append(SourceNormalizationFailure(
                 input_uri=source_input.uri,
-                original_uri=original_uri,
-                content_type=content_type,
-                bytes=len(original),
-                pages=None,
-                characters=len(text),
-                paragraphs=len(structure),
-                sentences=sum(len(item.sentences) for item in structure),
-                binary_sha256=binary_digest,
-                normalized_text_sha256=text_digest,
-                acquisition=record,
+                title=source_input.title,
+                error_class=type(error).__name__,
+                error_message=str(error)[:2000],
             ))
-            continue
-        original = source_reader.read(source_input.uri)
-        binary_digest = sha256(original).hexdigest()
-        source_id = uuid5(
-            input_request.project_id,
-            f"source:{ordinal}:{binary_digest}",
-        )
-        text, pages = extract_pdf(original)
-        original_name = (
-            f"hefesto-product/projects/{input_request.project_id}/sources/"
-            f"{source_id}/original.pdf"
-        )
-        original_uri = persist_bytes_immutable(
-            client,
-            bucket_name=bucket_name,
-            name=original_name,
-            data=original,
-            content_type="application/pdf",
-        )
-        value = NormalizedSource(
-            source_id=source_id,
-            title=source_input.title,
-            language=source_input.language,
-            text=text,
-            metadata={
-                "input_uri": source_input.uri,
-                "original_gcs_uri": original_uri,
-                "content_type": "application/pdf",
-                "pages": pages,
-                "bytes": len(original),
-                "binary_sha256": binary_digest,
-                "normalized_text_sha256": sha256(text.encode()).hexdigest(),
-                "normalizer": "hefesto-pdf-v1",
-            },
-        )
-        structure = segment_sources([value])
-        normalized.append(value)
-        source_receipts.append(
-            IngestedSource(
-                source_id=source_id,
-                source_ordinal=len(source_receipts) + 1,
-                input_uri=source_input.uri,
-                original_uri=original_uri,
-                content_type="application/pdf",
-                bytes=len(original),
-                pages=pages,
-                characters=len(text),
-                paragraphs=len(structure),
-                sentences=sum(len(item.sentences) for item in structure),
-                binary_sha256=binary_digest,
-                normalized_text_sha256=sha256(text.encode()).hexdigest(),
-            )
-        )
     if not normalized:
         raise ValueError("none of the supplied sources could be acquired and normalized")
     request = PlanningRequest(
@@ -230,6 +188,7 @@ def ingest(
         model_invocations=0,
         sources=source_receipts,
         failed_acquisitions=failed_acquisitions,
+        failed_normalizations=failed_normalizations,
     )
     receipt_uri = persist_json_immutable(
         client,
@@ -238,6 +197,144 @@ def ingest(
         payload=receipt.model_dump(mode="json"),
     )
     return IngestionResult(request=request, receipt=receipt, receipt_uri=receipt_uri)
+
+
+def _is_pdf(data: bytes, content_type: str) -> bool:
+    return data.startswith(b"%PDF") or content_type.split(";", 1)[0].lower() == "application/pdf"
+
+
+def _normalize_pdf_source(
+    *,
+    input_request: EditorialInputRequest,
+    source_id: UUID,
+    source_ordinal: int,
+    input_uri: str,
+    title: str | None,
+    language: str,
+    original: bytes,
+    client: storage.Client,
+    bucket_name: str,
+    acquisition: AcquiredSource | None,
+) -> tuple[NormalizedSource, IngestedSource]:
+    original_uri = persist_bytes_immutable(
+        client,
+        bucket_name=bucket_name,
+        name=(
+            f"hefesto-product/projects/{input_request.project_id}/sources/"
+            f"{source_id}/original.pdf"
+        ),
+        data=original,
+        content_type="application/pdf",
+    )
+    conversion = normalize_pdf_document(
+        original,
+        project_id=input_request.project_id,
+        source_id=source_id,
+        source_ordinal=source_ordinal,
+        title=title,
+        language=language,
+        input_uri=input_uri,
+        original_uri=original_uri,
+        client=client,
+        bucket_name=bucket_name,
+    )
+    value = conversion.source
+    if acquisition is not None:
+        value = value.model_copy(update={"metadata": {
+            **value.metadata,
+            "final_url": acquisition.final_url,
+            "doi": acquisition.candidate.doi,
+            "publisher": acquisition.candidate.publisher,
+            "acquisition_route": acquisition.selected_route,
+        }})
+    structure = segment_sources([value])
+    binary_digest = sha256(original).hexdigest()
+    text_digest = sha256(value.text.encode()).hexdigest()
+    return value, IngestedSource(
+        source_id=value.source_id,
+        source_ordinal=source_ordinal,
+        input_uri=input_uri,
+        original_uri=original_uri,
+        content_type="application/pdf",
+        bytes=len(original),
+        pages=conversion.pages or None,
+        characters=len(value.text),
+        paragraphs=len(structure),
+        sentences=sum(len(item.sentences) for item in structure),
+        tables=sum(item.kind == "table" for item in value.assets),
+        figures=sum(item.kind != "table" for item in value.assets),
+        normalization_status=conversion.status,
+        normalization_receipt_uri=conversion.receipt_uri,
+        binary_sha256=binary_digest,
+        normalized_text_sha256=text_digest,
+        acquisition=acquisition,
+    )
+
+
+def _normalize_text_source(
+    *,
+    input_request: EditorialInputRequest,
+    source_id: UUID,
+    source_ordinal: int,
+    input_uri: str,
+    title: str | None,
+    language: str,
+    text: str,
+    original: bytes,
+    content_type: str,
+    client: storage.Client,
+    bucket_name: str,
+    acquisition: AcquiredSource | None,
+) -> tuple[NormalizedSource, IngestedSource]:
+    if not text.strip():
+        raise ValueError("an acquired source has no normalized text")
+    binary_digest = sha256(original).hexdigest()
+    text_digest = sha256(text.encode()).hexdigest()
+    original_uri = persist_bytes_immutable(
+        client,
+        bucket_name=bucket_name,
+        name=(
+            f"hefesto-product/projects/{input_request.project_id}/sources/"
+            f"{source_id}/original.md"
+        ),
+        data=original,
+        content_type=content_type,
+    )
+    value = NormalizedSource(
+        source_id=source_id,
+        title=title,
+        language=language,
+        text=text,
+        metadata={
+            "input_uri": input_uri,
+            "final_url": acquisition.final_url if acquisition else None,
+            "doi": acquisition.candidate.doi if acquisition else None,
+            "publisher": acquisition.candidate.publisher if acquisition else None,
+            "original_gcs_uri": original_uri,
+            "content_type": content_type,
+            "bytes": len(original),
+            "binary_sha256": binary_digest,
+            "normalized_text_sha256": text_digest,
+            "normalizer": "hefesto-acquired-text-v1",
+            "acquisition_route": acquisition.selected_route if acquisition else None,
+        },
+    )
+    structure = segment_sources([value])
+    return value, IngestedSource(
+        source_id=value.source_id,
+        source_ordinal=source_ordinal,
+        input_uri=input_uri,
+        original_uri=original_uri,
+        content_type=content_type,
+        bytes=len(original),
+        pages=None,
+        characters=len(text),
+        paragraphs=len(structure),
+        sentences=sum(len(item.sentences) for item in structure),
+        binary_sha256=binary_digest,
+        normalized_text_sha256=text_digest,
+        acquisition=acquisition,
+    )
 
 
 def ingest_acquired(
@@ -262,69 +359,64 @@ def ingest_acquired(
 
     normalized: list[NormalizedSource] = []
     source_receipts: list[IngestedSource] = []
+    failed_normalizations: list[SourceNormalizationFailure] = []
     for ordinal, payload in enumerate(successful, start=1):
         record = payload.record
         text = record.normalized_text or ""
-        if not text.strip():
-            raise ValueError("an acquired source has no normalized text")
         original = payload.original_bytes or text.encode("utf-8")
         content_type = payload.original_content_type or record.content_type or "text/markdown"
         binary_digest = sha256(original).hexdigest()
-        text_digest = sha256(text.encode()).hexdigest()
         source_id = uuid5(
             input_request.project_id,
             f"acquired:{record.candidate.candidate_id}:{binary_digest}",
         )
-        extension = ".pdf" if content_type == "application/pdf" else ".md"
-        original_uri = persist_bytes_immutable(
-            client,
-            bucket_name=bucket_name,
-            name=(
-                f"hefesto-product/projects/{input_request.project_id}/sources/"
-                f"{source_id}/original{extension}"
-            ),
-            data=original,
-            content_type=content_type,
-        )
-        value = NormalizedSource(
-            source_id=source_id,
-            title=record.candidate.title,
-            language=input_request.brief.output_language,
-            text=text,
-            metadata={
-                "input_uri": record.candidate.url,
-                "final_url": record.final_url,
-                "doi": record.candidate.doi,
-                "publisher": record.candidate.publisher,
-                "original_gcs_uri": original_uri,
-                "content_type": content_type,
-                "bytes": len(original),
-                "binary_sha256": binary_digest,
-                "normalized_text_sha256": text_digest,
-                "normalizer": "hefesto-acquired-text-v1",
-                "acquisition_route": record.selected_route,
+        try:
+            if _is_pdf(original, content_type):
+                value, source_receipt = _normalize_pdf_source(
+                    input_request=input_request,
+                    source_id=source_id,
+                    source_ordinal=len(normalized) + 1,
+                    input_uri=record.candidate.url,
+                    title=record.candidate.title,
+                    language=input_request.brief.output_language,
+                    original=original,
+                    client=client,
+                    bucket_name=bucket_name,
+                    acquisition=record,
+                )
+            else:
+                value, source_receipt = _normalize_text_source(
+                    input_request=input_request,
+                    source_id=source_id,
+                    source_ordinal=len(normalized) + 1,
+                    input_uri=record.candidate.url,
+                    title=record.candidate.title,
+                    language=input_request.brief.output_language,
+                    text=text,
+                    original=original,
+                    content_type=content_type,
+                    client=client,
+                    bucket_name=bucket_name,
+                    acquisition=record,
+                )
+            value = value.model_copy(update={"metadata": {
+                **value.metadata,
                 "covered_subject_indexes": subject_coverage.get(
                     record.candidate.candidate_id, []
                 ),
-            },
-        )
-        structure = segment_sources([value])
-        normalized.append(value)
-        source_receipts.append(IngestedSource(
-            source_id=source_id,
-            source_ordinal=ordinal,
-            input_uri=record.candidate.url,
-            original_uri=original_uri,
-            content_type=content_type,
-            bytes=len(original),
-            pages=None,
-            characters=len(text),
-            paragraphs=len(structure),
-            sentences=sum(len(item.sentences) for item in structure),
-            binary_sha256=binary_digest,
-            normalized_text_sha256=text_digest,
-            acquisition=record,
-        ))
+            }})
+            normalized.append(value)
+            source_receipts.append(source_receipt)
+        except Exception as error:
+            failed_normalizations.append(SourceNormalizationFailure(
+                input_uri=record.candidate.url,
+                title=record.candidate.title,
+                error_class=type(error).__name__,
+                error_message=str(error)[:2000],
+            ))
+
+    if not normalized:
+        raise ValueError("none of the acquired sources could be normalized")
 
     request = PlanningRequest(
         project_id=input_request.project_id,
@@ -349,6 +441,7 @@ def ingest_acquired(
         model_invocations=0,
         sources=source_receipts,
         failed_acquisitions=failures,
+        failed_normalizations=failed_normalizations,
     )
     receipt_uri = persist_json_immutable(
         client,

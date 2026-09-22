@@ -13,6 +13,12 @@ _SENTENCE_END = re.compile(r"[.!?…。！？]+(?:[\"'”’»）)\]]+)?(?=\s+|$
 def segment_sources(sources: Sequence[NormalizedSource]) -> list[Paragraph]:
     result: list[Paragraph] = []
     for source_ordinal, source in enumerate(sources, start=1):
+        if source.paragraphs:
+            result.extend(
+                paragraph.model_copy(update={"source_ordinal": source_ordinal})
+                for paragraph in source.paragraphs
+            )
+            continue
         text = source.text.replace("\r\n", "\n").replace("\r", "\n").strip()
         raw_paragraphs = [part.strip() for part in _PARAGRAPH_BREAK.split(text) if part.strip()]
         for paragraph_ordinal, paragraph_text in enumerate(raw_paragraphs, start=1):

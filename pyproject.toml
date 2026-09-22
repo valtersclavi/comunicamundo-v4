@@ -24,6 +24,7 @@ comunicamundo-v4-worker = "comunicamundo_v4.hefesto.worker:main"
 
 [project.optional-dependencies]
 dev = ["pytest==8.4.2", "pytest-asyncio==1.1.0"]
+document = ["docling==2.130.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -123,6 +123,10 @@ async def plan(args: argparse.Namespace) -> None:
         "duration_ms": int((perf_counter() - started) * 1000),
         "receipt_uri": ingestion.receipt_uri,
         "model_invocations": 0,
+        "source_count": ingestion.receipt.source_count,
+        "table_count": sum(item.tables for item in ingestion.receipt.sources),
+        "figure_count": sum(item.figures for item in ingestion.receipt.sources),
+        "failed_normalization_count": len(ingestion.receipt.failed_normalizations),
     })
     repository, hefesto = await services()
     try:
@@ -284,6 +288,10 @@ async def source_search(execution_id: UUID) -> None:
             "stage": "redigestion", "status": "completed",
             "duration_ms": int((perf_counter() - started) * 1000),
             "receipt_uri": ingestion.receipt_uri,
+            "source_count": ingestion.receipt.source_count,
+            "table_count": sum(item.tables for item in ingestion.receipt.sources),
+            "figure_count": sum(item.figures for item in ingestion.receipt.sources),
+            "failed_normalization_count": len(ingestion.receipt.failed_normalizations),
         })
         hefesto = Hefesto(repository, gateway)
         await hefesto.prepare(ingestion.request, execution_run_id=execution_id)
@@ -572,6 +580,11 @@ async def _persist_product_receipt(
     ingestion: IngestionResult | None = None,
 ) -> None:
     await hefesto.record_stages(execution_id, stages)
+    previous_receipt = await hefesto.stored_product_receipt(execution_id)
+    previous_input = (
+        previous_receipt.get("input")
+        if isinstance(previous_receipt, dict) else None
+    )
     receipt = {
         **(await hefesto.receipt(execution_id)),
         "input": (
@@ -582,8 +595,45 @@ async def _persist_product_receipt(
                 "source_count": ingestion.receipt.source_count,
                 "paragraph_count": ingestion.receipt.paragraph_count,
                 "sentence_count": ingestion.receipt.sentence_count,
+                "table_count": sum(item.tables for item in ingestion.receipt.sources),
+                "figure_count": sum(item.figures for item in ingestion.receipt.sources),
+                "sources": [
+                    {
+                        "source_id": str(item.source_id),
+                        "input_uri": item.input_uri,
+                        "status": item.normalization_status,
+                        "pages": item.pages,
+                        "paragraphs": item.paragraphs,
+                        "tables": item.tables,
+                        "figures": item.figures,
+                        "normalization_receipt_uri": item.normalization_receipt_uri,
+                    }
+                    for item in ingestion.receipt.sources
+                ],
+                "failed_normalizations": [
+                    item.model_dump(mode="json")
+                    for item in ingestion.receipt.failed_normalizations
+                ],
+                "assets": [
+                    {
+                        "asset_id": asset.asset_id,
+                        "source_id": str(asset.source_id),
+                        "kind": asset.kind,
+                        "role": asset.role,
+                        "page_no": asset.page_no,
+                        "caption": asset.caption,
+                        "has_image": bool(asset.blob_uri),
+                        "has_structure": bool(asset.structured_uri),
+                        "linked_paragraphs": sum(
+                            link.asset_id == asset.asset_id
+                            for link in source.asset_links
+                        ),
+                    }
+                    for source in ingestion.request.sources
+                    for asset in source.assets
+                ],
             }
-            if ingestion is not None else None
+            if ingestion is not None else previous_input
         ),
         "generated_at": datetime.now(UTC).isoformat(),
     }

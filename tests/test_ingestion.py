@@ -7,6 +7,8 @@ import pytest
 
 from comunicamundo_v4.hefesto import ingestion
 from comunicamundo_v4.hefesto.contracts import EditorialInputRequest
+from comunicamundo_v4.hefesto.contracts import NormalizedSource
+from comunicamundo_v4.hefesto.document_normalization import DocumentNormalization
 from comunicamundo_v4.hefesto.ingestion import extract_pdf, ingest, normalize_pdf_pages
 from comunicamundo_v4.hefesto.storage import load_input_request
 from comunicamundo_v4.hefesto.worker import parser
@@ -111,11 +113,22 @@ def test_generic_ingestion_normalizes_each_pdf_once_before_any_model(monkeypatch
     reader = Reader({item.uri: b"%PDF synthetic" for item in source.sources})
     calls: list[bytes] = []
 
-    def fake_extract(data: bytes) -> tuple[str, int]:
+    def fake_normalize(data: bytes, **kwargs) -> DocumentNormalization:
         calls.append(data)
-        return "Primeira frase. Continuação.\n\nSegundo parágrafo.", 3
+        source = NormalizedSource(
+            source_id=kwargs["source_id"],
+            title=kwargs["title"],
+            language=kwargs["language"],
+            text="Primeira frase. Continuação.\n\nSegundo parágrafo.",
+        )
+        return DocumentNormalization(
+            source=source,
+            status="normalized",
+            pages=3,
+            receipt_uri="gs://product/normalization-receipt.json",
+        )
 
-    monkeypatch.setattr(ingestion, "extract_pdf", fake_extract)
+    monkeypatch.setattr(ingestion, "normalize_pdf_document", fake_normalize)
     first = ingest(source, client=storage, bucket_name="product", reader=reader)
     second = ingest(source, client=storage, bucket_name="product", reader=reader)
 

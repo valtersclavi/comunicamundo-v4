@@ -1,6 +1,6 @@
 # Plano de integração do Docling no Hefesto
 
-Status: decisão arquitetural e plano de implementação. Nenhuma etapa deste documento está implementada ainda.
+Status: implementação em andamento conforme este plano.
 
 ## 1. Resultado pretendido
 
@@ -633,11 +633,11 @@ A integração está pronta quando todos forem verdadeiros:
 
 ## 18. Definição de pronto para começar a codificar
 
-Não resta decisão arquitetural bloqueante para a primeira entrega. Ao iniciar a implementação, as únicas escolhas técnicas que precisam ser materializadas — e então congeladas no código — são:
+Não resta decisão arquitetural bloqueante para a primeira entrega. As escolhas técnicas iniciais foram materializadas assim:
 
-1. versão exata do Docling e do runtime CPU;
-2. engine OCR local compatível com os idiomas e com a imagem Debian atual;
-3. forma lossless concreta da tabela (`HTML` mais JSON seletivo ou JSON completo do item);
-4. conjunto mínimo de modelos que será embutido na imagem.
+1. Docling `2.130.0`, fixado no build CPU;
+2. Tesseract CLI local, com os pacotes de idioma Debian disponíveis na imagem;
+3. tabela em HTML mais o JSON lossless completo do `DoclingDocument`;
+4. somente os modelos Docling de layout e TableFormer embutidos na imagem.
 
-Essas escolhas devem ser resolvidas no primeiro commit de implementação por compatibilidade verificável, não por uma nova rodada aberta de pesquisa.
+Qualquer alteração dessas escolhas exige incompatibilidade reproduzível ou necessidade real do produto.

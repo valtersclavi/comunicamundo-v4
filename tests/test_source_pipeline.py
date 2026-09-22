@@ -232,6 +232,25 @@ def test_acquire_falls_through_to_you_contents_and_preserves_attempts() -> None:
     assert result.original_bytes == b"login"
 
 
+def test_acquire_delivers_public_pdf_bytes_without_parsing_them() -> None:
+    session = Session()
+    session.queue("GET", "https://example.org/article", Response(
+        content=b"%PDF scanned or structured content",
+        content_type="application/pdf",
+    ))
+
+    result = SourceAcquirer(
+        you_api_key="you", jina_api_key="jina", browser_use_api_key="browser",
+        session=session,
+    ).acquire(candidate())
+
+    assert result.record.status == "acquired"
+    assert result.record.selected_route == "direct"
+    assert result.record.normalized_text == ""
+    assert result.original_bytes.startswith(b"%PDF")
+    assert [item.route for item in result.record.attempts] == ["direct"]
+
+
 def test_acquire_uses_jina_when_contents_is_too_short() -> None:
     session = Session()
     session.queue("GET", "https://example.org/article", Response(status=403))

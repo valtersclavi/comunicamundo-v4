@@ -121,7 +121,7 @@ function renderFiles() {
 function addFiles(files) {
   for (const file of files) {
     if ((file.type && file.type !== "application/pdf") || !file.name.toLowerCase().endsWith(".pdf")) { showError($("#form-error"), `“${file.name}” não é um PDF.`); continue; }
-    if (file.size > 1024 ** 3) { showError($("#form-error"), `“${file.name}” ultrapassa 1 GB.`); continue; }
+    if (file.size > 200 * 1024 ** 2) { showError($("#form-error"), `“${file.name}” ultrapassa 200 MB.`); continue; }
     if (!state.files.some((item) => item.name === file.name && item.size === file.size)) state.files.push(file);
   }
   renderFiles();
@@ -193,6 +193,19 @@ function renderSourceManifest(known, provisionalProject) {
   }).join("");
 }
 
+function renderAssetManifest(input) {
+  const assets = Array.isArray(input?.assets) ? input.assets : [];
+  const panel = $("#assets-panel");
+  panel.hidden = assets.length === 0;
+  if (!assets.length) { $("#asset-manifest").innerHTML = ""; return; }
+  const names = { table: "Tabela", figure: "Figura", chart: "Gráfico", unknown_picture: "Imagem" };
+  $("#asset-manifest").innerHTML = assets.map((asset, index) => `<article class="source-record">
+    <div class="source-record-head"><span>${escapeHtml(names[asset.kind] || "Ativo")} ${index + 1}</span><strong>${asset.page_no ? `Página ${asset.page_no}` : "Página não identificada"}</strong></div>
+    <h3>${escapeHtml(asset.caption || `${names[asset.kind] || "Ativo"} sem legenda`)}</h3>
+    <p class="source-meta">${asset.has_image ? "Imagem preservada" : "Sem recorte visual"}${asset.has_structure ? " · Estrutura preservada" : ""} · ${formatter.format(asset.linked_paragraphs || 0)} vínculo${asset.linked_paragraphs === 1 ? "" : "s"} textual${asset.linked_paragraphs === 1 ? "" : "is"}</p>
+  </article>`).join("");
+}
+
 function renderRun(run) {
   const status = run.status || "queued";
   state.currentStatus = status;
@@ -205,6 +218,7 @@ function renderRun(run) {
   const project = run.editorial_project?.proposal || run.provisional_editorial_project;
   renderSummary(run, known, project);
   renderSourceManifest(known, run.provisional_editorial_project || run.request?.provisional_project);
+  renderAssetManifest(run.input);
   let activeFound = false;
   $("#stages").innerHTML = displayedStages.map((name) => {
     const item = known.get(name); let kind = item ? statusClass(item.status) : "pending";

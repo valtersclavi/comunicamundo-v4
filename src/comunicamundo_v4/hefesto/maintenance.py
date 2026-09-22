@@ -14,6 +14,8 @@ from .storage import parse_gs_uri
 PRODUCT_PREFIX = "hefesto-product/"
 _EXECUTION_TABLES = (
     "sentences",
+    "paragraph_assets",
+    "source_assets",
     "selection_batches",
     "editorial_condensations",
     "paragraphs",

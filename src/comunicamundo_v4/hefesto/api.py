@@ -165,7 +165,7 @@ class UploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     file_name: str = Field(min_length=1, max_length=255)
     content_type: str = Field(default="application/pdf", pattern=r"^application/pdf$")
-    size_bytes: int = Field(ge=1, le=1_073_741_824)
+    size_bytes: int = Field(ge=1, le=209_715_200)
 
 
 class LoginRequest(BaseModel):

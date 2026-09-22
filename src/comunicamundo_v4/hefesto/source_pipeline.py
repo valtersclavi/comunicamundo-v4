@@ -17,7 +17,7 @@ from .contracts import (
     SourceCandidate,
     SourceSearchPlan,
 )
-from .normalization import extract_pdf, normalize_acquired_text
+from .normalization import normalize_acquired_text
 
 
 _TRACKING_PARAMETERS = {
@@ -241,6 +241,19 @@ class SourceAcquirer:
     def acquire(self, candidate: SourceCandidate) -> AcquisitionPayload:
         attempts: list[AcquisitionAttempt] = []
         original_bytes, original_content_type, direct_text = self._direct(candidate, attempts)
+        if (
+            original_bytes
+            and (
+                original_bytes.startswith(b"%PDF")
+                or original_content_type == "application/pdf"
+            )
+        ):
+            return self._success(
+                candidate, "direct", "", attempts,
+                final_url=candidate.acquisition_url,
+                original_bytes=original_bytes,
+                original_content_type="application/pdf",
+            )
         if direct_text and _acceptable(direct_text):
             return self._success(
                 candidate, "direct", direct_text, attempts,
@@ -299,9 +312,7 @@ class SourceAcquirer:
             data = response.content
             content_type = response.headers.get("content-type", "application/octet-stream").split(";", 1)[0].lower()
             text = None
-            if data.startswith(b"%PDF") or content_type == "application/pdf":
-                text, _ = extract_pdf(data)
-            elif content_type.startswith("text/plain"):
+            if content_type.startswith("text/plain"):
                 text = response.text
             attempts.append(_attempt("direct", True, started, response.url, content_type, text))
             return data, content_type, text

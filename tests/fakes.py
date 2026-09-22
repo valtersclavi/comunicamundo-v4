@@ -17,10 +17,12 @@ from comunicamundo_v4.hefesto.contracts import (
     EditorialProjectScaffold,
     FinalTextProposal,
     Paragraph,
+    ParagraphAssetLink,
     ProductRun,
     PreservationReviewProposal,
     SelectionBatch,
     SelectionFlags,
+    SourceAsset,
     SubjectMaterialDigest,
     SubjectPassageRouting,
     SubjectCorpusCore,
@@ -34,6 +36,8 @@ class MemoryRepository:
     def __init__(self) -> None:
         self.runs: dict[UUID, ProductRun] = {}
         self.structures: dict[UUID, list[Paragraph]] = {}
+        self.assets: dict[UUID, list[SourceAsset]] = {}
+        self.asset_links: dict[UUID, list[ParagraphAssetLink]] = {}
         self.saved_selections: dict[UUID, dict[str, SelectionBatch]] = {}
         self.saved_condensations: dict[UUID, dict[str, EditorialCondensation]] = {}
         self.usage: dict[UUID, list[CallUsage]] = {}
@@ -47,9 +51,15 @@ class MemoryRepository:
         return self.runs.get(execution_run_id)
 
     async def save_structure(
-        self, execution_run_id: UUID, paragraphs: Sequence[Paragraph]
+        self,
+        execution_run_id: UUID,
+        paragraphs: Sequence[Paragraph],
+        assets: Sequence[SourceAsset] = (),
+        asset_links: Sequence[ParagraphAssetLink] = (),
     ) -> None:
         self.structures[execution_run_id] = list(paragraphs)
+        self.assets[execution_run_id] = list(assets)
+        self.asset_links[execution_run_id] = list(asset_links)
 
     async def save_selection_batch(
         self, execution_run_id: UUID, batch: SelectionBatch
@@ -57,6 +67,9 @@ class MemoryRepository:
         self.saved_selections.setdefault(execution_run_id, {}).setdefault(
             batch.batch_id, batch
         )
+
+    async def structure(self, execution_run_id: UUID) -> list[Paragraph]:
+        return list(self.structures.get(execution_run_id, []))
 
     async def selection_batches(
         self, execution_run_id: UUID
@@ -126,6 +139,12 @@ class MemoryRepository:
         self, execution_run_id: UUID, payload: dict[str, object]
     ) -> None:
         self.receipts[execution_run_id] = payload
+
+    async def product_receipt(
+        self, execution_run_id: UUID
+    ) -> dict[str, object] | None:
+        value = self.receipts.get(execution_run_id)
+        return dict(value) if value is not None else None
 
 
 class FakeGateway:

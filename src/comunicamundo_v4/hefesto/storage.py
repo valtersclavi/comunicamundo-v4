@@ -53,6 +53,23 @@ def persist_json_immutable(
     return f"gs://{bucket_name}/{name}"
 
 
+def persist_text_immutable(
+    client: storage.Client,
+    *,
+    bucket_name: str,
+    name: str,
+    text: str,
+) -> str:
+    persist_bytes_immutable(
+        client,
+        bucket_name=bucket_name,
+        name=name,
+        data=text.encode("utf-8"),
+        content_type="text/plain; charset=utf-8",
+    )
+    return f"gs://{bucket_name}/{name}"
+
+
 def persist_bytes_immutable(
     client: storage.Client,
     *,

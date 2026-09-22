@@ -140,12 +140,100 @@ class AcquiredSource(StrictModel):
     failure_reason: str | None = None
 
 
+class BoundingBox(StrictModel):
+    left: float
+    top: float
+    right: float
+    bottom: float
+    coord_origin: str | None = None
+
+
+class Sentence(StrictModel):
+    sentence_id: Sha256
+    ordinal: int = Field(ge=1)
+    text: str = Field(min_length=1)
+
+
+class Paragraph(StrictModel):
+    paragraph_id: Sha256
+    source_id: UUID
+    source_ordinal: int = Field(ge=1)
+    ordinal: int = Field(ge=1)
+    text: str = Field(min_length=1)
+    sentences: list[Sentence] = Field(min_length=1)
+    element_type: str = "paragraph"
+    page_no: int | None = Field(default=None, ge=1)
+    bbox: BoundingBox | None = None
+    canonical_start: int | None = Field(default=None, ge=0)
+    canonical_end: int | None = Field(default=None, ge=0)
+    origin_refs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def canonical_span_is_ordered(self) -> "Paragraph":
+        if (self.canonical_start is None) != (self.canonical_end is None):
+            raise ValueError("canonical offsets must be provided together")
+        if (
+            self.canonical_start is not None
+            and self.canonical_end is not None
+            and self.canonical_end <= self.canonical_start
+        ):
+            raise ValueError("canonical end must follow canonical start")
+        return self
+
+
+class SourceAsset(StrictModel):
+    asset_id: Sha256
+    source_id: UUID
+    source_ordinal: int = Field(ge=1)
+    ordinal: int = Field(ge=1)
+    kind: str = Field(pattern=r"^(table|figure|chart|unknown_picture)$")
+    role: str = Field(pattern=r"^(content|decorative|unknown)$")
+    page_no: int | None = Field(default=None, ge=1)
+    bbox: BoundingBox | None = None
+    caption: str | None = None
+    text_representation: str | None = None
+    blob_uri: str | None = Field(default=None, pattern=r"^gs://")
+    structured_uri: str | None = Field(default=None, pattern=r"^gs://")
+    binary_sha256: Sha256 | None = None
+    origin_ref: str = Field(min_length=1)
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class ParagraphAssetLink(StrictModel):
+    paragraph_id: Sha256
+    asset_id: Sha256
+    relation: str = Field(
+        pattern=r"^(anchor_after|anchor_before|caption|context_before|context_after)$"
+    )
+    distance: int = Field(ge=0)
+    primary: bool = False
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
 class NormalizedSource(StrictModel):
     source_id: UUID = Field(default_factory=uuid4)
     text: str = Field(min_length=1)
     language: str = Field(min_length=2)
     title: str | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
+    paragraphs: list[Paragraph] = Field(default_factory=list)
+    assets: list[SourceAsset] = Field(default_factory=list)
+    asset_links: list[ParagraphAssetLink] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def structured_content_belongs_to_source(self) -> "NormalizedSource":
+        if any(item.source_id != self.source_id for item in self.paragraphs):
+            raise ValueError("normalized paragraphs must belong to their source")
+        if any(item.source_id != self.source_id for item in self.assets):
+            raise ValueError("normalized assets must belong to their source")
+        paragraph_ids = {item.paragraph_id for item in self.paragraphs}
+        asset_ids = {item.asset_id for item in self.assets}
+        if any(
+            item.paragraph_id not in paragraph_ids or item.asset_id not in asset_ids
+            for item in self.asset_links
+        ):
+            raise ValueError("asset links must reference normalized source content")
+        return self
 
 
 class PlanningRequest(StrictModel):
@@ -181,9 +269,22 @@ class IngestedSource(StrictModel):
     characters: int = Field(ge=1)
     paragraphs: int = Field(ge=1)
     sentences: int = Field(ge=1)
+    tables: int = Field(default=0, ge=0)
+    figures: int = Field(default=0, ge=0)
+    normalization_status: str = Field(
+        default="normalized", pattern=r"^(normalized|partial)$"
+    )
+    normalization_receipt_uri: str | None = Field(default=None, pattern=r"^gs://")
     binary_sha256: Sha256
     normalized_text_sha256: Sha256
     acquisition: AcquiredSource | None = None
+
+
+class SourceNormalizationFailure(StrictModel):
+    input_uri: str
+    title: str | None = None
+    error_class: str
+    error_message: str
 
 
 class IngestionReceipt(StrictModel):
@@ -196,21 +297,7 @@ class IngestionReceipt(StrictModel):
     model_invocations: int = Field(default=0, ge=0)
     sources: list[IngestedSource] = Field(min_length=1)
     failed_acquisitions: list[AcquiredSource] = Field(default_factory=list)
-
-
-class Sentence(StrictModel):
-    sentence_id: Sha256
-    ordinal: int = Field(ge=1)
-    text: str = Field(min_length=1)
-
-
-class Paragraph(StrictModel):
-    paragraph_id: Sha256
-    source_id: UUID
-    source_ordinal: int = Field(ge=1)
-    ordinal: int = Field(ge=1)
-    text: str = Field(min_length=1)
-    sentences: list[Sentence] = Field(min_length=1)
+    failed_normalizations: list[SourceNormalizationFailure] = Field(default_factory=list)
 
 
 class Passage(StrictModel):
