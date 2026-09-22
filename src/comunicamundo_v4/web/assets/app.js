@@ -47,7 +47,7 @@ function renderSummary(run, known, project) {
   const stages = run.stages || [];
   const elapsedMs = stages.reduce((sum, item) => sum + Number(item.duration_ms || 0), 0);
   const finalProject = run.editorial_project?.proposal;
-  const provisionalProject = run.provisional_editorial_project;
+  const provisionalProject = run.provisional_editorial_project || run.request?.provisional_project;
   const finalText = run.final_text?.proposal;
   const sourceResearch = known.get("source_research");
   const acquisition = known.get("source_acquisition");
@@ -204,7 +204,7 @@ function renderRun(run) {
   const displayedStages = [...baseStages, ...(run.stages || []).map((item) => item.stage).filter((name) => !baseStages.includes(name))];
   const project = run.editorial_project?.proposal || run.provisional_editorial_project;
   renderSummary(run, known, project);
-  renderSourceManifest(known, run.provisional_editorial_project);
+  renderSourceManifest(known, run.provisional_editorial_project || run.request?.provisional_project);
   let activeFound = false;
   $("#stages").innerHTML = displayedStages.map((name) => {
     const item = known.get(name); let kind = item ? statusClass(item.status) : "pending";
