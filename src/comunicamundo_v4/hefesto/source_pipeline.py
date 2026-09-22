@@ -11,6 +11,13 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 
+from .document_formats import (
+    SUPPORTED_CONTENT_TYPES,
+    is_docling_format,
+    resolve_document_format,
+    source_file_name,
+)
+
 from .contracts import (
     AcquiredSource,
     AcquisitionAttempt,
@@ -218,6 +225,24 @@ def deduplicate_candidates(candidates: Iterable[SourceCandidate]) -> list[Source
     return [chosen[item] for item in order]
 
 
+def _is_direct_document(
+    candidate: SourceCandidate,
+    content_type: str | None,
+) -> bool:
+    if content_type in {
+        "text/plain", "text/markdown", "text/html", "application/xhtml+xml"
+    }:
+        return False
+    try:
+        value = resolve_document_format(
+            source_file_name(candidate.acquisition_url, None, content_type),
+            content_type,
+        )
+        return is_docling_format(value)
+    except ValueError:
+        return False
+
+
 class SourceAcquirer:
     def __init__(
         self,
@@ -245,14 +270,18 @@ class SourceAcquirer:
             original_bytes
             and (
                 original_bytes.startswith(b"%PDF")
-                or original_content_type == "application/pdf"
+                or _is_direct_document(candidate, original_content_type)
+                or original_content_type in (
+                    SUPPORTED_CONTENT_TYPES
+                    - {"text/plain", "text/markdown", "text/html", "application/xhtml+xml"}
+                )
             )
         ):
             return self._success(
                 candidate, "direct", "", attempts,
                 final_url=candidate.acquisition_url,
                 original_bytes=original_bytes,
-                original_content_type="application/pdf",
+                original_content_type=original_content_type or "application/pdf",
             )
         if direct_text and _acceptable(direct_text):
             return self._success(

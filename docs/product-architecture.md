@@ -6,11 +6,11 @@ Status: canônica.
 
 `login da equipe → briefing + fontes → acompanhamento → Projeto Editorial com Eixo Narrativo → aprovação humana → texto final`
 
-A aplicação web e a API são entregues pelo mesmo Cloud Run Service. O navegador envia PDFs em partes para a API, URLs públicas também são aceitas e o Cloud Run Job executa o processamento demorado. PostgreSQL é a fonte canônica de estado, estrutura, artefatos e métricas; Cloud Storage preserva arquivos e recibos.
+A aplicação web e a API são entregues pelo mesmo Cloud Run Service. O navegador envia fontes em partes para a API, URLs públicas também são aceitas e o Cloud Run Job executa o processamento demorado. PostgreSQL é a fonte canônica de estado, estrutura, artefatos e métricas; Cloud Storage preserva arquivos e recibos.
 
 ## Processamento editorial
 
-1. A ingestão valida cada PDF, preserva o original e normaliza parágrafos completos.
+1. A ingestão valida cada formato aceito, preserva o original e normaliza parágrafos completos, tabelas, figuras e proveniência.
 2. Parágrafos e frases são gravados no PostgreSQL antes da primeira chamada de modelo.
 3. Uma varredura em lotes orientada pelo briefing devolve somente flags compactas: relevante, central, incerto e contexto adjacente necessário.
 4. Os parágrafos selecionados seguem como texto original para a compreensão editorial.

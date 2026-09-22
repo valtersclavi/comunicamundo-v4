@@ -4,7 +4,7 @@ Hefesto é um produto de planejamento editorial orientado pelas fontes e pela in
 
 O serviço web com login é a única entrada de uso editorial. Nele, o usuário:
 
-1. envia PDFs e/ou informa URLs públicas;
+1. envia documentos, planilhas, apresentações, e-books, texto, imagens, áudio, vídeo e/ou informa URLs públicas;
    alternativamente, escolhe **Procure as fontes para mim** e começa com zero fontes;
 2. define tema, abordagem, público, produto, idioma e duração;
 3. acompanha ingestão, triagem, compreensão e uso de modelo;
@@ -24,7 +24,7 @@ O processamento é assíncrono e persistido. Uma atualização da página não p
 - Cloud Run Service: tela de login, interface web e API protegida por sessão.
 - Cloud Run Job: processamento editorial de longa duração.
 - PostgreSQL: estado canônico, propriedade, estrutura das fontes, artefatos, etapas e consumo.
-- Cloud Storage: PDFs, solicitações e recibos imutáveis.
+- Cloud Storage: fontes originais, solicitações, representações canônicas, ativos e recibos imutáveis.
 - Vertex AI: triagem por flags, compreensão editorial, redação, revisão, estilo e verificação final limitadas por tokens.
 - You e OpenAlex: descoberta interna de candidatos a fonte.
 - You Contents, Jina Reader e Browser Use: rotas sucessivas de aquisição pública.

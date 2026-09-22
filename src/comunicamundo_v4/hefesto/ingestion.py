@@ -19,13 +19,19 @@ from .contracts import (
     ProvisionalEditorialProject,
     SourceNormalizationFailure,
 )
-from .document_normalization import normalize_pdf_document
+from .document_formats import (
+    MAX_DOCUMENT_BYTES,
+    is_docling_format,
+    resolve_document_format,
+    source_file_name,
+)
+from .document_normalization import normalize_document
 from .segmentation import segment_sources
 from .normalization import extract_pdf, normalize_pdf_pages
 from .storage import parse_gs_uri, persist_bytes_immutable, persist_json_immutable
 
 
-MAX_SOURCE_BYTES = 200 * 1024 * 1024
+MAX_SOURCE_BYTES = MAX_DOCUMENT_BYTES
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,9 +116,38 @@ def ingest(
                     or "text/markdown"
                 )
             else:
-                acquired_text = ""
+                file_name = source_file_name(
+                    source_input.uri, source_input.title, source_input.content_type
+                )
                 original = source_reader.read(source_input.uri)
-                content_type = "application/pdf"
+                document_format = resolve_document_format(
+                    file_name, source_input.content_type
+                )
+                content_type = document_format.content_type
+                acquired_text = (
+                    original.decode("utf-8-sig")
+                    if document_format.family == "text" else ""
+                )
+
+            title = (
+                acquisition.candidate.title if acquisition is not None
+                else source_input.title
+            )
+            file_name = source_file_name(source_input.uri, title, content_type)
+            document_format = None
+            try:
+                document_format = resolve_document_format(file_name, content_type)
+            except ValueError:
+                # Extracted web pages from acquisition routes are already canonical text.
+                if not acquired_text:
+                    raise
+            if (
+                acquisition is not None
+                and acquired_text
+                and acquisition.selected_route != "direct"
+            ):
+                # You/Jina/Browser already returned the canonical readable body.
+                document_format = None
 
             binary_digest = sha256(original).hexdigest()
             identity = (
@@ -122,18 +157,17 @@ def ingest(
                 input_request.project_id,
                 f"source:{ordinal}:{identity}:{binary_digest}",
             )
-            if _is_pdf(original, content_type):
-                value, source_receipt = _normalize_pdf_source(
+            if document_format is not None and is_docling_format(document_format):
+                value, source_receipt = _normalize_document_source(
                     input_request=input_request,
                     source_id=source_id,
                     source_ordinal=len(normalized) + 1,
                     input_uri=source_input.uri,
-                    title=(
-                        acquisition.candidate.title
-                        if acquisition is not None else source_input.title
-                    ),
+                    title=title,
                     language=source_input.language,
                     original=original,
+                    file_name=file_name,
+                    content_type=document_format.content_type,
                     client=client,
                     bucket_name=bucket_name,
                     acquisition=acquisition,
@@ -148,6 +182,7 @@ def ingest(
                     language=source_input.language,
                     text=acquired_text,
                     original=original,
+                    file_name=file_name,
                     content_type=content_type,
                     client=client,
                     bucket_name=bucket_name,
@@ -199,11 +234,7 @@ def ingest(
     return IngestionResult(request=request, receipt=receipt, receipt_uri=receipt_uri)
 
 
-def _is_pdf(data: bytes, content_type: str) -> bool:
-    return data.startswith(b"%PDF") or content_type.split(";", 1)[0].lower() == "application/pdf"
-
-
-def _normalize_pdf_source(
+def _normalize_document_source(
     *,
     input_request: EditorialInputRequest,
     source_id: UUID,
@@ -212,22 +243,27 @@ def _normalize_pdf_source(
     title: str | None,
     language: str,
     original: bytes,
+    file_name: str,
+    content_type: str,
     client: storage.Client,
     bucket_name: str,
     acquisition: AcquiredSource | None,
 ) -> tuple[NormalizedSource, IngestedSource]:
+    document_format = resolve_document_format(file_name, content_type)
     original_uri = persist_bytes_immutable(
         client,
         bucket_name=bucket_name,
         name=(
             f"hefesto-product/projects/{input_request.project_id}/sources/"
-            f"{source_id}/original.pdf"
+            f"{source_id}/original{document_format.extension}"
         ),
         data=original,
-        content_type="application/pdf",
+        content_type=document_format.content_type,
     )
-    conversion = normalize_pdf_document(
+    conversion = normalize_document(
         original,
+        file_name=file_name,
+        content_type=document_format.content_type,
         project_id=input_request.project_id,
         source_id=source_id,
         source_ordinal=source_ordinal,
@@ -255,7 +291,7 @@ def _normalize_pdf_source(
         source_ordinal=source_ordinal,
         input_uri=input_uri,
         original_uri=original_uri,
-        content_type="application/pdf",
+        content_type=document_format.content_type,
         bytes=len(original),
         pages=conversion.pages or None,
         characters=len(value.text),
@@ -281,21 +317,26 @@ def _normalize_text_source(
     language: str,
     text: str,
     original: bytes,
+    file_name: str,
     content_type: str,
     client: storage.Client,
     bucket_name: str,
     acquisition: AcquiredSource | None,
 ) -> tuple[NormalizedSource, IngestedSource]:
     if not text.strip():
-        raise ValueError("an acquired source has no normalized text")
+        raise ValueError("source has no usable text")
     binary_digest = sha256(original).hexdigest()
     text_digest = sha256(text.encode()).hexdigest()
+    try:
+        original_extension = resolve_document_format(file_name, content_type).extension
+    except ValueError:
+        original_extension = ".md"
     original_uri = persist_bytes_immutable(
         client,
         bucket_name=bucket_name,
         name=(
             f"hefesto-product/projects/{input_request.project_id}/sources/"
-            f"{source_id}/original.md"
+            f"{source_id}/original{original_extension}"
         ),
         data=original,
         content_type=content_type,
@@ -315,7 +356,7 @@ def _normalize_text_source(
             "bytes": len(original),
             "binary_sha256": binary_digest,
             "normalized_text_sha256": text_digest,
-            "normalizer": "hefesto-acquired-text-v1",
+            "normalizer": "hefesto-lossless-text-v1",
             "acquisition_route": acquisition.selected_route if acquisition else None,
         },
     )
@@ -365,14 +406,24 @@ def ingest_acquired(
         text = record.normalized_text or ""
         original = payload.original_bytes or text.encode("utf-8")
         content_type = payload.original_content_type or record.content_type or "text/markdown"
+        file_name = source_file_name(
+            record.candidate.url, record.candidate.title, content_type
+        )
+        document_format = None
+        try:
+            document_format = resolve_document_format(file_name, content_type)
+        except ValueError:
+            document_format = None
+        if text and record.selected_route != "direct":
+            document_format = None
         binary_digest = sha256(original).hexdigest()
         source_id = uuid5(
             input_request.project_id,
             f"acquired:{record.candidate.candidate_id}:{binary_digest}",
         )
         try:
-            if _is_pdf(original, content_type):
-                value, source_receipt = _normalize_pdf_source(
+            if document_format is not None and is_docling_format(document_format):
+                value, source_receipt = _normalize_document_source(
                     input_request=input_request,
                     source_id=source_id,
                     source_ordinal=len(normalized) + 1,
@@ -380,6 +431,8 @@ def ingest_acquired(
                     title=record.candidate.title,
                     language=input_request.brief.output_language,
                     original=original,
+                    file_name=file_name,
+                    content_type=document_format.content_type,
                     client=client,
                     bucket_name=bucket_name,
                     acquisition=record,
@@ -394,6 +447,7 @@ def ingest_acquired(
                     language=input_request.brief.output_language,
                     text=text,
                     original=original,
+                    file_name=file_name,
                     content_type=content_type,
                     client=client,
                     bucket_name=bucket_name,

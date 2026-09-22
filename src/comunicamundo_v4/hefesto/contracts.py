@@ -34,6 +34,7 @@ class SourceInput(StrictModel):
     uri: str = Field(pattern=r"^(gs://|https://)", min_length=8)
     title: str | None = None
     language: str = Field(default="und", min_length=2)
+    content_type: str | None = None
     doi: str | None = None
     publisher: str | None = None
 

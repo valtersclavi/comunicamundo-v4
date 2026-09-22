@@ -29,7 +29,7 @@ flowchart TD
 
 ## 2. Decisões tomadas
 
-- A primeira entrega continua sendo **PDF apenas**. O Docling suporta muitos formatos, mas habilitá-los agora ampliaria interface, segurança, testes e operação sem necessidade imediata.
+- A primeira entrega aceita PDF, DOCX, PPTX, XLSX, HTML/XHTML, EPUB, Markdown, TXT, imagens, áudio e vídeo. Todos convergem para o mesmo contrato canônico; TXT usa preservação textual direta e mídia usa ASR local.
 - O Docling roda **como biblioteca dentro do Cloud Run Job existente**. Não haverá `docling-serve`, Redis nem um segundo serviço nesta fase.
 - A execução inicial será **CPU-only**, sem GPU e sem chamadas remotas de IA.
 - A ingestão não fará chamadas de LLM. Relações entre texto, tabela e figura serão derivadas da estrutura, ordem de leitura e proveniência do documento.
@@ -437,15 +437,15 @@ O Job já possui 4 CPU, 8 GiB e timeout de 7200 s, configuração compatível co
 | `pyproject.toml` | adicionar Docling/CPU runtime fixados; remover `pypdf` no corte final |
 | `Dockerfile` | empacotar dependências e modelos; impedir downloads em runtime |
 | `contracts.py` | provenance de parágrafo, `SourceAsset`, `ParagraphAssetLink`, recibo e bundle |
-| `document_normalization.py` | interface e implementação Docling PDF |
+| `document_normalization.py` | interface e implementação Docling multiformato |
 | `normalization.py` | manter apenas normalização textual adquirida; retirar PDF antigo no corte |
-| `ingestion.py` | unificar PDF enviado/adquirido, persistir bundle, isolar falha por fonte |
+| `ingestion.py` | unificar documentos enviados/adquiridos, persistir bundle, isolar falha por fonte |
 | `segmentation.py` | aceitar parágrafos estruturados sem voltar a parti-los por linhas em branco |
 | `storage.py` | persistência imutável de texto, JSON e ativos |
 | `postgres.py` | salvar ativos e vínculos junto da estrutura |
 | `service.py` | preparar a estrutura já produzida pela ingestão sem resegmentar e perder provenance |
 | `worker.py` | reutilizar converter por processo; registrar métricas e estados por fonte |
-| `api.py` | harmonizar limite em 200 MB; manter PDF-only nesta fase |
+| `api.py` | harmonizar limite em 200 MB e validar a matriz de formatos |
 | `app.js` | mostrar o mesmo limite real de 200 MB |
 | migração nova | criar `source_assets` e `paragraph_assets` e seus índices |
 | `maintenance.py` | inventário e exclusão das novas tabelas/objetos |
@@ -610,7 +610,7 @@ A integração está pronta quando todos forem verdadeiros:
 - interpretar números de gráficos;
 - gerar alt text editorial definitivo;
 - deduplicar figuras semanticamente entre fontes;
-- suportar todos os formatos anunciados pelo Docling;
+- suportar formatos legados e especializados fora da matriz do produto (DOC/XLS/PPT, OpenDocument, XMLs específicos, e-mail, Apple Pages, BoxNote e AFP);
 - transformar o Docling em serviço independente;
 - chunking/RAG do Docling;
 - substituir a seleção e digestão editorial do Hefesto;
@@ -635,9 +635,9 @@ A integração está pronta quando todos forem verdadeiros:
 
 Não resta decisão arquitetural bloqueante para a primeira entrega. As escolhas técnicas iniciais foram materializadas assim:
 
-1. Docling `2.130.0`, fixado no build CPU;
+1. Docling `2.129.0`, release estável disponível, fixado no build CPU;
 2. Tesseract CLI local, com os pacotes de idioma Debian disponíveis na imagem;
 3. tabela em HTML mais o JSON lossless completo do `DoclingDocument`;
-4. somente os modelos Docling de layout e TableFormer embutidos na imagem.
+4. modelos Docling de layout e TableFormer e Whisper Small embutidos na imagem.
 
 Qualquer alteração dessas escolhas exige incompatibilidade reproduzível ou necessidade real do produto.

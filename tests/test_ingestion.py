@@ -128,7 +128,7 @@ def test_generic_ingestion_normalizes_each_pdf_once_before_any_model(monkeypatch
             receipt_uri="gs://product/normalization-receipt.json",
         )
 
-    monkeypatch.setattr(ingestion, "normalize_pdf_document", fake_normalize)
+    monkeypatch.setattr(ingestion, "normalize_document", fake_normalize)
     first = ingest(source, client=storage, bucket_name="product", reader=reader)
     second = ingest(source, client=storage, bucket_name="product", reader=reader)
 

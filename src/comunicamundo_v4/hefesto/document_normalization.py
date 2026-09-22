@@ -21,6 +21,7 @@ from .contracts import (
     SourceAsset,
     content_hash,
 )
+from .document_formats import MAX_DOCUMENT_BYTES, resolve_document_format
 from .segmentation import _sentences
 from .storage import (
     persist_bytes_immutable,
@@ -46,14 +47,24 @@ class _BodyEntry:
 
 
 @lru_cache(maxsize=1)
-def _pdf_converter() -> Any:
-    """Load Docling only in the worker process and reuse its models."""
+def _document_converter() -> Any:
+    """Load Docling only in the worker process and reuse every pipeline."""
+    from docling.datamodel import asr_model_specs
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import (
+        AsrPipelineOptions,
         PdfPipelineOptions,
         TesseractCliOcrOptions,
+        VideoPipelineOptions,
     )
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.document_converter import (
+        AudioFormatOption,
+        DocumentConverter,
+        ImageFormatOption,
+        PdfFormatOption,
+        VideoFormatOption,
+    )
+    from docling.pipeline.asr_pipeline import AsrPipeline
 
     options = PdfPipelineOptions()
     options.do_ocr = True
@@ -68,15 +79,45 @@ def _pdf_converter() -> Any:
     artifacts = os.environ.get("HEFESTO_DOCLING_ARTIFACTS_PATH", "").strip()
     if artifacts:
         options.artifacts_path = Path(artifacts)
+    asr_options = AsrPipelineOptions()
+    asr_options.asr_options = asr_model_specs.WHISPER_SMALL_NATIVE
+    asr_options.document_timeout = float(
+        os.environ.get("HEFESTO_DOCLING_MEDIA_TIMEOUT", "3600")
+    )
+    video_options = VideoPipelineOptions(
+        asr_options=asr_model_specs.WHISPER_SMALL_NATIVE,
+        enable_diarization=False,
+        document_timeout=float(
+            os.environ.get("HEFESTO_DOCLING_MEDIA_TIMEOUT", "3600")
+        ),
+    )
+    allowed_names = (
+        "PDF", "DOCX", "PPTX", "XLSX", "HTML", "MD", "EPUB", "IMAGE",
+        "AUDIO", "VIDEO",
+    )
+    allowed_formats = [
+        getattr(InputFormat, name) for name in allowed_names
+        if hasattr(InputFormat, name)
+    ]
     return DocumentConverter(
-        allowed_formats=[InputFormat.PDF],
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)},
+        allowed_formats=allowed_formats,
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=options),
+            InputFormat.IMAGE: ImageFormatOption(pipeline_options=options),
+            InputFormat.AUDIO: AudioFormatOption(
+                pipeline_cls=AsrPipeline,
+                pipeline_options=asr_options,
+            ),
+            InputFormat.VIDEO: VideoFormatOption(pipeline_options=video_options),
+        },
     )
 
 
-def normalize_pdf_document(
+def normalize_document(
     data: bytes,
     *,
+    file_name: str,
+    content_type: str,
     project_id: UUID,
     source_id: UUID,
     source_ordinal: int,
@@ -87,15 +128,18 @@ def normalize_pdf_document(
     client: storage.Client,
     bucket_name: str,
 ) -> DocumentNormalization:
-    if not data.startswith(b"%PDF"):
-        raise ValueError("source is not a PDF")
+    document_format = resolve_document_format(file_name, content_type)
+    if document_format.family == "text":
+        raise ValueError("plain text must use the lossless text normalizer")
+    if document_format.extension == ".pdf" and not data.startswith(b"%PDF"):
+        raise ValueError("source declares PDF but does not contain a PDF signature")
 
     from docling.datamodel.base_models import DocumentStream
 
-    result = _pdf_converter().convert(
-        DocumentStream(name=f"{source_id}.pdf", stream=BytesIO(data)),
+    result = _document_converter().convert(
+        DocumentStream(name=file_name, stream=BytesIO(data)),
         raises_on_error=False,
-        max_file_size=200 * 1024 * 1024,
+        max_file_size=MAX_DOCUMENT_BYTES,
     )
     status_name = _status_name(result.status)
     if status_name not in {"success", "partial_success"}:
@@ -271,7 +315,7 @@ def normalize_pdf_document(
         ))
 
     if not paragraphs:
-        raise ValueError("PDF contains no usable text after structured conversion")
+        raise ValueError("document contains no usable text after structured conversion")
 
     canonical_text = "\n\n".join(canonical_blocks).strip()
     asset_links = _asset_links(entries)
@@ -293,12 +337,13 @@ def normalize_pdf_document(
     metadata: dict[str, object] = {
         "input_uri": input_uri,
         "original_gcs_uri": original_uri,
-        "content_type": "application/pdf",
+        "content_type": document_format.content_type,
+        "input_format": document_format.extension.removeprefix("."),
         "pages": pages,
         "bytes": len(data),
         "binary_sha256": sha256(data).hexdigest(),
         "normalized_text_sha256": sha256(canonical_text.encode()).hexdigest(),
-        "normalizer": "docling-pdf-v1",
+        "normalizer": "docling-document-v1",
         "canonical_text_uri": canonical_uri,
         "docling_document_uri": document_uri,
         "normalization_status": normalized_status,
@@ -318,7 +363,9 @@ def normalize_pdf_document(
     receipt_payload: dict[str, object] = {
         "status": normalized_status,
         "source_id": str(source_id),
-        "normalizer": "docling-pdf-v1",
+        "normalizer": "docling-document-v1",
+        "input_format": document_format.extension.removeprefix("."),
+        "content_type": document_format.content_type,
         "docling_version": _package_version("docling"),
         "docling_core_version": _package_version("docling-core"),
         "configuration": {
@@ -331,6 +378,9 @@ def normalize_pdf_document(
                 os.environ.get("HEFESTO_DOCLING_DOCUMENT_TIMEOUT", "120")
             ),
             "remote_services": False,
+            "asr_model": "whisper-small-native",
+            "video_frame_sampling": True,
+            "speaker_diarization": False,
         },
         "docling_status": status_name,
         "pages": pages,
@@ -428,7 +478,7 @@ def _status_name(value: object) -> str:
 def _conversion_failure(result: Any, status_name: str) -> str:
     errors = getattr(result, "errors", None) or []
     detail = "; ".join(str(getattr(item, "error_message", item)) for item in errors)
-    return f"Docling PDF conversion {status_name}: {detail or 'no usable document'}"
+    return f"Docling document conversion {status_name}: {detail or 'no usable document'}"
 
 
 def _label(item: Any) -> str:

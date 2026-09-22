@@ -47,6 +47,8 @@ jobs:
       - name: Smoke product image
         run: |
           set -euo pipefail
+          docker run --rm --entrypoint python "${IMAGE}" \
+            -m comunicamundo_v4.hefesto.document_smoke
           container="$(docker run --detach --publish 127.0.0.1:8080:8080 \
             --entrypoint uvicorn "${IMAGE}" \
             comunicamundo_v4.hefesto.api:app --host 0.0.0.0 --port 8080)"

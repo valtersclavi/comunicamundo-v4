@@ -20,7 +20,12 @@ from google.cloud import storage
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .document_formats import (
+    MAX_DOCUMENT_BYTES,
+    resolve_document_format,
+)
 import requests
 
 from .contracts import EditorialInputRequest
@@ -164,8 +169,13 @@ class GoogleCloudRunDispatcher:
 class UploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     file_name: str = Field(min_length=1, max_length=255)
-    content_type: str = Field(default="application/pdf", pattern=r"^application/pdf$")
-    size_bytes: int = Field(ge=1, le=209_715_200)
+    content_type: str
+    size_bytes: int = Field(ge=1, le=MAX_DOCUMENT_BYTES)
+
+    @model_validator(mode="after")
+    def supported_document(self) -> "UploadRequest":
+        resolve_document_format(self.file_name, self.content_type)
+        return self
 
 
 class LoginRequest(BaseModel):
@@ -493,7 +503,7 @@ def create_app(
         owner_id = await owner(request)
         safe_name = re.sub(
             r"[^A-Za-z0-9._-]+", "-", Path(upload.file_name).name
-        ).strip(".-") or "source.pdf"
+        ).strip(".-") or "source.bin"
         upload_id = uuid4()
         owner_key = sha256(owner_id.encode()).hexdigest()[:24]
         object_name = (
@@ -605,6 +615,7 @@ def create_app(
             "status": "stored",
             "uri": record["object_uri"],
             "title": record["file_name"],
+            "content_type": record["content_type"],
         }
 
     @app.post("/v1/plans", status_code=status.HTTP_202_ACCEPTED)

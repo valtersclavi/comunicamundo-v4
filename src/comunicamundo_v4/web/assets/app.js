@@ -1,6 +1,15 @@
 const $ = (selector) => document.querySelector(selector);
 const formatter = new Intl.NumberFormat("pt-BR");
 const state = { files: [], current: null, timer: null, history: [], pendingStatus: null, pendingSignature: null, currentStatus: null, currentProjectSignature: null };
+const sourceFormats = {
+  pdf: ["application/pdf", "PDF"], docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Word"],
+  pptx: ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "PowerPoint"], xlsx: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Excel"],
+  html: ["text/html", "HTML"], htm: ["text/html", "HTML"], xhtml: ["application/xhtml+xml", "XHTML"], epub: ["application/epub+zip", "EPUB"],
+  md: ["text/markdown", "Markdown"], markdown: ["text/markdown", "Markdown"], txt: ["text/plain", "Texto"],
+  png: ["image/png", "Imagem"], jpg: ["image/jpeg", "Imagem"], jpeg: ["image/jpeg", "Imagem"], tif: ["image/tiff", "Imagem"], tiff: ["image/tiff", "Imagem"], bmp: ["image/bmp", "Imagem"], webp: ["image/webp", "Imagem"],
+  wav: ["audio/wav", "Áudio"], mp3: ["audio/mpeg", "Áudio"], m4a: ["audio/mp4", "Áudio"], aac: ["audio/aac", "Áudio"], ogg: ["audio/ogg", "Áudio"], flac: ["audio/flac", "Áudio"],
+  mp4: ["video/mp4", "Vídeo"], avi: ["video/x-msvideo", "Vídeo"], mov: ["video/quicktime", "Vídeo"], mkv: ["video/x-matroska", "Vídeo"], webm: ["video/webm", "Vídeo"]
+};
 
 const labels = {
   queued: "Na fila", input_failed: "Falha na entrada", provisional_project_proposed: "Direção provisória pronta", searching_sources: "Procurando fontes", source_structure_ready: "Fontes estruturadas",
@@ -113,14 +122,15 @@ function clearError(element) { element.hidden = true; element.textContent = ""; 
 function bytes(value) { if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`; return `${(value / 1024 / 1024).toFixed(1)} MB`; }
 function escapeHtml(value) { const node = document.createElement("span"); node.textContent = value ?? ""; return node.innerHTML; }
 function escapeAttribute(value) { return escapeHtml(value).replaceAll('"', "&quot;").replaceAll("'", "&#39;"); }
+function sourceFormat(file) { return sourceFormats[file.name.split(".").pop().toLowerCase()] || null; }
 
 function renderFiles() {
-  $("#file-list").innerHTML = state.files.map((file, index) => `<div class="file-item"><span>PDF</span><strong>${escapeHtml(file.name)}</strong><span>${bytes(file.size)}</span><button type="button" data-remove="${index}" aria-label="Remover ${escapeHtml(file.name)}">×</button></div>`).join("");
+  $("#file-list").innerHTML = state.files.map((file, index) => `<div class="file-item"><span>${sourceFormat(file)?.[1] || "Arquivo"}</span><strong>${escapeHtml(file.name)}</strong><span>${bytes(file.size)}</span><button type="button" data-remove="${index}" aria-label="Remover ${escapeHtml(file.name)}">×</button></div>`).join("");
 }
 
 function addFiles(files) {
   for (const file of files) {
-    if ((file.type && file.type !== "application/pdf") || !file.name.toLowerCase().endsWith(".pdf")) { showError($("#form-error"), `“${file.name}” não é um PDF.`); continue; }
+    if (!sourceFormat(file)) { showError($("#form-error"), `“${file.name}” não está em um formato aceito.`); continue; }
     if (file.size > 200 * 1024 ** 2) { showError($("#form-error"), `“${file.name}” ultrapassa 200 MB.`); continue; }
     if (!state.files.some((item) => item.name === file.name && item.size === file.size)) state.files.push(file);
   }
@@ -129,8 +139,8 @@ function addFiles(files) {
 
 async function uploadFile(file, index, totalFiles) {
   const button = $("#submit-plan");
-  button.textContent = `Enviando PDF ${index + 1} de ${totalFiles}…`;
-  const start = await api("/v1/uploads", { method: "POST", body: JSON.stringify({ file_name: file.name, content_type: "application/pdf", size_bytes: file.size }) });
+  button.textContent = `Enviando arquivo ${index + 1} de ${totalFiles}…`;
+  const start = await api("/v1/uploads", { method: "POST", body: JSON.stringify({ file_name: file.name, content_type: sourceFormat(file)[0], size_bytes: file.size }) });
   for (let offset = 0; offset < file.size; offset += start.chunk_size) {
     const end = Math.min(offset + start.chunk_size, file.size);
     const progress = Math.round((end / file.size) * 100);
@@ -144,7 +154,7 @@ async function submitPlan(event) {
   event.preventDefault(); clearError($("#form-error"));
   const findForMe = $("#find-sources").checked;
   const urls = $("#urls").value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
-  if (!findForMe && !state.files.length && !urls.length) return showError($("#form-error"), "Adicione pelo menos um PDF ou uma URL pública, ou escolha procurar as fontes.");
+  if (!findForMe && !state.files.length && !urls.length) return showError($("#form-error"), "Adicione pelo menos um arquivo ou uma URL pública, ou escolha procurar as fontes.");
   if (state.files.length + urls.length > 64) return showError($("#form-error"), "Use no máximo 64 fontes por planejamento.");
   if (urls.some((url) => !url.startsWith("https://"))) return showError($("#form-error"), "Cada URL precisa começar com https://.");
   const button = $("#submit-plan"); button.disabled = true;
@@ -156,7 +166,7 @@ async function submitPlan(event) {
       project_id: crypto.randomUUID(),
       brief: { theme: $("#theme").value, approach: $("#approach").value, duration_minutes: Number($("#duration").value), output_language: $("#language").value, audience: $("#audience").value, product: $("#product").value },
       source_mode: findForMe ? "find_for_me" : "provided",
-      sources: findForMe ? [] : [...uploaded.map((item) => ({ uri: item.uri, title: item.title, language: $("#language").value })), ...urls.map((url) => ({ uri: url, title: null, language: $("#language").value }))]
+      sources: findForMe ? [] : [...uploaded.map((item) => ({ uri: item.uri, title: item.title, content_type: item.content_type, language: $("#language").value })), ...urls.map((url) => ({ uri: url, title: null, language: $("#language").value }))]
     };
     const result = await api("/v1/plans", { method: "POST", body: JSON.stringify(payload) });
     await loadHistory(); await openExecution(result.execution_run_id, payload.brief.theme);
