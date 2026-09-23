@@ -75,7 +75,33 @@ async def plan(args: argparse.Namespace) -> None:
         return
     stages: list[dict[str, object]] = []
     started = perf_counter()
+    progress_repository = ProductRepository(required("HEFESTO_POSTGRES_URL"))
+    await progress_repository.open()
+    submitted = [{"input_uri": item.uri, "title": item.title}
+                 for item in input_request.sources]
+    progress = [{**item, "ordinal": index, "status": "queued"}
+                for index, item in enumerate(submitted, start=1)]
+    loop = asyncio.get_running_loop()
+
+    def publish_progress(update: dict[str, object]) -> None:
+        index = int(update["ordinal"]) - 1
+        progress[index] = {**progress[index], **update}
+        receipt = {
+            "status": "ingesting", "project_id": str(input_request.project_id),
+            "execution_run_id": str(execution_id),
+            "input": {"submitted_sources": submitted,
+                      "source_progress": [item.copy() for item in progress]},
+        }
+        asyncio.run_coroutine_threadsafe(
+            progress_repository.record_product_receipt(execution_id, receipt), loop
+        ).result()
+
     try:
+        await progress_repository.record_product_receipt(execution_id, {
+            "status": "ingesting", "project_id": str(input_request.project_id),
+            "execution_run_id": str(execution_id),
+            "input": {"submitted_sources": submitted, "source_progress": progress},
+        })
         acquirer = None
         if any(item.uri.startswith("https://") for item in input_request.sources):
             acquirer = SourceAcquirer(
@@ -89,9 +115,12 @@ async def plan(args: argparse.Namespace) -> None:
             client=client,
             bucket_name=bucket_name,
             acquirer=acquirer,
+            on_progress=publish_progress,
         )
     except Exception as error:
+        previous = await progress_repository.product_receipt(execution_id) or {}
         receipt = {
+            **previous,
             "status": "input_failed",
             "project_id": str(input_request.project_id),
             "execution_run_id": str(execution_id),
@@ -118,6 +147,8 @@ async def plan(args: argparse.Namespace) -> None:
             await repository.close()
         print_receipt(receipt, uri)
         raise
+    finally:
+        await progress_repository.close()
     stages.append({
         "stage": "ingestion",
         "duration_ms": int((perf_counter() - started) * 1000),
@@ -140,6 +171,12 @@ async def plan(args: argparse.Namespace) -> None:
             "model_invocations": 0,
         })
         await hefesto.record_stages(execution_id, stages)
+        # Publish the per-file outcome as soon as the relational structure is stored.
+        # Editorial work can take minutes and must not hide ingestion failures.
+        await _persist_product_receipt(
+            hefesto, client, execution_id, stages,
+            ingestion=ingestion, submitted_sources=input_request.sources,
+        )
         await _continue_to_project(
             hefesto, client, execution_id, stages,
             ingestion=ingestion,
@@ -578,6 +615,7 @@ async def _persist_product_receipt(
     stages: list[dict[str, object]],
     *,
     ingestion: IngestionResult | None = None,
+    submitted_sources: list | None = None,
 ) -> None:
     await hefesto.record_stages(execution_id, stages)
     previous_receipt = await hefesto.stored_product_receipt(execution_id)
@@ -585,6 +623,7 @@ async def _persist_product_receipt(
         previous_receipt.get("input")
         if isinstance(previous_receipt, dict) else None
     )
+    stored_counts = await hefesto.structure_counts(execution_id) if ingestion is not None else {}
     receipt = {
         **(await hefesto.receipt(execution_id)),
         "input": (
@@ -593,6 +632,11 @@ async def _persist_product_receipt(
                 "ingestion_receipt_uri": ingestion.receipt_uri,
                 "normalized_request_uri": ingestion.receipt.normalized_request_uri,
                 "source_count": ingestion.receipt.source_count,
+                "source_progress": (previous_input or {}).get("source_progress", []),
+                "attempted_count": (
+                    len(submitted_sources) if submitted_sources is not None
+                    else (previous_input or {}).get("attempted_count")
+                ),
                 "paragraph_count": ingestion.receipt.paragraph_count,
                 "sentence_count": ingestion.receipt.sentence_count,
                 "table_count": sum(item.tables for item in ingestion.receipt.sources),
@@ -601,9 +645,24 @@ async def _persist_product_receipt(
                     {
                         "source_id": str(item.source_id),
                         "input_uri": item.input_uri,
+                        "title": next(
+                            (source.title for source in (submitted_sources or []) if source.uri == item.input_uri),
+                            next((source.get("title") for source in (previous_input or {}).get("sources", [])
+                                  if source.get("input_uri") == item.input_uri), None),
+                        ),
                         "status": item.normalization_status,
+                        "original_stored": bool(item.original_uri),
+                        "normalized": bool(item.normalization_receipt_uri or item.normalized_text_sha256),
+                        "structured": item.paragraphs > 0 and item.sentences > 0,
+                        "persisted": stored_counts.get(item.source_id) == (
+                            item.paragraphs, item.sentences
+                        ),
+                        "stored_paragraphs": stored_counts.get(item.source_id, (0, 0))[0],
+                        "stored_sentences": stored_counts.get(item.source_id, (0, 0))[1],
+                        "bytes": item.bytes,
                         "pages": item.pages,
                         "paragraphs": item.paragraphs,
+                        "sentences": item.sentences,
                         "tables": item.tables,
                         "figures": item.figures,
                         "normalization_receipt_uri": item.normalization_receipt_uri,
@@ -614,6 +673,17 @@ async def _persist_product_receipt(
                     item.model_dump(mode="json")
                     for item in ingestion.receipt.failed_normalizations
                 ],
+                "failed_acquisitions": [
+                    {"input_uri": item.candidate.url, "title": item.candidate.title,
+                     "error_message": item.failure_reason or "Aquisição falhou"}
+                    for item in ingestion.receipt.failed_acquisitions
+                ],
+                "submitted_sources": (
+                    [{"input_uri": source.uri, "title": source.title}
+                     for source in submitted_sources]
+                    if submitted_sources is not None
+                    else (previous_input or {}).get("submitted_sources", [])
+                ),
                 "assets": [
                     {
                         "asset_id": asset.asset_id,

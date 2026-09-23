@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import ipaddress
 import socket
+from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import UUID, uuid5
@@ -75,6 +76,7 @@ def ingest(
     bucket_name: str,
     reader: SourceReader | None = None,
     acquirer: object | None = None,
+    on_progress: Callable[[dict[str, object]], None] | None = None,
 ) -> IngestionResult:
     source_reader = reader or SourceReader(client)
     normalized: list[NormalizedSource] = []
@@ -82,6 +84,15 @@ def ingest(
     failed_acquisitions = []
     failed_normalizations: list[SourceNormalizationFailure] = []
     for ordinal, source_input in enumerate(input_request.sources, start=1):
+        failed_step = "leitura ou aquisição"
+        def progress(status: str, **details: object) -> None:
+            if on_progress is not None:
+                on_progress({
+                    "ordinal": ordinal, "input_uri": source_input.uri,
+                    "title": source_input.title, "status": status, **details,
+                })
+
+        progress("reading")
         try:
             acquisition = None
             if source_input.uri.startswith("https://") and acquirer is not None:
@@ -106,6 +117,9 @@ def ingest(
                 payload = acquirer.acquire(candidate)
                 if payload.record.status != "acquired":
                     failed_acquisitions.append(payload.record)
+                    progress("failed", failed_step=failed_step,
+                             error_class="AcquisitionFailed",
+                             error_message=payload.record.failure_reason or "Aquisição falhou")
                     continue
                 acquisition = payload.record
                 acquired_text = acquisition.normalized_text or ""
@@ -129,6 +143,8 @@ def ingest(
                     if document_format.family == "text" else ""
                 )
 
+            failed_step = "normalização e divisão em parágrafos"
+            progress("normalizing")
             title = (
                 acquisition.candidate.title if acquisition is not None
                 else source_input.title
@@ -190,13 +206,19 @@ def ingest(
                 )
             normalized.append(value)
             source_receipts.append(source_receipt)
+            progress("normalized", paragraphs=source_receipt.paragraphs,
+                     sentences=source_receipt.sentences, pages=source_receipt.pages)
         except Exception as error:
             failed_normalizations.append(SourceNormalizationFailure(
                 input_uri=source_input.uri,
                 title=source_input.title,
+                failed_step=failed_step,
                 error_class=type(error).__name__,
                 error_message=str(error)[:2000],
             ))
+            progress("failed", failed_step=failed_step,
+                     error_class=type(error).__name__,
+                     error_message=str(error)[:2000])
     if not normalized:
         raise ValueError("none of the supplied sources could be acquired and normalized")
     request = PlanningRequest(

@@ -284,6 +284,7 @@ class IngestedSource(StrictModel):
 class SourceNormalizationFailure(StrictModel):
     input_uri: str
     title: str | None = None
+    failed_step: str | None = None
     error_class: str
     error_message: str
 

@@ -12,7 +12,7 @@ const sourceFormats = {
 };
 
 const labels = {
-  queued: "Na fila", input_failed: "Falha na entrada", provisional_project_proposed: "Direção provisória pronta", searching_sources: "Procurando fontes", source_structure_ready: "Fontes estruturadas",
+  queued: "Na fila", ingesting: "Lendo arquivos", input_failed: "Falha na entrada", provisional_project_proposed: "Direção provisória pronta", searching_sources: "Procurando fontes", source_structure_ready: "Fontes estruturadas",
   selecting: "Selecionando material", comprehending: "Compreendendo fontes",
   project_proposed: "Projeto Editorial pronto", project_approved: "Projeto aprovado",
   producing_text: "Escrevendo texto final", text_ready: "Texto final pronto", failed: "Falha"
@@ -203,6 +203,43 @@ function renderSourceManifest(known, provisionalProject) {
   }).join("");
 }
 
+function renderInputSources(input) {
+  const panel = $("#input-sources-panel");
+  const successful = Array.isArray(input?.sources) ? input.sources : [];
+  const progress = Array.isArray(input?.source_progress) ? input.source_progress : [];
+  const failed = [
+    ...(Array.isArray(input?.failed_normalizations) ? input.failed_normalizations : []),
+    ...(Array.isArray(input?.failed_acquisitions) ? input.failed_acquisitions : [])
+  ];
+  const submitted = Array.isArray(input?.submitted_sources) && input.submitted_sources.length
+    ? input.submitted_sources
+    : progress.length ? progress : [...successful, ...failed];
+  panel.hidden = !submitted.length;
+  if (!submitted.length) { $("#input-sources-manifest").innerHTML = ""; return; }
+  const stored = submitted.filter((source) => successful.some((item) => item.input_uri === source.input_uri && item.persisted)).length;
+  $("#input-sources-title").textContent = `${stored} de ${submitted.length} arquivos com frases no banco`;
+  $("#input-sources-manifest").innerHTML = submitted.map((source, index) => {
+    const item = successful.find((record) => record.input_uri === source.input_uri);
+    const current = progress[index]?.input_uri === source.input_uri ? progress[index] : progress.find((record) => record.input_uri === source.input_uri);
+    const error = failed.find((record) => record.input_uri === source.input_uri) || (current?.status === "failed" ? current : null);
+    const name = source.title || source.input_uri?.split("/").pop() || `Arquivo ${index + 1}`;
+    const outcome = item?.persisted ? "Frases no banco" : item?.status === "partial" ? "Parcial" : item ? "Normalizado" : error ? "Falhou" : ({reading: "Lendo", normalizing: "Normalizando", normalized: "Normalizado", queued: "Aguardando"}[current?.status] || "Aguardando");
+    const steps = item ? [
+      item.original_stored ? "Original guardado" : "Original: sem confirmação",
+      item.normalized ? "Texto extraído" : "Extração: sem confirmação",
+      `${formatter.format(item.paragraphs || 0)} parágrafos · ${formatter.format(item.sentences || 0)} frases`,
+      item.persisted ? `${formatter.format(item.stored_sentences || 0)} frases conferidas no banco` : "Banco: sem confirmação"
+    ] : error ? [`Falha em ${error.failed_step || "aquisição ou normalização"}`]
+      : [current?.status === "normalized" ? `${formatter.format(current.sentences || 0)} frases preparadas; aguardando Postgres` : outcome];
+    return `<article class="source-record">
+      <div class="source-record-head"><span>Arquivo ${index + 1}</span><strong class="source-status ${item?.persisted ? "acquired" : error ? "failed" : ""}">${outcome}</strong></div>
+      <h3>${escapeHtml(name)}</h3>
+      <p class="source-meta">${steps.map(escapeHtml).join(" · ")}</p>
+      ${error ? `<p class="source-error">${escapeHtml(error.error_class || "Falha")}: ${escapeHtml(error.error_message || "Sem detalhes")}</p>` : ""}
+    </article>`;
+  }).join("");
+}
+
 function renderAssetManifest(input) {
   const assets = Array.isArray(input?.assets) ? input.assets : [];
   const panel = $("#assets-panel");
@@ -228,6 +265,7 @@ function renderRun(run) {
   const project = run.editorial_project?.proposal || run.provisional_editorial_project;
   renderSummary(run, known, project);
   renderSourceManifest(known, run.provisional_editorial_project || run.request?.provisional_project);
+  renderInputSources(run.input);
   renderAssetManifest(run.input);
   let activeFound = false;
   $("#stages").innerHTML = displayedStages.map((name) => {

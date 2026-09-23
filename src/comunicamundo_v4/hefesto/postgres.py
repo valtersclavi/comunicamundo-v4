@@ -396,6 +396,22 @@ class ProductRepository:
                         ) for link in asset_links],
                     )
 
+    async def structure_counts(self, execution_run_id: UUID) -> dict[UUID, tuple[int, int]]:
+        """Count rows actually committed for each source, including its sentences."""
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT p.source_id, count(DISTINCT p.paragraph_id), count(s.sentence_id)
+                   FROM hefesto_product.paragraphs p
+                   LEFT JOIN hefesto_product.sentences s
+                     ON s.execution_run_id=p.execution_run_id
+                    AND s.paragraph_id=p.paragraph_id
+                   WHERE p.execution_run_id=%s
+                   GROUP BY p.source_id""",
+                (execution_run_id,),
+            )
+            return {source_id: (paragraphs, sentences)
+                    for source_id, paragraphs, sentences in await rows.fetchall()}
+
     async def save_selection_batch(
         self, execution_run_id: UUID, batch: SelectionBatch
     ) -> None:

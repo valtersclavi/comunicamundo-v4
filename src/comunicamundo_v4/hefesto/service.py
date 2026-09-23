@@ -168,6 +168,9 @@ class Hefesto:
         )
         return run
 
+    async def structure_counts(self, execution_run_id: UUID) -> dict[UUID, tuple[int, int]]:
+        return await self._repository.structure_counts(execution_run_id)
+
     async def select(self, execution_run_id: UUID) -> ProductRun:
         run = await self._required_run(execution_run_id)
         if run.editorial_project is not None:
