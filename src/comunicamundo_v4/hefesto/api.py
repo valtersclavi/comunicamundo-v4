@@ -374,10 +374,14 @@ async def _canonical_receipt(
     repository: ProductRepository, run: Any
 ) -> dict[str, Any]:
     execution_id = run.execution_run_id
+    # The canonical run owns editorial state; the submission receipt owns
+    # per-file ingestion evidence, which must remain visible after prepare().
+    stored = await repository.product_receipt(execution_id) or {}
     return {
         "status": run.state.value,
         "project_id": str(run.project_id),
         "execution_run_id": str(execution_id),
+        "input": stored.get("input"),
         "editorial_project": (
             run.editorial_project.model_dump(mode="json")
             if run.editorial_project else None

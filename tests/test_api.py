@@ -407,6 +407,10 @@ def test_canonical_receipt_exposes_the_persisted_final_text() -> None:
             return final_text
 
     class Repository:
+        async def product_receipt(self, execution_id):
+            return {"input": {"submitted_sources": [{"title": "sample.pdf"}],
+                              "sources": [{"title": "sample.pdf", "stored_sentences": 4}]}}
+
         async def work_report(self, execution_id):
             return {}
 
@@ -429,6 +433,7 @@ def test_canonical_receipt_exposes_the_persisted_final_text() -> None:
     receipt = asyncio.run(_canonical_receipt(Repository(), run))
     assert receipt["status"] == "text_ready"
     assert receipt["final_text"] == final_text
+    assert receipt["input"]["sources"][0]["stored_sentences"] == 4
 
 
 def test_shared_login_protects_product_operations_with_server_session() -> None:
