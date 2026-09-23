@@ -5,10 +5,10 @@ const sourceFormats = {
   pdf: ["application/pdf", "PDF"], docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Word"],
   pptx: ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "PowerPoint"], xlsx: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Excel"],
   html: ["text/html", "HTML"], htm: ["text/html", "HTML"], xhtml: ["application/xhtml+xml", "XHTML"], epub: ["application/epub+zip", "EPUB"],
-  md: ["text/markdown", "Markdown"], markdown: ["text/markdown", "Markdown"], txt: ["text/plain", "Texto"],
-  png: ["image/png", "Imagem"], jpg: ["image/jpeg", "Imagem"], jpeg: ["image/jpeg", "Imagem"], tif: ["image/tiff", "Imagem"], tiff: ["image/tiff", "Imagem"], bmp: ["image/bmp", "Imagem"], webp: ["image/webp", "Imagem"],
-  wav: ["audio/wav", "Áudio"], mp3: ["audio/mpeg", "Áudio"], m4a: ["audio/mp4", "Áudio"], aac: ["audio/aac", "Áudio"], ogg: ["audio/ogg", "Áudio"], flac: ["audio/flac", "Áudio"],
-  mp4: ["video/mp4", "Vídeo"], avi: ["video/x-msvideo", "Vídeo"], mov: ["video/quicktime", "Vídeo"], mkv: ["video/x-matroska", "Vídeo"], webm: ["video/webm", "Vídeo"]
+  md: ["text/markdown", "Markdown"], txt: ["text/plain", "Texto"],
+  png: ["image/png", "Imagem"], jpg: ["image/jpeg", "Imagem"], jpeg: ["image/jpeg", "Imagem"], tif: ["image/tiff", "Imagem"], tiff: ["image/tiff", "Imagem"], webp: ["image/webp", "Imagem"],
+  wav: ["audio/wav", "Áudio"], mp3: ["audio/mpeg", "Áudio"], aac: ["audio/aac", "Áudio"],
+  mp4: ["video/mp4", "Vídeo"], avi: ["video/x-msvideo", "Vídeo"], mov: ["video/quicktime", "Vídeo"], webm: ["video/webm", "Vídeo"]
 };
 
 const labels = {

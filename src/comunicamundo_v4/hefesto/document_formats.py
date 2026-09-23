@@ -26,25 +26,19 @@ _FORMATS = (
     DocumentFormat(".xhtml", "application/xhtml+xml", "document", "XHTML"),
     DocumentFormat(".epub", "application/epub+zip", "document", "EPUB"),
     DocumentFormat(".md", "text/markdown", "document", "Markdown"),
-    DocumentFormat(".markdown", "text/markdown", "document", "Markdown"),
     DocumentFormat(".txt", "text/plain", "text", "Texto"),
     DocumentFormat(".png", "image/png", "image", "Imagem"),
     DocumentFormat(".jpg", "image/jpeg", "image", "Imagem"),
     DocumentFormat(".jpeg", "image/jpeg", "image", "Imagem"),
     DocumentFormat(".tif", "image/tiff", "image", "Imagem"),
     DocumentFormat(".tiff", "image/tiff", "image", "Imagem"),
-    DocumentFormat(".bmp", "image/bmp", "image", "Imagem"),
     DocumentFormat(".webp", "image/webp", "image", "Imagem"),
     DocumentFormat(".wav", "audio/wav", "audio", "Áudio"),
     DocumentFormat(".mp3", "audio/mpeg", "audio", "Áudio"),
-    DocumentFormat(".m4a", "audio/mp4", "audio", "Áudio"),
     DocumentFormat(".aac", "audio/aac", "audio", "Áudio"),
-    DocumentFormat(".ogg", "audio/ogg", "audio", "Áudio"),
-    DocumentFormat(".flac", "audio/flac", "audio", "Áudio"),
     DocumentFormat(".mp4", "video/mp4", "video", "Vídeo"),
     DocumentFormat(".avi", "video/x-msvideo", "video", "Vídeo"),
     DocumentFormat(".mov", "video/quicktime", "video", "Vídeo"),
-    DocumentFormat(".mkv", "video/x-matroska", "video", "Vídeo"),
     DocumentFormat(".webm", "video/webm", "video", "Vídeo"),
 )
 
@@ -96,9 +90,7 @@ def resolve_document_format(
         "binary/octet-stream",
         # Browsers disagree on these common media aliases.
         "audio/x-wav" if extension == ".wav" else value.content_type,
-        "audio/x-m4a" if extension == ".m4a" else value.content_type,
         "audio/mp3" if extension == ".mp3" else value.content_type,
-        "audio/x-flac" if extension == ".flac" else value.content_type,
         "video/avi" if extension == ".avi" else value.content_type,
     }:
         raise ValueError(
