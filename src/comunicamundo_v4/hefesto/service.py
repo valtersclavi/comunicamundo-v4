@@ -936,6 +936,7 @@ class Hefesto:
             for ordinal, (items, prompt, tokens) in enumerate(packets, start=1)
         )))
         level = 2
+        merge_input_budget = max(self._subject_budget, 8_000)
         while len(readings) > 1:
             def render_readings(items: Sequence[EditorialCondensation]) -> str:
                 return subject_material_digest_prompt(
@@ -947,7 +948,7 @@ class Hefesto:
 
             candidates = candidate_packets(
                 readings,
-                token_budget=self._subject_budget * 3 // 4,
+                token_budget=merge_input_budget * 3 // 4,
                 render=render_readings,
             )
             merge_packets: list[
@@ -956,7 +957,7 @@ class Hefesto:
             for candidate in candidates:
                 merge_packets.extend(
                     await self._measure_packet(
-                        candidate, render_readings, self._subject_budget
+                        candidate, render_readings, merge_input_budget
                     )
                 )
             if len(merge_packets) >= len(readings):
@@ -972,7 +973,7 @@ class Hefesto:
                     task_type="editorial_subject_digest_merge",
                     prompt=prompt,
                     schema=SubjectMaterialDigest,
-                    max_output_tokens=2_048,
+                    max_output_tokens=8_192,
                     thinking_tokens=1_000,
                 )
                 identity = (
