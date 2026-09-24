@@ -138,10 +138,44 @@ def test_generic_ingestion_normalizes_each_pdf_once_before_any_model(monkeypatch
     assert first.receipt.paragraph_count == 4
     assert first.receipt.sentence_count == 6
     assert len(calls) == 4
-    assert reader.calls == [item.uri for item in source.sources] * 2
+    assert sorted(reader.calls) == sorted([item.uri for item in source.sources] * 2)
     assert all(item.original_uri.startswith("gs://product/") for item in first.receipt.sources)
     assert first.receipt.normalized_request_uri.endswith("/normalized-request.json")
     assert first.receipt_uri.endswith("/ingestion-receipt.json")
+
+
+def test_finished_source_can_be_committed_while_other_source_is_still_running(monkeypatch) -> None:
+    from threading import Event
+
+    request = input_request()
+    committed = Event()
+    observed: list[int] = []
+
+    def fake_normalize(data: bytes, **kwargs) -> DocumentNormalization:
+        if kwargs["source_ordinal"] == 2:
+            assert committed.wait(timeout=5), "second source waited for first source's commit"
+        source = NormalizedSource(
+            source_id=kwargs["source_id"], language=kwargs["language"],
+            text="One complete sentence.",
+        )
+        return DocumentNormalization(
+            source=source, status="normalized", pages=1,
+            receipt_uri="gs://product/normalization-receipt.json",
+        )
+
+    def on_normalized(ordinal, source, receipt) -> None:
+        observed.append(ordinal)
+        if ordinal == 1:
+            committed.set()
+
+    monkeypatch.setattr(ingestion, "normalize_document", fake_normalize)
+    result = ingest(
+        request, client=Storage(), bucket_name="product",
+        reader=Reader({item.uri: b"%PDF synthetic" for item in request.sources}),
+        on_normalized=on_normalized,
+    )
+    assert observed == [1, 2]
+    assert result.receipt.source_count == 2
 
 
 def test_pdf_normalization_uses_layout_blocks_not_character_limits() -> None:
@@ -166,6 +200,56 @@ def test_real_text_pdf_is_extracted_into_semantic_layout_blocks() -> None:
         "Primeiro paragrafo. Continua na mesma ideia.",
         "Segundo paragrafo.",
     ]
+
+
+def test_native_pdf_keeps_page_and_skips_docling(monkeypatch) -> None:
+    from comunicamundo_v4.hefesto import document_normalization
+
+    monkeypatch.setattr(document_normalization, "_document_converter", lambda: (_ for _ in ()).throw(
+        AssertionError("Docling must not run on a textual PDF")
+    ))
+    pages: list[tuple[int, int]] = []
+    normalized = document_normalization.normalize_document(
+        text_pdf(), file_name="source.pdf", content_type="application/pdf",
+        project_id=uuid4(), source_id=uuid4(), source_ordinal=1,
+        title="Source", language="en", input_uri="gs://uploads/one.pdf",
+        original_uri="gs://product/original.pdf", client=Storage(),
+        bucket_name="product", on_page=lambda done, total: pages.append((done, total)),
+    )
+    assert pages == [(1, 1)]
+    assert [item.page_no for item in normalized.source.paragraphs] == [1, 1]
+    assert normalized.source.metadata["normalizer"] == "pypdf-native-text-v1"
+    assert normalized.source.metadata["pages_with_text"] == 1
+    assert normalized.source.text.startswith("Primeiro paragrafo.")
+
+
+def test_scanned_pdf_routes_to_ocr_without_silent_partial_result(monkeypatch) -> None:
+    from pypdf import PdfWriter
+    from io import BytesIO
+    from comunicamundo_v4.hefesto import document_normalization
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=300, height=300)
+    stream = BytesIO()
+    writer.write(stream)
+    import sys
+    from types import ModuleType
+    base_models = ModuleType("docling.datamodel.base_models")
+    base_models.DocumentStream = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, "docling", ModuleType("docling"))
+    monkeypatch.setitem(sys.modules, "docling.datamodel", ModuleType("docling.datamodel"))
+    monkeypatch.setitem(sys.modules, "docling.datamodel.base_models", base_models)
+    class Converter:
+        def convert(self, *args, **kwargs):
+            raise RuntimeError("OCR path reached")
+    monkeypatch.setattr(document_normalization, "_document_converter", lambda: Converter())
+    with pytest.raises(RuntimeError, match="OCR path reached"):
+        document_normalization.normalize_document(
+            stream.getvalue(), file_name="scan.pdf", content_type="application/pdf",
+            project_id=uuid4(), source_id=uuid4(), source_ordinal=1,
+            title="Scan", language="en", input_uri="gs://uploads/scan.pdf",
+            original_uri="gs://product/scan.pdf", client=Storage(), bucket_name="product",
+        )
 
 
 def test_input_request_is_loaded_from_product_storage() -> None:
