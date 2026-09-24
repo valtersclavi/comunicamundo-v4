@@ -13,11 +13,12 @@ from google.cloud import storage
 from google.api_core.exceptions import NotFound
 
 from .gateway import VertexGateway
-from .contracts import CallUsage, ProvisionalEditorialProject, SourceMode
+from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, SourceMode
 from .ingestion import IngestionResult, ingest, ingest_acquired
 from .maintenance import clean_operational_history
 from .postgres import ProductRepository, apply_migrations
 from .service import Hefesto
+from .segmentation import segment_sources
 from .source_editor import EditorialSourceEditor
 from .source_pipeline import OpenAlexSearchProvider, SourceAcquirer, SourceDiscovery, YouSearchProvider
 from .source_research import SourceResearch
@@ -82,19 +83,77 @@ async def plan(args: argparse.Namespace) -> None:
     progress = [{**item, "ordinal": index, "status": "queued"}
                 for index, item in enumerate(submitted, start=1)]
     loop = asyncio.get_running_loop()
+    from threading import Lock
+    progress_lock = Lock()
+    stored_sources: list[NormalizedSource] = []
+
+    async def store_normalized_source(
+        ordinal: int, source: NormalizedSource, source_receipt: object,
+    ) -> None:
+        """Commit each completed source before the remaining conversions finish."""
+        rank = len(stored_sources) + 1
+        paragraphs = [p.model_copy(update={"source_ordinal": rank})
+                      for p in segment_sources([source])]
+        assets = [a.model_copy(update={"source_ordinal": rank})
+                  for a in source.assets]
+        stored_sources.append(source)
+        partial_request = PlanningRequest(
+            project_id=input_request.project_id, brief=input_request.brief,
+            sources=[s.model_copy(update={
+                "paragraphs": [], "assets": [], "asset_links": [],
+            }) for s in stored_sources],
+        )
+        run = await progress_repository.get_run(execution_id)
+        if run is None:
+            run = ProductRun(execution_run_id=execution_id,
+                             project_id=input_request.project_id,
+                             request=partial_request)
+        else:
+            run = run.model_copy(update={"request": partial_request})
+        await progress_repository.save_run(run)
+        await progress_repository.save_structure(
+            execution_id, paragraphs, assets, source.asset_links,
+        )
+        counts = await progress_repository.structure_counts(execution_id)
+        expected = (source_receipt.paragraphs, source_receipt.sentences)
+        if counts.get(source.source_id) != expected:
+            raise RuntimeError(
+                f"Postgres did not confirm source {ordinal}: "
+                f"expected {expected}, got {counts.get(source.source_id)}"
+            )
+
+    def persist_source(ordinal: int, source: NormalizedSource, receipt: object) -> None:
+        try:
+            asyncio.run_coroutine_threadsafe(
+                store_normalized_source(ordinal, source, receipt), loop,
+            ).result()
+        except Exception as error:
+            publish_progress({
+                "ordinal": ordinal, "status": "failed",
+                "failed_step": "gravação no Postgres",
+                "error_class": type(error).__name__,
+                "error_message": str(error)[:2000],
+            })
+            raise
+        publish_progress({
+            "ordinal": ordinal, "status": "persisted",
+            "source_id": str(source.source_id),
+            "paragraphs": receipt.paragraphs, "sentences": receipt.sentences,
+        })
 
     def publish_progress(update: dict[str, object]) -> None:
-        index = int(update["ordinal"]) - 1
-        progress[index] = {**progress[index], **update}
-        receipt = {
-            "status": "ingesting", "project_id": str(input_request.project_id),
-            "execution_run_id": str(execution_id),
-            "input": {"submitted_sources": submitted,
-                      "source_progress": [item.copy() for item in progress]},
-        }
-        asyncio.run_coroutine_threadsafe(
-            progress_repository.record_product_receipt(execution_id, receipt), loop
-        ).result()
+        with progress_lock:
+            index = int(update["ordinal"]) - 1
+            progress[index] = {**progress[index], **update}
+            receipt = {
+                "status": "ingesting", "project_id": str(input_request.project_id),
+                "execution_run_id": str(execution_id),
+                "input": {"submitted_sources": submitted,
+                          "source_progress": [item.copy() for item in progress]},
+            }
+            asyncio.run_coroutine_threadsafe(
+                progress_repository.record_product_receipt(execution_id, receipt), loop
+            ).result()
 
     try:
         await progress_repository.record_product_receipt(execution_id, {
@@ -116,6 +175,7 @@ async def plan(args: argparse.Namespace) -> None:
             bucket_name=bucket_name,
             acquirer=acquirer,
             on_progress=publish_progress,
+            on_normalized=persist_source,
         )
     except Exception as error:
         previous = await progress_repository.product_receipt(execution_id) or {}
