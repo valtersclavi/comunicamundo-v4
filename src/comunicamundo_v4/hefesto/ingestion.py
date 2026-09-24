@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from hashlib import sha256
 import ipaddress
 import socket
+from threading import Lock
 from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -77,13 +79,15 @@ def ingest(
     reader: SourceReader | None = None,
     acquirer: object | None = None,
     on_progress: Callable[[dict[str, object]], None] | None = None,
+    on_normalized: Callable[[int, NormalizedSource, IngestedSource], None] | None = None,
 ) -> IngestionResult:
     source_reader = reader or SourceReader(client)
-    normalized: list[NormalizedSource] = []
-    source_receipts: list[IngestedSource] = []
+    results: dict[int, tuple[NormalizedSource, IngestedSource]] = {}
     failed_acquisitions = []
     failed_normalizations: list[SourceNormalizationFailure] = []
-    for ordinal, source_input in enumerate(input_request.sources, start=1):
+    heavy_converter_lock = Lock()
+
+    def process_source(ordinal: int, source_input: object):
         failed_step = "leitura ou aquisição"
         def progress(status: str, **details: object) -> None:
             if on_progress is not None:
@@ -116,11 +120,10 @@ def ingest(
                 )
                 payload = acquirer.acquire(candidate)
                 if payload.record.status != "acquired":
-                    failed_acquisitions.append(payload.record)
                     progress("failed", failed_step=failed_step,
                              error_class="AcquisitionFailed",
                              error_message=payload.record.failure_reason or "Aquisição falhou")
-                    continue
+                    return None, None, payload.record, None
                 acquisition = payload.record
                 acquired_text = acquisition.normalized_text or ""
                 original = payload.original_bytes or acquired_text.encode("utf-8")
@@ -174,25 +177,32 @@ def ingest(
                 f"source:{ordinal}:{identity}:{binary_digest}",
             )
             if document_format is not None and is_docling_format(document_format):
-                value, source_receipt = _normalize_document_source(
-                    input_request=input_request,
-                    source_id=source_id,
-                    source_ordinal=len(normalized) + 1,
-                    input_uri=source_input.uri,
-                    title=title,
-                    language=source_input.language,
-                    original=original,
-                    file_name=file_name,
-                    content_type=document_format.content_type,
-                    client=client,
-                    bucket_name=bucket_name,
-                    acquisition=acquisition,
-                )
+                def convert():
+                    return _normalize_document_source(
+                        input_request=input_request,
+                        source_id=source_id, source_ordinal=ordinal,
+                        input_uri=source_input.uri, title=title,
+                        language=source_input.language, original=original,
+                        file_name=file_name,
+                        content_type=document_format.content_type,
+                        client=client, bucket_name=bucket_name,
+                        acquisition=acquisition,
+                        on_page=lambda done, total: progress(
+                            "extracting", pages_done=done, pages=total,
+                        ),
+                    )
+                if document_format.extension == ".pdf":
+                    value, source_receipt = convert()
+                else:
+                    # Keep memory-heavy Docling conversions to one at a time;
+                    # native PDFs and other sources continue concurrently.
+                    with heavy_converter_lock:
+                        value, source_receipt = convert()
             else:
                 value, source_receipt = _normalize_text_source(
                     input_request=input_request,
                     source_id=source_id,
-                    source_ordinal=len(normalized) + 1,
+                    source_ordinal=ordinal,
                     input_uri=source_input.uri,
                     title=acquisition.candidate.title if acquisition else source_input.title,
                     language=source_input.language,
@@ -204,21 +214,45 @@ def ingest(
                     bucket_name=bucket_name,
                     acquisition=acquisition,
                 )
-            normalized.append(value)
-            source_receipts.append(source_receipt)
             progress("normalized", paragraphs=source_receipt.paragraphs,
                      sentences=source_receipt.sentences, pages=source_receipt.pages)
+            return value, source_receipt, None, None
         except Exception as error:
-            failed_normalizations.append(SourceNormalizationFailure(
+            failure = SourceNormalizationFailure(
                 input_uri=source_input.uri,
                 title=source_input.title,
                 failed_step=failed_step,
                 error_class=type(error).__name__,
                 error_message=str(error)[:2000],
-            ))
+            )
             progress("failed", failed_step=failed_step,
                      error_class=type(error).__name__,
                      error_message=str(error)[:2000])
+            return None, None, None, failure
+
+    with ThreadPoolExecutor(max_workers=min(4, len(input_request.sources))) as pool:
+        futures = {
+            pool.submit(process_source, ordinal, source): ordinal
+            for ordinal, source in enumerate(input_request.sources, start=1)
+        }
+        pending: dict[int, tuple[NormalizedSource | None, IngestedSource | None]] = {}
+        next_ordinal = 1
+        for future in as_completed(futures):
+            value, source_receipt, acquisition_failure, failure = future.result()
+            if value is not None and source_receipt is not None:
+                results[futures[future]] = value, source_receipt
+            pending[futures[future]] = value, source_receipt
+            if acquisition_failure is not None:
+                failed_acquisitions.append(acquisition_failure)
+            if failure is not None:
+                failed_normalizations.append(failure)
+            while next_ordinal in pending:
+                ready_source, ready_receipt = pending.pop(next_ordinal)
+                if ready_source is not None and ready_receipt is not None and on_normalized:
+                    on_normalized(next_ordinal, ready_source, ready_receipt)
+                next_ordinal += 1
+    normalized = [item[0] for _, item in sorted(results.items())]
+    source_receipts = [item[1] for _, item in sorted(results.items())]
     if not normalized:
         raise ValueError("none of the supplied sources could be acquired and normalized")
     request = PlanningRequest(
@@ -270,6 +304,7 @@ def _normalize_document_source(
     client: storage.Client,
     bucket_name: str,
     acquisition: AcquiredSource | None,
+    on_page: Callable[[int, int], None] | None = None,
 ) -> tuple[NormalizedSource, IngestedSource]:
     document_format = resolve_document_format(file_name, content_type)
     original_uri = persist_bytes_immutable(
@@ -295,6 +330,7 @@ def _normalize_document_source(
         original_uri=original_uri,
         client=client,
         bucket_name=bucket_name,
+        on_page=on_page,
     )
     value = conversion.source
     if acquisition is not None:
