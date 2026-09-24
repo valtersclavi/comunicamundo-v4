@@ -33,7 +33,7 @@ _TRACKING_PARAMETERS = {
 }
 _TERMINAL_BROWSER_STATUSES = {"completed", "failed", "stopped", "cancelled"}
 _SEARCH_TIMEOUT = (5, 25)
-_OPEN_TIMEOUT = (5, 120)
+_OPEN_TIMEOUT = (5, 600)
 _SERVICE_EXTRACTION_TIMEOUT = (5, 90)
 
 
