@@ -8,6 +8,8 @@ from io import BytesIO
 import json
 import os
 from pathlib import Path
+import re
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
@@ -23,6 +25,7 @@ from .contracts import (
 )
 from .document_formats import MAX_DOCUMENT_BYTES, resolve_document_format
 from .segmentation import _sentences
+from .normalization import pdf_page_blocks
 from .storage import (
     persist_bytes_immutable,
     persist_json_immutable,
@@ -69,9 +72,9 @@ def _document_converter() -> Any:
     options = PdfPipelineOptions()
     options.do_ocr = True
     options.ocr_options = TesseractCliOcrOptions(lang=[])
-    options.do_table_structure = True
-    options.generate_page_images = True
-    options.generate_picture_images = True
+    options.do_table_structure = False
+    options.generate_page_images = False
+    options.generate_picture_images = False
     options.images_scale = float(os.environ.get("HEFESTO_DOCLING_IMAGE_SCALE", "2.0"))
     options.document_timeout = float(
         os.environ.get("HEFESTO_DOCLING_DOCUMENT_TIMEOUT", "600")
@@ -127,12 +130,25 @@ def normalize_document(
     original_uri: str,
     client: storage.Client,
     bucket_name: str,
+    on_page: Callable[[int, int], None] | None = None,
 ) -> DocumentNormalization:
     document_format = resolve_document_format(file_name, content_type)
     if document_format.family == "text":
         raise ValueError("plain text must use the lossless text normalizer")
     if document_format.extension == ".pdf" and not data.startswith(b"%PDF"):
         raise ValueError("source declares PDF but does not contain a PDF signature")
+    if document_format.extension == ".pdf":
+        try:
+            return _normalize_native_pdf(
+                data, project_id=project_id, source_id=source_id,
+                source_ordinal=source_ordinal, title=title, language=language,
+                input_uri=input_uri, original_uri=original_uri, client=client,
+                bucket_name=bucket_name, on_page=on_page,
+            )
+        except ValueError as error:
+            if str(error) != "PDF has no native text; OCR is required":
+                raise
+            # A wholly image-based PDF needs OCR. Sparse textual pages do not.
 
     from docling.datamodel.base_models import DocumentStream
 
@@ -142,7 +158,7 @@ def normalize_document(
         max_file_size=MAX_DOCUMENT_BYTES,
     )
     status_name = _status_name(result.status)
-    if status_name not in {"success", "partial_success"}:
+    if status_name != "success":
         raise ValueError(_conversion_failure(result, status_name))
 
     document = result.document
@@ -173,35 +189,10 @@ def normalize_document(
 
         if item_type == "TableItem":
             asset_ordinal += 1
-            html = _table_export(item, document, "html")
             readable = _table_export(item, document, "markdown")
             caption = _caption(item, document)
-            table_payload = _model_dump(item)
-            if not isinstance(table_payload, dict):
-                table_payload = {"value": table_payload}
-            table_identity = json.dumps(
-                table_payload, ensure_ascii=False, sort_keys=True, default=str
-            )
             asset_id = content_hash(
-                f"{source_id}:{origin_ref}:table:{content_hash(table_identity)}"
-            )
-            structured_uri = persist_json_immutable(
-                client,
-                bucket_name=bucket_name,
-                name=f"{prefix}/assets/{asset_id}.json",
-                payload=table_payload,
-            )
-            html_uri = None
-            if html:
-                html_uri = persist_bytes_immutable(
-                    client,
-                    bucket_name=bucket_name,
-                    name=f"{prefix}/assets/{asset_id}.html",
-                    data=html.encode("utf-8"),
-                    content_type="text/html; charset=utf-8",
-                )
-            blob_uri, binary_digest = _persist_item_image(
-                item, document, client, bucket_name, prefix, asset_id
+                f"{source_id}:{origin_ref}:table:{content_hash(readable or caption or origin_ref)}"
             )
             assets.append(SourceAsset(
                 asset_id=asset_id,
@@ -214,11 +205,8 @@ def normalize_document(
                 bbox=bbox,
                 caption=caption,
                 text_representation=readable or caption,
-                blob_uri=blob_uri,
-                structured_uri=structured_uri,
-                binary_sha256=binary_digest,
                 origin_ref=origin_ref,
-                payload={"docling_label": label, "html_uri": html_uri},
+                payload={"docling_label": label},
             ))
             marker = f"[asset:{asset_id}]"
             append_block(marker)
@@ -253,20 +241,9 @@ def normalize_document(
                 continue
             asset_ordinal += 1
             caption = _caption(item, document)
-            image_data = _item_image_bytes(item, document)
-            image_digest = sha256(image_data).hexdigest() if image_data else None
             asset_id = content_hash(
-                f"{source_id}:{origin_ref}:picture:{image_digest or content_hash(caption or origin_ref)}"
+                f"{source_id}:{origin_ref}:picture:{content_hash(caption or origin_ref)}"
             )
-            blob_uri = None
-            if image_data:
-                blob_uri = persist_bytes_immutable(
-                    client,
-                    bucket_name=bucket_name,
-                    name=f"{prefix}/assets/{asset_id}.png",
-                    data=image_data,
-                    content_type="image/png",
-                )
             kind = "chart" if "chart" in label else "figure"
             role = "decorative" if label in {"logo", "icon", "decoration"} else "unknown"
             assets.append(SourceAsset(
@@ -280,8 +257,6 @@ def normalize_document(
                 bbox=bbox,
                 caption=caption,
                 text_representation=caption,
-                blob_uri=blob_uri,
-                binary_sha256=image_digest,
                 origin_ref=origin_ref,
                 payload={"docling_label": label},
             ))
@@ -325,13 +300,7 @@ def normalize_document(
         name=f"{prefix}/canonical/content.txt",
         text=canonical_text,
     )
-    document_payload = _document_payload(document)
-    document_uri = persist_json_immutable(
-        client,
-        bucket_name=bucket_name,
-        name=f"{prefix}/canonical/document.json",
-        payload=document_payload,
-    )
+    document_uri = None
     pages = len(getattr(document, "pages", {}) or {})
     normalized_status = "partial" if status_name == "partial_success" else "normalized"
     metadata: dict[str, object] = {
@@ -371,8 +340,8 @@ def normalize_document(
         "configuration": {
             "ocr_engine": "tesseract-cli",
             "ocr_language": "automatic-script-detection",
-            "table_structure": True,
-            "picture_images": True,
+            "table_structure": False,
+            "picture_images": False,
             "image_scale": float(os.environ.get("HEFESTO_DOCLING_IMAGE_SCALE", "2.0")),
             "document_timeout_seconds": float(
                 os.environ.get("HEFESTO_DOCLING_DOCUMENT_TIMEOUT", "600")
@@ -407,6 +376,108 @@ def normalize_document(
         source=source,
         status=normalized_status,
         pages=pages,
+        receipt_uri=receipt_uri,
+    )
+
+
+_CAPTION = re.compile(
+    r"^(?:figure|fig\.?|table|tabela|quadro)\s+\d+(?:[-.]\d+)*\s*[:.\-–]",
+    re.IGNORECASE,
+)
+
+
+def _normalize_native_pdf(
+    data: bytes, *, project_id: UUID, source_id: UUID,
+    source_ordinal: int, title: str | None, language: str,
+    input_uri: str, original_uri: str, client: storage.Client,
+    bucket_name: str, on_page: Callable[[int, int], None] | None,
+) -> DocumentNormalization:
+    """Extract a PDF's existing text layer; keep page references and the original."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(data))
+    if reader.is_encrypted and not reader.decrypt(""):
+        raise ValueError("encrypted PDF requires a password")
+    total_pages = len(reader.pages)
+    raw_pages: list[str] = []
+    pages_with_text = 0
+    for index, page in enumerate(reader.pages, start=1):
+        # Layout mode preserves block breaks and caption lines, while still
+        # reading the PDF text layer without rendering pages or invoking OCR.
+        value = (page.extract_text(extraction_mode="layout") or "") if "/Contents" in page else ""
+        raw_pages.append(value)
+        pages_with_text += bool(value.strip())
+        if on_page and (index == 1 or index % 10 == 0 or index == total_pages):
+            on_page(index, total_pages)
+    if not pages_with_text:
+        raise ValueError("PDF has no native text; OCR is required")
+    # A sparse cover or chapter-ending page is valid. Preserve every page,
+    # including empty ones, in coverage metadata rather than guessing from length.
+    blocks_by_page = pdf_page_blocks(raw_pages)
+    prefix = f"hefesto-product/projects/{project_id}/sources/{source_id}"
+    blocks: list[str] = []
+    paragraphs: list[Paragraph] = []
+    cursor = 0
+    captions: list[dict[str, object]] = []
+    for page_no, page_blocks in enumerate(blocks_by_page, start=1):
+        for block in page_blocks:
+            if blocks:
+                cursor += 2
+            start = cursor
+            cursor += len(block)
+            blocks.append(block)
+            origin = f"pdf-page-{page_no}-paragraph-{len(paragraphs)+1}"
+            is_caption = bool(_CAPTION.match(block))
+            paragraph = _paragraph(
+                source_id=source_id, source_ordinal=source_ordinal,
+                ordinal=len(paragraphs) + 1, text=block,
+                element_type="caption" if is_caption else "paragraph",
+                page_no=page_no, bbox=None, canonical_start=start,
+                canonical_end=cursor, origin_ref=origin,
+            )
+            paragraphs.append(paragraph)
+            if is_caption:
+                captions.append({"text": block[:500], "page_no": page_no})
+    if not paragraphs:
+        raise ValueError("PDF native text contained no usable paragraphs; OCR is required")
+    canonical_text = "\n\n".join(blocks)
+    canonical_uri = persist_text_immutable(
+        client, bucket_name=bucket_name,
+        name=f"{prefix}/canonical/content.txt", text=canonical_text,
+    )
+    metadata: dict[str, object] = {
+        "input_uri": input_uri, "original_gcs_uri": original_uri,
+        "content_type": "application/pdf", "input_format": "pdf",
+        "pages": total_pages, "pages_with_text": pages_with_text,
+        "pages_without_text": total_pages - pages_with_text,
+        "bytes": len(data), "binary_sha256": sha256(data).hexdigest(),
+        "normalized_text_sha256": sha256(canonical_text.encode()).hexdigest(),
+        "normalizer": "pypdf-native-text-v1", "canonical_text_uri": canonical_uri,
+        "normalization_status": "normalized", "captions": captions,
+    }
+    source = NormalizedSource(
+        source_id=source_id, title=title, language=language,
+        text=canonical_text, metadata=metadata, paragraphs=paragraphs,
+    )
+    receipt_uri = persist_json_immutable(
+        client, bucket_name=bucket_name,
+        name=f"{prefix}/normalization-receipt.json",
+        payload={
+            "status": "normalized", "source_id": str(source_id),
+            "normalizer": "pypdf-native-text-v1", "pages": total_pages,
+            "pages_with_text": pages_with_text,
+            "pages_without_text": total_pages - pages_with_text,
+            "characters": len(canonical_text), "paragraphs": len(paragraphs),
+            "sentences": sum(len(p.sentences) for p in paragraphs),
+            "captions": captions, "canonical_text_uri": canonical_uri,
+            "ocr_used": False, "original_gcs_uri": original_uri,
+        },
+    )
+    source = source.model_copy(update={
+        "metadata": {**metadata, "normalization_receipt_uri": receipt_uri}
+    })
+    return DocumentNormalization(
+        source=source, status="normalized", pages=total_pages,
         receipt_uri=receipt_uri,
     )
 
