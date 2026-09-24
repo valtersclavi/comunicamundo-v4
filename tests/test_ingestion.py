@@ -223,6 +223,27 @@ def test_native_pdf_keeps_page_and_skips_docling(monkeypatch) -> None:
     assert normalized.source.text.startswith("Primeiro paragrafo.")
 
 
+def test_native_pdf_caption_is_a_location_only_asset() -> None:
+    from comunicamundo_v4.hefesto.document_normalization import normalize_document
+
+    original = b"Primeiro paragrafo."
+    caption = b"Figure 1: Example.."
+    assert len(original) == len(caption)
+    normalized = normalize_document(
+        text_pdf().replace(original, caption), file_name="figure.pdf",
+        content_type="application/pdf", project_id=uuid4(), source_id=uuid4(),
+        source_ordinal=1, title="Figure", language="en",
+        input_uri="gs://uploads/figure.pdf", original_uri="gs://product/figure.pdf",
+        client=Storage(), bucket_name="product",
+    )
+    assert len(normalized.source.assets) == 1
+    asset = normalized.source.assets[0]
+    assert asset.kind == "figure" and asset.page_no == 1
+    assert asset.caption.startswith("Figure 1:")
+    assert asset.blob_uri is None and asset.structured_uri is None
+    assert normalized.source.asset_links[0].asset_id == asset.asset_id
+
+
 def test_scanned_pdf_routes_to_ocr_without_silent_partial_result(monkeypatch) -> None:
     from pypdf import PdfWriter
     from io import BytesIO
