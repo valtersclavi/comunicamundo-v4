@@ -203,7 +203,7 @@ function renderSourceManifest(known, provisionalProject) {
   }).join("");
 }
 
-function renderInputSources(input) {
+function renderInputSources(input, runStatus) {
   const panel = $("#input-sources-panel");
   const successful = Array.isArray(input?.sources) ? input.sources : [];
   const progress = Array.isArray(input?.source_progress) ? input.source_progress : [];
@@ -216,24 +216,38 @@ function renderInputSources(input) {
     : progress.length ? progress : [...successful, ...failed];
   panel.hidden = !submitted.length;
   if (!submitted.length) { $("#input-sources-manifest").innerHTML = ""; return; }
-  const stored = submitted.filter((source) => successful.some((item) => item.input_uri === source.input_uri && item.persisted)).length;
+  const stored = submitted.filter((source) => successful.some((item) => item.input_uri === source.input_uri && item.persisted) || progress.some((item) => item.input_uri === source.input_uri && item.status === "persisted")).length;
   $("#input-sources-title").textContent = `${stored} de ${submitted.length} arquivos com frases no banco`;
   $("#input-sources-manifest").innerHTML = submitted.map((source, index) => {
     const item = successful.find((record) => record.input_uri === source.input_uri);
     const current = progress[index]?.input_uri === source.input_uri ? progress[index] : progress.find((record) => record.input_uri === source.input_uri);
     const error = failed.find((record) => record.input_uri === source.input_uri) || (current?.status === "failed" ? current : null);
     const name = source.title || source.input_uri?.split("/").pop() || `Arquivo ${index + 1}`;
-    const outcome = item?.persisted ? "Frases no banco" : item?.status === "partial" ? "Parcial" : item ? "Normalizado" : error ? "Falhou" : ({reading: "Lendo", normalizing: "Normalizando", normalized: "Normalizado", queued: "Aguardando"}[current?.status] || "Aguardando");
+    const persisted = Boolean(item?.persisted || current?.status === "persisted");
+    const digesting = persisted && !["queued", "ingesting", "input_failed"].includes(runStatus);
+    const outcome = error ? "Falhou" : digesting ? "Em digestão" : persisted ? "Frases no banco" : item?.status === "partial" ? "Parcial" : item ? "Normalizado" : ({reading: "Lendo", normalizing: "Preparando extração", extracting: "Extraindo texto", normalized: "Texto preparado", queued: "Aguardando"}[current?.status] || "Aguardando");
+    const phases = [
+      ["Recebido", true],
+      ["Lendo", Boolean(item || ["reading", "normalizing", "extracting", "normalized"].includes(current?.status))],
+      ["Texto", Boolean(item || ["normalized"].includes(current?.status) || current?.status === "extracting" && current?.pages_done === current?.pages)],
+      ["Frases no banco", persisted],
+      ["Digestão", Boolean(digesting)]
+    ];
+    const pageProgress = current?.status === "extracting" && current?.pages > 0
+      ? `${formatter.format(current.pages_done || 0)} de ${formatter.format(current.pages)} páginas lidas (${Math.round(100 * (current.pages_done || 0) / current.pages)}%)`
+      : "";
     const steps = item ? [
       item.original_stored ? "Original guardado" : "Original: sem confirmação",
       item.normalized ? "Texto extraído" : "Extração: sem confirmação",
       `${formatter.format(item.paragraphs || 0)} parágrafos · ${formatter.format(item.sentences || 0)} frases`,
-      item.persisted ? `${formatter.format(item.stored_sentences || 0)} frases conferidas no banco` : "Banco: sem confirmação"
+      persisted ? `${formatter.format(item.stored_sentences || current?.sentences || 0)} frases conferidas no banco` : "Banco: sem confirmação"
     ] : error ? [`Falha em ${error.failed_step || "aquisição ou normalização"}`]
-      : [current?.status === "normalized" ? `${formatter.format(current.sentences || 0)} frases preparadas; aguardando Postgres` : outcome];
+      : [persisted ? `${formatter.format(current?.sentences || 0)} frases conferidas no banco` : current?.status === "normalized" ? `${formatter.format(current.sentences || 0)} frases preparadas; aguardando Postgres` : outcome];
     return `<article class="source-record">
-      <div class="source-record-head"><span>Arquivo ${index + 1}</span><strong class="source-status ${item?.persisted ? "acquired" : error ? "failed" : ""}">${outcome}</strong></div>
+      <div class="source-record-head"><span>Arquivo ${index + 1}</span><strong class="source-status ${persisted ? "acquired" : error ? "failed" : ""}">${outcome}</strong></div>
       <h3>${escapeHtml(name)}</h3>
+      <div class="source-steps" aria-label="Etapas do arquivo">${phases.map(([label, done]) => `<span class="source-step ${done ? "done" : ""}">${done ? "●" : "○"} ${label}</span>`).join("")}</div>
+      ${pageProgress ? `<p class="source-meta">${escapeHtml(pageProgress)}</p>` : ""}
       <p class="source-meta">${steps.map(escapeHtml).join(" · ")}</p>
       ${error ? `<p class="source-error">${escapeHtml(error.error_class || "Falha")}: ${escapeHtml(error.error_message || "Sem detalhes")}</p>` : ""}
     </article>`;
@@ -265,7 +279,7 @@ function renderRun(run) {
   const project = run.editorial_project?.proposal || run.provisional_editorial_project;
   renderSummary(run, known, project);
   renderSourceManifest(known, run.provisional_editorial_project || run.request?.provisional_project);
-  renderInputSources(run.input);
+  renderInputSources(run.input, status);
   renderAssetManifest(run.input);
   let activeFound = false;
   $("#stages").innerHTML = displayedStages.map((name) => {
