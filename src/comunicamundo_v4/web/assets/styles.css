@@ -118,6 +118,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--green); box-shad
 .source-status { color: var(--soft-ink); }
 .source-status.acquired { color: var(--green); }
 .source-status.failed { color: var(--danger); }
+.source-steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.source-step { border: 1px solid var(--line); border-radius: 12px; padding: 3px 7px; color: var(--soft-ink); font-size: 11px; }
+.source-step.done { border-color: var(--green); color: var(--green); }
 .source-coverage { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 14px; }
 .source-coverage > span { margin-right: 2px; color: var(--soft-ink); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .source-coverage em { padding: 5px 8px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 11px; font-style: normal; }
