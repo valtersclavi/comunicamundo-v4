@@ -916,7 +916,7 @@ class Hefesto:
                     task_type="editorial_subject_digest",
                     prompt=prompt,
                     schema=SubjectMaterialDigest,
-                    max_output_tokens=2_048,
+                    max_output_tokens=8_192,
                     thinking_tokens=1_000,
                 )
             identity = "subject-digest-v1:" + _subject_key(subject.title) + ":" + ":".join(
