@@ -33,17 +33,26 @@ def extract_pdf(data: bytes) -> tuple[str, int]:
 
 
 def normalize_pdf_pages(raw_pages: list[str]) -> str:
+    return "\n\n".join(
+        block for blocks in pdf_page_blocks(raw_pages) for block in blocks
+    ).strip()
+
+
+def pdf_page_blocks(raw_pages: list[str]) -> list[list[str]]:
+    """Keep native PDF text in reading order without losing page provenance."""
     pages = [_clean_lines(value) for value in raw_pages]
     repeated = _repeated_boundaries(pages)
-    paragraphs: list[str] = []
+    result: list[list[str]] = []
     for lines in pages:
         kept = [line for line in lines if _canonical_line(line) not in repeated]
         page_text = "\n".join(kept).strip()
+        paragraphs: list[str] = []
         for raw_block in _BLANKS.split(page_text):
             block = _join_wrapped_lines(raw_block)
             if block:
                 paragraphs.append(block)
-    return "\n\n".join(paragraphs).strip()
+        result.append(paragraphs)
+    return result
 
 
 def normalize_acquired_text(value: str) -> str:
