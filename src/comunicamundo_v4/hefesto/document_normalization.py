@@ -381,7 +381,7 @@ def normalize_document(
 
 
 _CAPTION = re.compile(
-    r"^(?:figure|fig\.?|table|tabela|quadro)\s+\d+(?:[-.]\d+)*\s*[:.\-–]",
+    r"^(figure|fig\.?|table|tabela|quadro)\s+\d+(?:[-.]\d+)*(?:\s*[:.\-–]|\s+)",
     re.IGNORECASE,
 )
 
@@ -417,6 +417,8 @@ def _normalize_native_pdf(
     prefix = f"hefesto-product/projects/{project_id}/sources/{source_id}"
     blocks: list[str] = []
     paragraphs: list[Paragraph] = []
+    assets: list[SourceAsset] = []
+    asset_links: list[ParagraphAssetLink] = []
     cursor = 0
     captions: list[dict[str, object]] = []
     for page_no, page_blocks in enumerate(blocks_by_page, start=1):
@@ -427,7 +429,8 @@ def _normalize_native_pdf(
             cursor += len(block)
             blocks.append(block)
             origin = f"pdf-page-{page_no}-paragraph-{len(paragraphs)+1}"
-            is_caption = bool(_CAPTION.match(block))
+            caption_match = _CAPTION.match(block)
+            is_caption = bool(caption_match)
             paragraph = _paragraph(
                 source_id=source_id, source_ordinal=source_ordinal,
                 ordinal=len(paragraphs) + 1, text=block,
@@ -438,6 +441,19 @@ def _normalize_native_pdf(
             paragraphs.append(paragraph)
             if is_caption:
                 captions.append({"text": block[:500], "page_no": page_no})
+                kind = "table" if caption_match.group(1).lower() in {"table", "tabela", "quadro"} else "figure"
+                asset_id = content_hash(f"{source_id}:{origin}:{kind}:{content_hash(block)}")
+                assets.append(SourceAsset(
+                    asset_id=asset_id, source_id=source_id,
+                    source_ordinal=source_ordinal, ordinal=len(assets) + 1,
+                    kind=kind, role="content", page_no=page_no,
+                    caption=block[:500], text_representation=block,
+                    origin_ref=origin, payload={"extraction": "native_pdf_caption"},
+                ))
+                asset_links.append(ParagraphAssetLink(
+                    paragraph_id=paragraph.paragraph_id, asset_id=asset_id,
+                    relation="caption", distance=0, primary=True,
+                ))
     if not paragraphs:
         raise ValueError("PDF native text contained no usable paragraphs; OCR is required")
     canonical_text = "\n\n".join(blocks)
@@ -458,6 +474,7 @@ def _normalize_native_pdf(
     source = NormalizedSource(
         source_id=source_id, title=title, language=language,
         text=canonical_text, metadata=metadata, paragraphs=paragraphs,
+        assets=assets, asset_links=asset_links,
     )
     receipt_uri = persist_json_immutable(
         client, bucket_name=bucket_name,
@@ -469,6 +486,8 @@ def _normalize_native_pdf(
             "pages_without_text": total_pages - pages_with_text,
             "characters": len(canonical_text), "paragraphs": len(paragraphs),
             "sentences": sum(len(p.sentences) for p in paragraphs),
+            "tables": sum(a.kind == "table" for a in assets),
+            "figures": sum(a.kind != "table" for a in assets),
             "captions": captions, "canonical_text_uri": canonical_uri,
             "ocr_used": False, "original_gcs_uri": original_uri,
         },
