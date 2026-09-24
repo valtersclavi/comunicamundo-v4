@@ -384,7 +384,7 @@ Os graus de confiança `poor`, `fair`, `good` e `excellent` serão registrados. 
 
 - Harmonizar navegador, API, banco e worker no mesmo limite inicial de **200 MB por fonte**, que é o limite real já aplicado pela ingestão.
 - O limite de páginas e o timeout serão configurações explícitas do Job, não constantes escondidas.
-- Começar com `document_timeout=120s`, recomendação operacional documentada pelo Docling, e registrar `partial` quando houver conteúdo parcial. Alterar esse valor depois exige evidência de PDFs reais, não tentativa cega.
+- Usar `document_timeout=600s` após o teste B revelar extração parcial de um PDF real de 275 páginas sob o limite anterior de 120s; registrar `partial` quando houver conteúdo parcial. Confirmar a causa precisa no recibo de normalização.
 - O limite de 64 fontes por projeto permanece.
 - Conversões Docling rodam com concorrência 1 por task na primeira entrega para conter memória; aquisição pode continuar independente.
 - `OMP_NUM_THREADS` deve corresponder aos 4 CPUs já alocados ao Job, sem oversubscription.

@@ -74,7 +74,7 @@ def _document_converter() -> Any:
     options.generate_picture_images = True
     options.images_scale = float(os.environ.get("HEFESTO_DOCLING_IMAGE_SCALE", "2.0"))
     options.document_timeout = float(
-        os.environ.get("HEFESTO_DOCLING_DOCUMENT_TIMEOUT", "120")
+        os.environ.get("HEFESTO_DOCLING_DOCUMENT_TIMEOUT", "600")
     )
     artifacts = os.environ.get("HEFESTO_DOCLING_ARTIFACTS_PATH", "").strip()
     if artifacts:
@@ -375,7 +375,7 @@ def normalize_document(
             "picture_images": True,
             "image_scale": float(os.environ.get("HEFESTO_DOCLING_IMAGE_SCALE", "2.0")),
             "document_timeout_seconds": float(
-                os.environ.get("HEFESTO_DOCLING_DOCUMENT_TIMEOUT", "120")
+                os.environ.get("HEFESTO_DOCLING_DOCUMENT_TIMEOUT", "600")
             ),
             "remote_services": False,
             "asr_model": "whisper-small-native",
