@@ -1,0 +1,72 @@
+name: Hefesto operations
+on:
+  issues:
+    types: [opened, edited]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'valtersclavi/comunicamundo-v4' &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, '[hefesto-ops] inspect')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROJECT_ID: comunicamundo-v4
+      REGION: us-central1
+      JOB_NAME: hefesto-v4-rebuild
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    steps:
+      - name: Validate bounded log query
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from datetime import UTC, datetime, timedelta
+          from pathlib import Path
+          request = json.loads(os.environ["ISSUE_BODY"])
+          if set(request) != {"since"}:
+              raise ValueError('issue body must be JSON with only "since"')
+          since = datetime.fromisoformat(request["since"].replace("Z", "+00:00")).astimezone(UTC)
+          now = datetime.now(UTC)
+          if not now - timedelta(days=7) <= since <= now:
+              raise ValueError("since must be in the last seven days")
+          value = since.isoformat().replace("+00:00", "Z")
+          query = (
+              'resource.type="cloud_run_job"\n'
+              'resource.labels.job_name="hefesto-v4-rebuild"\n'
+              'resource.labels.location="us-central1"\n'
+              f'timestamp>="{value}"\n'
+          )
+          Path(os.environ["RUNNER_TEMP"], "hefesto-query.txt").write_text(query)
+          PY
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+          service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Fetch execution metadata and logs
+        shell: bash
+        run: |
+          gcloud run jobs executions list --job="${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --limit=25 --format=json > "${RUNNER_TEMP}/hefesto-executions.json"
+          gcloud logging read "$(cat "${RUNNER_TEMP}/hefesto-query.txt")" --project="${PROJECT_ID}" --limit=5000 --format=json > "${RUNNER_TEMP}/hefesto-logs.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          print("Executions:", len(json.loads((root / "hefesto-executions.json").read_text())))
+          print("Log entries:", len(json.loads((root / "hefesto-logs.json").read_text())))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hefesto-diagnostic-${{ github.event.issue.number }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/hefesto-query.txt
+            ${{ runner.temp }}/hefesto-executions.json
+            ${{ runner.temp }}/hefesto-logs.json
+          retention-days: 30
