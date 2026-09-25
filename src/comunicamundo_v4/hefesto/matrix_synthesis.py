@@ -334,6 +334,10 @@ async def propose_from_matrix(
                 ),
             ) for source in sources[:4]],
         ))
+    await repository.remap_matrix_subject_links(
+        run.execution_run_id, round_number,
+        [index for index, _ in supported],
+    )
     duration = max(
         scaffold.duration_minutes,
         ceil(sum(item.allocated_minutes for item in subjects)),
