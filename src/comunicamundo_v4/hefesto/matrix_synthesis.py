@@ -197,6 +197,8 @@ async def _themes(
         if len(merged) >= len(themes):
             raise ValueError("matrix thematic merge did not reduce its input")
         themes = merged
+    if not themes:
+        raise ValueError("matrix thematic reading produced no supported direction")
     return themes
 
 
