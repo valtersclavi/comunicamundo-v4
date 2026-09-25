@@ -1,6 +1,6 @@
 # Hefesto V4 — fluxo editorial e matriz relacional
 
-**Status:** contrato de produto para a evolução da matriz editorial, registrado em 25/09/2026. A matriz e partes deste fluxo ainda não estão implementadas. Este documento descreve o comportamento desejado; o comportamento atual do código não revoga estas regras.
+**Status:** contrato de produto registrado em 25/09/2026. O caminho da matriz está implementado como opção na interface, ao lado do caminho anterior. A qualidade editorial e operacional ainda depende de validação pelo usuário na interface; o Teste B permanece suspenso.
 
 ## Objetivo e fronteira
 
@@ -50,8 +50,8 @@ Aplicar o mesmo princípio à relação entre contribuições, síntese por assu
 
 ## Estado de implementação e referências
 
-A documentação de arquitetura em [product-architecture.md](product-architecture.md) já prevê sugestões do modelo e oportunidades de fontes no Projeto Editorial. O fluxo de zero fontes e a revisão do pré-projeto existem no código. Em 25/09/2026, os campos das duas sugestões existem nos contratos, mas são esvaziados na geração atual do Projeto Editorial; a interface ainda não permite escolher essas sugestões, e o remoque aparece apenas no pré-projeto. Esses pontos são lacunas de implementação, **não mudanças deste contrato**.
+A documentação em [product-architecture.md](product-architecture.md) descreve o fluxo existente. O caminho da matriz é opcional por execução e usa as migrações `1006_editorial_matrix.sql` e `1007_matrix_work.sql`. Extração, cobertura, contribuições, evidências, relações, roteamento por assunto e resultados intermediários ficam persistidos. A síntese e a escrita usam chamadas por lote ou parte, com recuperação das contribuições da matriz; as tarefas de síntese dividem lotes quando ocorre `MAX_TOKENS`. O caminho anterior continua disponível para comparação.
 
-A primeira etapa da matriz já possui esquema relacional, extração atômica dos trechos selecionados, validação de referência, cobertura e checkpoints. Ela é isolada: o comando interno `extract-matrix --execution-run-id=...` só executa quando solicitado explicitamente e pode incorrer em custo de modelo. A geração do Projeto Editorial e a redação ainda usam o caminho anterior. Antes de habilitar o caminho novo na interface, faltam o relacionamento/roteamento de contribuições por assunto, a síntese e redação que recuperam a matriz, o remoque permanente, as sugestões acionáveis e a comparação de qualidade orientada pelo usuário.
+Na interface, o primeiro Projeto Editorial originado de fontes fornecidas apresenta as duas listas. A escolha de contribuição do LLM registra proveniência de modelo; a escolha de fonte pesquisa e ingere apenas a nova fonte com a esteira existente, integra suas contribuições e refaz o projeto inteiro. Revisão do projeto, ações de sugestão e aprovação estão disponíveis por rotas próprias. A interface mantém o campo de alterações abaixo do projeto, inclusive durante o processamento, quando o bloqueia temporariamente. Ação editorial concorrente é recusada e falhas restauram a possibilidade de edição.
 
-Para o desenho da matriz, consulte também o memo de retomada de 25/09/2026. A implementação deve manter o caminho atual como referência, introduzir migrações apenas nas novas tabelas editoriais e deixar a ingestão congelada. O Teste B permanece suspenso; não executá-lo como parte desta documentação.
+A implementação **não equivale à validação da qualidade**: comparar projetos e textos com o caminho anterior, conferir cobertura, duração, proveniência, custo e retomada pela interface quando o usuário decidir testar. O Teste B não foi executado como parte desta implementação. O memo de retomada de 25/09/2026 registra a linha de base e o escopo congelado.
