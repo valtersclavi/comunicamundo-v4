@@ -91,6 +91,53 @@ async def _cached(
     return result
 
 
+async def _packet_call(
+    repository: object, execution_id: UUID, round_number: int,
+    task: str, items: Sequence[Any], render: Callable[[Sequence[Any]], str],
+    schema: type[BaseModel],
+    call: Callable[[str, str, type[BaseModel], int], Awaitable[BaseModel]],
+    output_tokens: int,
+) -> list[BaseModel]:
+    prompt = render(items)
+    digest = _digest(prompt)
+    unit_id = _digest(task + ":" + digest)
+    cached = await repository.matrix_work(
+        execution_id, round_number, task, unit_id, digest,
+    )
+    if cached is not None and not cached.get("_split"):
+        return [schema.model_validate(cached)]
+    if cached is None:
+        try:
+            value = await call(task, prompt, schema, output_tokens)
+        except Exception as error:
+            limited = (
+                "MAX_TOKENS" in str(error).upper()
+                or "ATOMIC INPUT BUDGET" in str(error).upper()
+            )
+            if not limited or len(items) < 2:
+                raise
+            await repository.save_matrix_work(
+                execution_id, round_number, task, unit_id, digest,
+                {"_split": True},
+            )
+        else:
+            await repository.save_matrix_work(
+                execution_id, round_number, task, unit_id, digest,
+                value.model_dump(mode="json"),
+            )
+            return [value]
+    middle = len(items) // 2
+    left = await _packet_call(
+        repository, execution_id, round_number, task,
+        items[:middle], render, schema, call, output_tokens,
+    )
+    right = await _packet_call(
+        repository, execution_id, round_number, task,
+        items[middle:], render, schema, call, output_tokens,
+    )
+    return [*left, *right]
+
+
 async def _themes(
     repository: object, execution_id: UUID, round_number: int,
     brief: EditorialBrief, claims: Sequence[dict[str, Any]],
@@ -106,11 +153,20 @@ async def _themes(
             f"BRIEF: {brief.model_dump_json()}\nCLAIMS: "
             f"{json.dumps(packet, ensure_ascii=False)}"
         )
-        result = await _cached(
+        results = await _packet_call(
             repository, execution_id, round_number, "matrix_themes",
-            prompt, Themes, call, 2_048,
+            packet,
+            lambda items: (
+                "Identify up to four distinct editorial ideas across these claims. "
+                "Preserve material contradictions, limits and unexpected angles. "
+                "Do not invent claims. Output short titles and insights.\\n"
+                f"BRIEF: {brief.model_dump_json()}\\nCLAIMS: "
+                + json.dumps(items, ensure_ascii=False)
+            ),
+            Themes, call, 2_048,
         )
-        themes.extend(result.items)
+        for result in results:
+            themes.extend(result.items)
     level = 0
     while len(themes) > 12:
         level += 1
