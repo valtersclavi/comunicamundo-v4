@@ -598,7 +598,10 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             await repository.record_usage(execution_id, original.project_id, usage)
         isolated_project_id = uuid5(
             original.project_id,
-            f"matrix-source:{original.editorial_project.editorial_project_id}:{index}",
+            "matrix-source:"
+            + str(original.editorial_project.editorial_project_id)
+            + f":{index}:"
+            + ":".join(sorted(result.selection.selected_candidate_ids)),
         )
         isolated_request = EditorialInputRequest(
             project_id=isolated_project_id, brief=original.request.brief,
