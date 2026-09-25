@@ -4,16 +4,17 @@ import argparse
 import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
+from hashlib import sha256
 import json
 import os
 from time import perf_counter
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from google.cloud import storage
 from google.api_core.exceptions import NotFound
 
 from .gateway import VertexGateway
-from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, RunState, SourceMode
+from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, ProvisionalEditorialSubject, EditorialInputRequest, RunState, SourceMode
 from .ingestion import IngestionResult, ingest, ingest_acquired
 from .maintenance import clean_operational_history
 from .postgres import ProductRepository, apply_migrations
@@ -542,6 +543,118 @@ async def accept_model_suggestion(execution_id: UUID, index: int) -> None:
         await repository.close()
 
 
+async def enrich_project_source(execution_id: UUID, index: int) -> None:
+    client = storage_client()
+    repository, hefesto = await services()
+    original = await repository.get_run(execution_id)
+    if original is None or original.state is not RunState.PROJECT_PROPOSED:
+        await repository.close()
+        raise ValueError("Editorial Project is not awaiting source enrichment")
+    proposal = original.editorial_project.proposal
+    options = proposal.source_enrichment_opportunities
+    if index < 0 or index >= len(options):
+        await repository.close()
+        raise ValueError("unknown source enrichment opportunity")
+    opportunity = options[index]
+    try:
+        gateway = VertexGateway(
+            project=required("GOOGLE_CLOUD_PROJECT"),
+            location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
+        )
+        provisional = ProvisionalEditorialProject(
+            working_title=proposal.working_title,
+            editorial_promise=proposal.editorial_promise,
+            narrative_axis=proposal.narrative_axis,
+            duration_minutes=2,
+            subjects=[ProvisionalEditorialSubject(
+                title=opportunity, editorial_role=opportunity,
+                desired_depth=opportunity, allocated_minutes=2,
+            )],
+            disclaimer="Esta oportunidade exige uma nova fonte.",
+        )
+        research = SourceResearch(
+            EditorialSourceEditor(gateway),
+            SourceDiscovery([
+                YouSearchProvider(required("YOU_API_KEY")),
+                OpenAlexSearchProvider(required("OPENALEX_API_KEY")),
+            ], results_per_query=2),
+            SourceAcquirer(
+                you_api_key=required("YOU_API_KEY"),
+                jina_api_key=required("JINA_API_KEY"),
+                browser_use_api_key=required("BROWSER_USE_API_KEY"),
+            ),
+        )
+        result = await research.run(original.request.brief, provisional)
+        for usage in result.usages:
+            await repository.record_usage(execution_id, original.project_id, usage)
+        isolated_project_id = uuid5(
+            original.project_id,
+            f"matrix-source:{original.editorial_project.editorial_project_id}:{index}",
+        )
+        isolated_request = EditorialInputRequest(
+            project_id=isolated_project_id, brief=original.request.brief,
+            source_mode=SourceMode.FIND_FOR_ME,
+        )
+        ingested = await asyncio.to_thread(
+            ingest_acquired, isolated_request, list(result.acquisitions),
+            client=client, bucket_name=required("HEFESTO_GCS_BUCKET"),
+            provisional_project=provisional,
+            supported_subject_indexes=[0],
+            subject_coverage=result.selection.subject_coverage,
+        )
+        offset = len(original.request.sources)
+        additions = list(ingested.request.sources)
+        paragraphs = [
+            item.model_copy(update={"source_ordinal": offset + rank})
+            for rank, source in enumerate(additions, start=1)
+            for item in segment_sources([source])
+        ]
+        assets = [
+            item.model_copy(update={"source_ordinal": offset + rank})
+            for rank, source in enumerate(additions, start=1)
+            for item in source.assets
+        ]
+        links = [item for source in additions for item in source.asset_links]
+        # Preserve old structured rows; append only the new source's rows.
+        await repository.save_structure(execution_id, paragraphs, assets, links)
+        clean_additions = [
+            source.model_copy(update={
+                "paragraphs": [], "assets": [], "asset_links": [],
+            }) for source in additions
+        ]
+        request = original.request.model_copy(update={
+            "sources": [*original.request.sources, *clean_additions],
+            "existing_editorial_project": proposal,
+        })
+        active = original.model_copy(update={
+            "request": request, "editorial_project": None,
+            "editorial_round": original.editorial_round + 1,
+            "editorial_engine": "matrix",
+            "state": RunState.SOURCE_STRUCTURE_READY,
+            "error_class": None, "error_message": None,
+        })
+        await repository.save_run(active)
+        await hefesto.select(execution_id)
+        await hefesto.extract_matrix(execution_id)
+        new_source_ids = {source.source_id for source in additions}
+        claims = await repository.matrix_claims(execution_id)
+        if not any(
+            item["origin"] == "source"
+            and any(e["source_ordinal"] > offset for e in item["evidence"])
+            for item in claims
+        ):
+            raise ValueError("new source did not contribute to the proposed enrichment")
+        await hefesto.propose_matrix_project(execution_id)
+        await _persist_product_receipt(hefesto, client, execution_id, [])
+    except Exception:
+        latest = await repository.get_run(execution_id)
+        if latest is not None and latest.editorial_project is None:
+            await repository.save_run(original)
+        raise
+    finally:
+        await repository.close()
+
+
 async def resume_plan(execution_id: UUID) -> None:
     client = storage_client()
     repository, hefesto = await services()
@@ -1021,6 +1134,21 @@ async def run(args: argparse.Namespace) -> None:
         finally:
             await repository.close()
         return
+    if args.command == "enrich-project-source":
+        try:
+            await enrich_project_source(args.execution_run_id, args.index)
+        except Exception as error:
+            await record_action_failure(args.execution_run_id, args.command, error)
+            mark_action_dispatch(
+                storage_client(), args.execution_run_id, args.command, "failed",
+                error, dispatch_key=args.dispatch_key,
+            )
+            raise
+        mark_action_dispatch(
+            storage_client(), args.execution_run_id, args.command,
+            "completed", dispatch_key=args.dispatch_key,
+        )
+        return
     if args.command in {"revise-project", "accept-model-suggestion"}:
         try:
             if args.command == "revise-project":
@@ -1120,6 +1248,10 @@ def parser() -> argparse.ArgumentParser:
     revision.add_argument("--execution-run-id", type=UUID, required=True)
     revision.add_argument("--instruction", required=True)
     revision.add_argument("--dispatch-key")
+    source_suggestion = commands.add_parser("enrich-project-source")
+    source_suggestion.add_argument("--execution-run-id", type=UUID, required=True)
+    source_suggestion.add_argument("--index", type=int, required=True)
+    source_suggestion.add_argument("--dispatch-key")
     model_suggestion = commands.add_parser("accept-model-suggestion")
     model_suggestion.add_argument("--execution-run-id", type=UUID, required=True)
     model_suggestion.add_argument("--index", type=int, required=True)
