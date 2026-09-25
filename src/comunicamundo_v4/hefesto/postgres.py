@@ -374,6 +374,45 @@ class ProductRepository:
                 proposal.setdefault("editorial_corpus", None)
         return ProductRun.model_validate(payload)
 
+    async def clone_editorial_inputs(
+        self, source_execution_id: UUID, target_execution_id: UUID,
+    ) -> dict[str, int]:
+        """Reuse persisted structure and selection for an isolated matrix comparison."""
+        tables = (
+            ("paragraphs", "paragraph_id,source_id,source_ordinal,paragraph_ordinal,text,payload"),
+            ("sentences", "paragraph_id,sentence_id,ordinal,text"),
+            ("source_assets", "asset_id,source_id,source_ordinal,asset_ordinal,kind,role,page_no,caption,text_representation,blob_uri,structured_uri,binary_sha256,payload"),
+            ("paragraph_assets", "paragraph_id,asset_id,relation,distance,is_primary,payload"),
+            ("selection_batches", "batch_id,source_id,source_ordinal,first_passage_ordinal,last_passage_ordinal,input_tokens,payload"),
+        )
+        counts: dict[str, int] = {}
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                for table, columns in tables:
+                    await connection.execute(
+                        f"""INSERT INTO hefesto_product.{table}
+                            (execution_run_id,{columns})
+                            SELECT %s,{columns} FROM hefesto_product.{table}
+                            WHERE execution_run_id=%s ON CONFLICT DO NOTHING""",
+                        (target_execution_id, source_execution_id),
+                    )
+                    row = await connection.execute(
+                        f"""SELECT count(*) FROM hefesto_product.{table}
+                            WHERE execution_run_id=%s""",
+                        (target_execution_id,),
+                    )
+                    counts[table] = (await row.fetchone())[0]
+                    row = await connection.execute(
+                        f"""SELECT count(*) FROM hefesto_product.{table}
+                            WHERE execution_run_id=%s""",
+                        (source_execution_id,),
+                    )
+                    if counts[table] != (await row.fetchone())[0]:
+                        raise ValueError(f"matrix comparison copied incomplete {table}")
+                if not counts["paragraphs"] or not counts["selection_batches"]:
+                    raise ValueError("matrix comparison requires persisted structure and selection")
+        return counts
+
     async def save_structure(
         self,
         execution_run_id: UUID,
