@@ -198,6 +198,41 @@ class ProductRepository:
             if await row.fetchone() is None:
                 raise KeyError("unknown execution")
 
+    async def claim_editorial_action(
+        self, execution_run_id: UUID, action_token: str,
+    ) -> bool:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """UPDATE hefesto_product.submissions
+                   SET receipt_payload=jsonb_set(
+                         jsonb_set(receipt_payload, '{status}',
+                                   '"updating_project"'::jsonb),
+                         '{editorial_action}', %s::jsonb
+                       ),
+                       updated_at=now()
+                   WHERE execution_run_id=%s
+                     AND receipt_payload->>'status'='project_proposed'
+                   RETURNING execution_run_id""",
+                (json.dumps(action_token), execution_run_id),
+            )
+            return await row.fetchone() is not None
+
+    async def release_editorial_action(
+        self, execution_run_id: UUID, action_token: str,
+    ) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """UPDATE hefesto_product.submissions
+                   SET receipt_payload=jsonb_set(
+                         receipt_payload - 'editorial_action',
+                         '{status}', '"project_proposed"'::jsonb
+                       ),updated_at=now()
+                   WHERE execution_run_id=%s
+                     AND receipt_payload->>'status'='updating_project'
+                     AND receipt_payload->>'editorial_action'=%s""",
+                (execution_run_id, action_token),
+            )
+
     async def product_receipt(
         self, execution_run_id: UUID
     ) -> dict[str, object] | None:
