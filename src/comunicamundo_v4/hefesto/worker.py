@@ -675,9 +675,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             await repository.rollback_enrichment_sources(
                 execution_id, added_ids, original.editorial_round,
             )
-        latest = await repository.get_run(execution_id)
-        if latest is not None and latest.editorial_project is None:
-            await repository.save_run(original)
+        await repository.save_run(original)
         raise
     finally:
         await repository.close()
