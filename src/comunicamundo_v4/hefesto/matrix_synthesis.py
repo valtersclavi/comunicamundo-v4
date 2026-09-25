@@ -153,7 +153,7 @@ async def _themes(
                 "Identify up to four distinct editorial ideas across these claims. "
                 "Preserve material contradictions, limits and unexpected angles. "
                 "Do not invent claims. Output short titles and insights.\n"
-                f"BRIEF: {brief.model_dump_json()}\\nCLAIMS: "
+                f"BRIEF: {brief.model_dump_json()}\nCLAIMS: "
                 + json.dumps(items, ensure_ascii=False)
             ),
             Themes, call, 2_048,
@@ -172,8 +172,8 @@ async def _themes(
                 lambda items: (
                     "Group overlapping editorial themes into up to four "
                     "meaningful directions. Preserve tensions, limits and "
-                    "distinctive angles. Do not add unsupported facts.\\n"
-                    f"BRIEF: {brief.model_dump_json()}\\nTHEMES: "
+                    "distinctive angles. Do not add unsupported facts.\n"
+                    f"BRIEF: {brief.model_dump_json()}\nTHEMES: "
                     + json.dumps([item.model_dump() for item in items],
                                  ensure_ascii=False)
                 ),
@@ -209,15 +209,15 @@ async def _route(
                 "can materially develop. Return each claim ID exactly once "
                 "with its subject indexes (or an empty list). Preserve "
                 "contradictions and do not treat model knowledge as source "
-                "evidence.\\n"
-                f"BRIEF: {brief.model_dump_json()}\\nSUBJECTS: "
+                "evidence.\n"
+                f"BRIEF: {brief.model_dump_json()}\nSUBJECTS: "
                 + json.dumps(
                     [{"index": i, "title": subject.title,
                       "role": subject.editorial_role[:160]}
                      for i, subject in enumerate(subjects)],
                     ensure_ascii=False,
                 )
-                + "\\nCLAIMS: "
+                + "\nCLAIMS: "
                 + json.dumps([_claim_input(item) for item in items],
                              ensure_ascii=False)
             ),
@@ -226,15 +226,15 @@ async def _route(
         known = {item["claim_id"]: item for item in packet}
         seen: set[str] = set()
         for result in results:
-          for placement in result.items:
-              if placement.claim_id not in known or placement.claim_id in seen:
-                  raise ValueError("matrix route contains an unknown or duplicate claim")
-              seen.add(placement.claim_id)
-              for index in set(placement.subject_indexes):
-                  if index < 0 or index >= len(subjects):
-                      raise ValueError("matrix route contains an unknown subject")
-                  routed[index].append(known[placement.claim_id])
-                  links[index].append((placement.claim_id, placement.role))
+            for placement in result.items:
+                if placement.claim_id not in known or placement.claim_id in seen:
+                    raise ValueError("matrix route contains an unknown or duplicate claim")
+                seen.add(placement.claim_id)
+                for index in set(placement.subject_indexes):
+                    if index < 0 or index >= len(subjects):
+                        raise ValueError("matrix route contains an unknown subject")
+                    routed[index].append(known[placement.claim_id])
+                    links[index].append((placement.claim_id, placement.role))
         if seen != set(known):
             raise ValueError("matrix routing omitted claims from the packet")
     for index, assignments in links.items():
@@ -258,8 +258,8 @@ async def _reading(
             lambda items: (
                 "Write a concise editorial reading from these claims. "
                 "Preserve qualifications, disagreements and uncertainty; "
-                "distinguish model knowledge from sources.\\n"
-                f"SUBJECT: {subject.model_dump_json()}\\nCLAIMS: "
+                "distinguish model knowledge from sources.\n"
+                f"SUBJECT: {subject.model_dump_json()}\nCLAIMS: "
                 + json.dumps([_claim_input(item) for item in items],
                              ensure_ascii=False)
             ),
@@ -281,8 +281,8 @@ async def _reading(
                 lambda items: (
                     "Integrate these partial editorial readings. Preserve "
                     "distinct ideas, tensions and limits. The original "
-                    "matrix remains available to the writer.\\n"
-                    f"SUBJECT: {subject.model_dump_json()}\\nREADINGS: "
+                    "matrix remains available to the writer.\n"
+                    f"SUBJECT: {subject.model_dump_json()}\nREADINGS: "
                     + json.dumps(
                         [item.model_dump(mode="json") for item in items],
                         ensure_ascii=False,
