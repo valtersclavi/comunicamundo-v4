@@ -814,7 +814,7 @@ def create_app(
         request: Request,
     ) -> dict[str, Any]:
         receipt = await required_receipt(execution_id, request)
-        if receipt["status"] != "project_proposed":
+        if receipt["status"] not in {"project_proposed", "project_approved", "text_ready"}:
             raise HTTPException(status_code=409, detail="project is not awaiting revision")
         project = receipt.get("editorial_project") or {}
         version = str(project.get("editorial_project_id") or "")
