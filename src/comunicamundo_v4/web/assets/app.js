@@ -14,7 +14,7 @@ const sourceFormats = {
 const labels = {
   queued: "Na fila", ingesting: "Lendo arquivos", input_failed: "Falha na entrada", provisional_project_proposed: "Direção provisória pronta", searching_sources: "Procurando fontes", source_structure_ready: "Fontes estruturadas",
   selecting: "Selecionando material", comprehending: "Compreendendo fontes",
-  project_proposed: "Projeto Editorial pronto", project_approved: "Projeto aprovado",
+  project_proposed: "Projeto Editorial pronto", updating_project: "Atualizando Projeto Editorial", project_approved: "Projeto aprovado",
   producing_text: "Escrevendo texto final", text_ready: "Texto final pronto", failed: "Falha"
 };
 const stageNames = {
@@ -272,7 +272,7 @@ function renderRun(run) {
   const status = run.status || "queued";
   state.currentStatus = status;
   $("#run-status").textContent = labels[status] || status;
-  $("#execution-title").textContent = status === "text_ready" ? "Texto final" : ["project_proposed", "project_approved"].includes(status) ? "Projeto Editorial" : "Hefesto em andamento";
+  $("#execution-title").textContent = status === "text_ready" ? "Texto final" : ["project_proposed", "updating_project", "project_approved"].includes(status) ? "Projeto Editorial" : "Hefesto em andamento";
   const known = new Map((run.stages || []).map((item) => [item.stage, item]));
   const zeroSource = ["provisional_project_proposed", "searching_sources"].includes(status) || known.has("source_research") || known.has("redigestion");
   const baseStages = zeroSource ? ["provisional_editorial_project", "source_research", "source_acquisition", "redigestion", ...expectedStages.slice(1)] : expectedStages;
@@ -316,15 +316,17 @@ function renderRun(run) {
   if (project) renderProject(project, provisional);
   $("#approve-project").hidden = !["project_proposed", "provisional_project_proposed"].includes(status) || state.pendingStatus === status;
   $("#approve-project").textContent = status === "provisional_project_proposed" ? "Aprovar pré-projeto" : "Aprovar Projeto Editorial";
-  $("#project-chat").hidden = !["provisional_project_proposed", "project_proposed"].includes(status);
-  $("#revise-project").disabled = state.pendingStatus === status;
+  $("#project-chat").hidden = !["provisional_project_proposed", "project_proposed", "updating_project"].includes(status);
+  $("#revise-project").disabled = status === "updating_project" || state.pendingStatus === status;
   $("#project-suggestions").querySelectorAll("button").forEach((button) => {
-    button.disabled = state.pendingStatus === status;
+    button.disabled = status === "updating_project" || state.pendingStatus === status;
   });
   $("#produce-text").hidden = status !== "project_approved" || Boolean(run.final_text) || state.pendingStatus === "project_approved";
   $("#project-approval-copy").textContent =
     status === "provisional_project_proposed"
       ? "Revise o pré-projeto ou aprove para o Hefesto buscar fontes automaticamente."
+      : status === "updating_project"
+        ? "O Hefesto está incorporando a alteração pedida. O campo ficará disponível novamente no projeto atualizado."
       : status === "searching_sources"
         ? "Pré-projeto aprovado. O Hefesto está buscando fontes e preparará o Projeto Editorial definitivo."
         : ["project_approved", "producing_text", "text_ready"].includes(status)
