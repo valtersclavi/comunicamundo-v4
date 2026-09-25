@@ -45,6 +45,7 @@ from .contracts import (
     SourceAsset,
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
+from .editorial_matrix import MatrixExtraction, extract_selected_matrix
 from .prompts import (
     SYSTEM,
     condensation_prompt,
@@ -93,6 +94,16 @@ class Repository(Protocol):
     async def condensations(
         self, execution_run_id: UUID
     ) -> list[EditorialCondensation]: ...
+    async def completed_matrix_batches(self, execution_run_id: UUID) -> list[str]: ...
+    async def save_matrix_batch(
+        self, execution_run_id: UUID, batch_id: str, version: str,
+        input_tokens: int, coverage: Sequence[dict[str, object]],
+        claims: Sequence[dict[str, object]],
+    ) -> None: ...
+    async def fail_matrix_batch(
+        self, execution_run_id: UUID, batch_id: str, version: str,
+        input_tokens: int, error_message: str,
+    ) -> None: ...
     async def work_report(self, execution_run_id: UUID) -> dict[str, object]: ...
     async def record_usage(
         self, execution_run_id: UUID, project_id: UUID, usage: CallUsage
@@ -211,6 +222,40 @@ class Hefesto:
         except Exception as error:
             await self._fail(run, error)
             raise
+
+    async def extract_matrix(self, execution_run_id: UUID) -> None:
+        """Opt-in matrix build from existing selections; legacy planning stays available."""
+        run = await self._required_run(execution_run_id)
+        if run.state not in {
+            RunState.COMPREHENDING, RunState.PROJECT_PROPOSED,
+            RunState.PROJECT_APPROVED, RunState.TEXT_READY,
+        }:
+            raise ValueError("matrix extraction requires completed source selection")
+        paragraphs = await self._paragraphs(run)
+        passages = passages_from_paragraphs(
+            paragraphs, passage_token_target=self._passage_target
+        )
+        selected = await self._selected_passages(run, passages)
+        if not selected:
+            raise ValueError("matrix extraction requires selected source passages")
+        titles = {
+            ordinal: source.title
+            for ordinal, source in enumerate(run.request.sources, start=1)
+        }
+
+        async def invoke(prompt: str) -> MatrixExtraction:
+            result = await self._call(
+                run, task_type="editorial_matrix_extract", prompt=prompt,
+                schema=MatrixExtraction, max_output_tokens=3_072,
+                thinking_tokens=0,
+            )
+            return result.value
+
+        await extract_selected_matrix(
+            run.execution_run_id, run.request.brief, selected, paragraphs,
+            titles, count_tokens=self._count_tokens, invoke=invoke,
+            repository=self._repository,
+        )
 
     async def propose_project(self, execution_run_id: UUID) -> ProductRun:
         run = await self._required_run(execution_run_id)
