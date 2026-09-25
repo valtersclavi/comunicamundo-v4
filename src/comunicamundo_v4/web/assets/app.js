@@ -168,7 +168,8 @@ async function submitPlan(event) {
       source_mode: findForMe ? "find_for_me" : "provided",
       sources: findForMe ? [] : [...uploaded.map((item) => ({ uri: item.uri, title: item.title, content_type: item.content_type, language: $("#language").value })), ...urls.map((url) => ({ uri: url, title: null, language: $("#language").value }))]
     };
-    const result = await api("/v1/plans", { method: "POST", body: JSON.stringify(payload) });
+    const engine = $("#matrix-preview").checked ? "matrix" : "legacy";
+    const result = await api("/v1/plans", { method: "POST", headers: { "X-Editorial-Engine": engine }, body: JSON.stringify(payload) });
     await loadHistory(); await openExecution(result.execution_run_id, payload.brief.theme);
   } catch (error) { showError($("#form-error"), error); }
   finally { button.disabled = false; button.textContent = "Criar planejamento"; }
