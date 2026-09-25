@@ -840,6 +840,30 @@ def create_app(
             raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
 
     @app.post(
+        "/v1/plans/{execution_id}/source-suggestions/{index}/accept",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def accept_source_suggestion(
+        execution_id: UUID, index: int, request: Request,
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
+        if receipt["status"] != "project_proposed":
+            raise HTTPException(status_code=409, detail="project is not awaiting suggestions")
+        project = receipt.get("editorial_project") or {}
+        options = (project.get("proposal") or {}).get("source_enrichment_opportunities") or []
+        if index < 0 or index >= len(options):
+            raise HTTPException(status_code=404, detail="unknown source opportunity")
+        version = str(project.get("editorial_project_id") or "")
+        try:
+            return await asyncio.to_thread(
+                service().dispatch_action, execution_id, "enrich-project-source",
+                extra_args=[f"--index={index}"],
+                dispatch_key=f"source-suggestion-{version}-{index}",
+            )
+        except Exception as error:
+            raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
+
+    @app.post(
         "/v1/plans/{execution_id}/approve-project",
         status_code=status.HTTP_202_ACCEPTED,
     )
