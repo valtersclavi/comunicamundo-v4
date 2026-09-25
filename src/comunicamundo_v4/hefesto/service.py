@@ -274,7 +274,8 @@ class Hefesto:
         )
 
     async def propose_matrix_project(
-        self, execution_run_id: UUID, *, revision_instruction: str | None = None
+        self, execution_run_id: UUID, *, revision_instruction: str | None = None,
+        model_choice: bool = False,
     ) -> ProductRun:
         """Build the opt-in editorial project from persisted claims."""
         run = await self._required_run(execution_run_id)
@@ -302,6 +303,7 @@ class Hefesto:
             proposal = await propose_from_matrix(
                 run, self._repository, call, round_number=round_number,
                 revision_instruction=revision_instruction,
+                model_choice=model_choice,
             )
             record = EditorialProjectRecord(
                 execution_run_id=run.execution_run_id,
