@@ -237,6 +237,21 @@ async def _reading(
     return readings[0]
 
 
+def _previous_project_context(previous: EditorialProjectProposal | None) -> str:
+    if previous is None:
+        return ""
+    return json.dumps({
+        "working_title": previous.working_title,
+        "editorial_promise": previous.editorial_promise,
+        "narrative_axis": previous.narrative_axis.model_dump(mode="json"),
+        "duration_minutes": previous.duration_minutes,
+        "subjects": [
+            item.model_dump(mode="json")
+            for item in previous.source_supported_subjects
+        ],
+    }, ensure_ascii=False)
+
+
 async def propose_from_matrix(
     run: object,
     repository: object,
@@ -264,7 +279,7 @@ async def propose_from_matrix(
             "instruction. Add, remove or change subjects, title, promise and "
             "axis as requested; retain relevant supported content. Do not "
             "keep a subject the user explicitly removed.\n"
-            + (previous.model_dump_json() if previous is not None else "")
+            + (_previous_project_context(previous))
         )
     else:
         anchor = (
@@ -275,7 +290,7 @@ async def propose_from_matrix(
         "Reevaluate the complete project, including the Narrative Axis, "
         "after enrichment. Preserve existing subjects and their allocated "
         "minutes at minimum; increase total time for genuine new material.\n"
-        + previous.model_dump_json()
+        + _previous_project_context(previous)
         if previous is not None else "This is the first project from supplied sources."
         )
     suggestions = (
