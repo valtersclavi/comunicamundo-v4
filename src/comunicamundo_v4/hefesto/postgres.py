@@ -549,6 +549,37 @@ class ProductRepository:
                 (execution_run_id, batch_id, version, input_tokens, error_message),
             )
 
+    async def matrix_report(self, execution_run_id: UUID) -> dict[str, object]:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT status, count(*) FROM hefesto_product.editorial_matrix_batches
+                   WHERE execution_run_id=%s GROUP BY status""",
+                (execution_run_id,),
+            )
+            statuses = {status: count for status, count in await rows.fetchall()}
+            row = await connection.execute(
+                """SELECT count(DISTINCT passage_id),
+                          count(DISTINCT source_id)
+                   FROM hefesto_product.editorial_matrix_coverage
+                   WHERE execution_run_id=%s""",
+                (execution_run_id,),
+            )
+            passages, sources = await row.fetchone()
+            row = await connection.execute(
+                """SELECT count(*) FROM hefesto_product.editorial_claims
+                   WHERE execution_run_id=%s AND status='active'""",
+                (execution_run_id,),
+            )
+            claims = (await row.fetchone())[0]
+        return {
+            "execution_run_id": str(execution_run_id),
+            "completed_batches": statuses.get("completed", 0),
+            "failed_batches": statuses.get("failed", 0),
+            "examined_passages": passages,
+            "represented_sources": sources,
+            "source_claims": claims,
+        }
+
     async def save_condensation(
         self, execution_run_id: UUID, unit: EditorialCondensation
     ) -> None:
