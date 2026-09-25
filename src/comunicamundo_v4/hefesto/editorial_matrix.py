@@ -121,6 +121,7 @@ async def extract_selected_matrix(
         for item in paragraphs
     }
     existing = set(await repository.completed_matrix_batches(execution_run_id))
+    split_batches = set(await repository.matrix_split_batches(execution_run_id))
     by_source: dict[int, list[Passage]] = {}
     for passage in selected:
         by_source.setdefault(passage.source_ordinal, []).extend(_chunks(passage))
@@ -133,7 +134,7 @@ async def extract_selected_matrix(
         for packet in packets:
             await _extract_packet(
                 execution_run_id, brief, packet, titles, paragraph_ids,
-                existing, count_tokens, invoke, repository,
+                existing, split_batches, count_tokens, invoke, repository,
             )
 
 
@@ -144,12 +145,19 @@ async def _extract_packet(
     titles: dict[int, str | None],
     paragraph_ids: dict[tuple[int, int], str],
     existing: set[str],
+    split_batches: set[str],
     count_tokens: Callable[[str], Awaitable[int]],
     invoke: Callable[[str], Awaitable[MatrixExtraction]],
     repository: object,
 ) -> None:
     batch_id = _batch_id(packet)
     if batch_id in existing:
+        return
+    if batch_id in split_batches:
+        await _split_limited_packet(
+            execution_run_id, brief, packet, titles, paragraph_ids,
+            existing, split_batches, count_tokens, invoke, repository,
+        )
         return
     prompt = _prompt(brief, packet, titles)
     tokens = await count_tokens(prompt)
@@ -160,7 +168,7 @@ async def _extract_packet(
         for part in (packet[:middle], packet[middle:]):
             await _extract_packet(
                 execution_run_id, brief, part, titles, paragraph_ids,
-                existing, count_tokens, invoke, repository,
+                existing, split_batches, count_tokens, invoke, repository,
             )
         return
     try:
@@ -219,22 +227,41 @@ async def _extract_packet(
             str(error)[:2000],
         )
         if "MAX_TOKENS" in str(error).upper():
-            if len(packet) > 1:
-                middle = len(packet) // 2
-                parts = (packet[:middle], packet[middle:])
-            else:
-                words = packet[0].text.split()
-                if len(words) < 12:
-                    raise
-                middle = len(words) // 2
-                parts = (
-                    [packet[0].model_copy(update={"text": " ".join(words[:middle])})],
-                    [packet[0].model_copy(update={"text": " ".join(words[middle:])})],
-                )
-            for part in parts:
-                await _extract_packet(
-                    execution_run_id, brief, part, titles, paragraph_ids,
-                    existing, count_tokens, invoke, repository,
-                )
+            split_batches.add(batch_id)
+            await _split_limited_packet(
+                execution_run_id, brief, packet, titles, paragraph_ids,
+                existing, split_batches, count_tokens, invoke, repository,
+            )
             return
         raise
+
+
+async def _split_limited_packet(
+    execution_run_id: UUID,
+    brief: EditorialBrief,
+    packet: list[Passage],
+    titles: dict[int, str | None],
+    paragraph_ids: dict[tuple[int, int], str],
+    existing: set[str],
+    split_batches: set[str],
+    count_tokens: Callable[[str], Awaitable[int]],
+    invoke: Callable[[str], Awaitable[MatrixExtraction]],
+    repository: object,
+) -> None:
+    if len(packet) > 1:
+        middle = len(packet) // 2
+        parts = (packet[:middle], packet[middle:])
+    else:
+        words = packet[0].text.split()
+        if len(words) < 12:
+            raise ValueError("matrix passage too short to split after MAX_TOKENS")
+        middle = len(words) // 2
+        parts = (
+            [packet[0].model_copy(update={"text": " ".join(words[:middle])})],
+            [packet[0].model_copy(update={"text": " ".join(words[middle:])})],
+        )
+    for part in parts:
+        await _extract_packet(
+            execution_run_id, brief, part, titles, paragraph_ids,
+            existing, split_batches, count_tokens, invoke, repository,
+        )
