@@ -35,6 +35,10 @@ As chaves `YOU_API_KEY`, `OPENALEX_API_KEY`, `JINA_API_KEY` e
 
 O deploy ocorre em `main`. O workflow testa o contrato completo, constrói uma única imagem, aplica migrações, implanta Job e aplicação web, configura autenticação e publica o recibo na issue canônica.
 
+## Contrato do fluxo editorial
+
+As regras de zero fontes, remoque permanente, sugestões do primeiro Projeto Editorial, enriquecimento pontual com fontes e integração à matriz estão em [docs/hefesto-matriz-fluxo-editorial.md](docs/hefesto-matriz-fluxo-editorial.md). O documento distingue o contrato de produto das partes ainda não implementadas e mantém a ingestão congelada.
+
 ## Desenvolvimento
 
 ```bash
