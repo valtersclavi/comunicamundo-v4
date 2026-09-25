@@ -108,7 +108,7 @@ async def draft_from_matrix(
         chosen = _prioritize(claims, roles.get(index, []), word_target)
         if not chosen:
             raise ValueError(f"matrix has no routed claims for subject {subject.title}")
-        chunk_count = max(1, ceil(word_target / 320), ceil(len(chosen) / 8))
+        chunk_count = max(1, ceil(word_target / 160), ceil(len(chosen) / 4))
         packets: list[list[dict[str, Any]]] = [[] for _ in range(chunk_count)]
         for position, claim in enumerate(chosen):
             packets[min(chunk_count - 1, position * chunk_count // len(chosen))].append(claim)
