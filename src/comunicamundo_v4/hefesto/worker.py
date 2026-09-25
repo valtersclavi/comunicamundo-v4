@@ -67,7 +67,7 @@ async def plan(args: argparse.Namespace) -> None:
     if input_request.source_mode is SourceMode.FIND_FOR_ME:
         try:
             await _propose_provisional_project(
-                input_request, execution_id, client, bucket_name
+                input_request, execution_id, client, bucket_name, args.engine,
             )
         except Exception as error:
             await _record_pre_run_failure(
@@ -223,9 +223,12 @@ async def plan(args: argparse.Namespace) -> None:
     repository, hefesto = await services()
     try:
         started = perf_counter()
-        await hefesto.prepare(
+        prepared = await hefesto.prepare(
             ingestion.request, execution_run_id=execution_id
         )
+        await repository.save_run(prepared.model_copy(
+            update={"editorial_engine": args.engine}
+        ))
         stages.append({
             "stage": "relational_structure",
             "duration_ms": int((perf_counter() - started) * 1000),
@@ -251,6 +254,7 @@ async def _propose_provisional_project(
     execution_id: UUID,
     client: storage.Client,
     bucket_name: str,
+    engine: str,
 ) -> None:
     from .contracts import EditorialInputRequest
 
@@ -272,6 +276,7 @@ async def _propose_provisional_project(
         }
         receipt = {
             "status": "provisional_project_proposed",
+            "editorial_engine": engine,
             "project_id": str(request.project_id),
             "execution_run_id": str(execution_id),
             "provisional_editorial_project": result.value.model_dump(mode="json"),
@@ -392,7 +397,10 @@ async def source_search(execution_id: UUID) -> None:
             "failed_normalization_count": len(ingestion.receipt.failed_normalizations),
         })
         hefesto = Hefesto(repository, gateway)
-        await hefesto.prepare(ingestion.request, execution_run_id=execution_id)
+        prepared = await hefesto.prepare(ingestion.request, execution_run_id=execution_id)
+        await repository.save_run(prepared.model_copy(
+            update={"editorial_engine": receipt.get("editorial_engine", "legacy")}
+        ))
         provisional_calls = list((receipt.get("usage") or {}).get("calls") or [])
         for provisional_usage in provisional_calls:
             await repository.record_usage(
@@ -693,7 +701,8 @@ async def _continue_to_project(
         await hefesto.record_stages(execution_id, [{
             "stage": active_stage, "status": "running", "duration_ms": 0,
         }])
-        if os.environ.get("HEFESTO_EDITORIAL_ENGINE", "legacy") == "matrix":
+        active = await hefesto._required_run(execution_id)
+        if active.editorial_engine == "matrix":
             await hefesto.propose_matrix_project(execution_id)
         else:
             await hefesto.propose_project(execution_id)
@@ -1242,6 +1251,7 @@ def parser() -> argparse.ArgumentParser:
     planning = commands.add_parser("plan")
     _input_transport(planning)
     planning.add_argument("--execution-run-id", type=UUID)
+    planning.add_argument("--engine", choices=["legacy", "matrix"], default="legacy")
     matrix = commands.add_parser("extract-matrix")
     matrix.add_argument("--execution-run-id", type=UUID, required=True)
     revision = commands.add_parser("revise-project")
