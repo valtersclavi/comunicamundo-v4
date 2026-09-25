@@ -825,7 +825,7 @@ def create_app(
             name=f"hefesto-product/executions/{execution_id}/project-revisions/{digest}.json",
             payload={"message": revision.message},
         )
-        token = f"revise-project-{digest[:16]}"
+        token = f"revise-project-{digest[:16]}-{uuid4().hex[:12]}"
         if not await access.claim_editorial_action(execution_id, token):
             raise HTTPException(status_code=409, detail="project is already being updated")
         try:
@@ -853,7 +853,7 @@ def create_app(
         if index < 0 or index >= len(options):
             raise HTTPException(status_code=404, detail="unknown model suggestion")
         version = str(project.get("editorial_project_id") or "")
-        token = f"model-suggestion-{version}-{index}"
+        token = f"model-suggestion-{version}-{index}-{uuid4().hex[:12]}"
         if not await access.claim_editorial_action(execution_id, token):
             raise HTTPException(status_code=409, detail="project is already being updated")
         try:
@@ -881,7 +881,7 @@ def create_app(
         if index < 0 or index >= len(options):
             raise HTTPException(status_code=404, detail="unknown source opportunity")
         version = str(project.get("editorial_project_id") or "")
-        token = f"source-suggestion-{version}-{index}"
+        token = f"source-suggestion-{version}-{index}-{uuid4().hex[:12]}"
         if not await access.claim_editorial_action(execution_id, token):
             raise HTTPException(status_code=409, detail="project is already being updated")
         try:
