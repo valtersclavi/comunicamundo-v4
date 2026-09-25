@@ -47,6 +47,7 @@ async def _cached(
 
 def _prioritize(
     claims: list[dict[str, Any]], roles: list[tuple[str, str]], word_target: int,
+    divergent: set[str],
 ) -> list[dict[str, Any]]:
     by_id = {item["claim_id"]: item for item in claims}
     rank = {"core": 0, "tension": 1, "qualification": 2, "context": 3}
@@ -68,6 +69,11 @@ def _prioritize(
             chosen.append(claim)
             used.add(claim["claim_id"])
     # Preserve disagreements and source diversity before filling with core claims.
+    for _, claim in ordered:
+        if (len(chosen) < limit and claim["claim_id"] in divergent
+                and claim["claim_id"] not in used):
+            chosen.append(claim)
+            used.add(claim["claim_id"])
     for wanted in ("contradiction", "limit", "qualification"):
         for _, claim in ordered:
             if len(chosen) < limit and claim["kind"] == wanted and claim["claim_id"] not in used:
@@ -90,6 +96,7 @@ async def draft_from_matrix(
 ) -> FinalTextProposal:
     project = run.editorial_project.proposal
     claims = await repository.matrix_claims(run.execution_run_id)
+    divergent = await repository.matrix_divergent_claim_ids(run.execution_run_id)
     roles = await repository.matrix_subject_claim_roles(
         run.execution_run_id, run.editorial_round,
     )
@@ -105,7 +112,7 @@ async def draft_from_matrix(
         word_target = max(
             80, round(total_words * subject.allocated_minutes / minutes),
         )
-        chosen = _prioritize(claims, roles.get(index, []), word_target)
+        chosen = _prioritize(claims, roles.get(index, []), word_target, divergent)
         if not chosen:
             raise ValueError(f"matrix has no routed claims for subject {subject.title}")
         chunk_count = max(1, ceil(word_target / 160), ceil(len(chosen) / 4))
