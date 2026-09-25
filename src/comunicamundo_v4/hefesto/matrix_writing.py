@@ -62,10 +62,15 @@ def _prioritize(
     limit = min(40, max(4, word_target // 28))
     chosen: list[dict[str, Any]] = []
     used: set[str] = set()
+    # Explicitly accepted model contributions must survive the selection limit.
+    for _, claim in ordered:
+        if claim["origin"] == "model" and len(chosen) < limit:
+            chosen.append(claim)
+            used.add(claim["claim_id"])
     # Preserve disagreements and source diversity before filling with core claims.
     for wanted in ("contradiction", "limit", "qualification"):
         for _, claim in ordered:
-            if claim["kind"] == wanted and claim["claim_id"] not in used:
+            if len(chosen) < limit and claim["kind"] == wanted and claim["claim_id"] not in used:
                 chosen.append(claim)
                 used.add(claim["claim_id"])
                 break
