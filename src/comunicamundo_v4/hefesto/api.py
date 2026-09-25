@@ -297,7 +297,7 @@ class SubmissionService:
         extra_args: list[str] | None = None,
         dispatch_key: str | None = None,
     ) -> dict[str, Any]:
-        if action not in {"revise-provisional", "source-search", "resume-plan", "approve-project", "produce-text"}:
+        if action not in {"revise-provisional", "revise-project", "accept-model-suggestion", "enrich-project-source", "source-search", "resume-plan", "approve-project", "produce-text"}:
             raise ValueError("unsupported product action")
         blob = self._client.bucket(self._bucket_name).blob(
             f"hefesto-product/executions/{execution_id}/{dispatch_key or action}-dispatch.json"
@@ -784,6 +784,60 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail=f"dispatch failed: {error}"
             ) from error
+
+    @app.post(
+        "/v1/plans/{execution_id}/revise-project",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def revise_editorial_project(
+        execution_id: UUID,
+        revision: ProvisionalRevisionRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
+        if receipt["status"] != "project_proposed":
+            raise HTTPException(status_code=409, detail="project is not awaiting revision")
+        project = receipt.get("editorial_project") or {}
+        version = str(project.get("editorial_project_id") or "")
+        digest = sha256((version + revision.message).encode()).hexdigest()
+        uri = persist_json_immutable(
+            client or storage.Client(project=_required("GOOGLE_CLOUD_PROJECT")),
+            bucket_name=bucket_name or _required("HEFESTO_GCS_BUCKET"),
+            name=f"hefesto-product/executions/{execution_id}/project-revisions/{digest}.json",
+            payload={"message": revision.message},
+        )
+        try:
+            return await asyncio.to_thread(
+                service().dispatch_action, execution_id, "revise-project",
+                extra_args=[f"--instruction={uri}"],
+                dispatch_key=f"revise-project-{digest[:16]}",
+            )
+        except Exception as error:
+            raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
+
+    @app.post(
+        "/v1/plans/{execution_id}/model-suggestions/{index}/accept",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def accept_model_suggestion(
+        execution_id: UUID, index: int, request: Request,
+    ) -> dict[str, Any]:
+        receipt = await required_receipt(execution_id, request)
+        if receipt["status"] != "project_proposed":
+            raise HTTPException(status_code=409, detail="project is not awaiting suggestions")
+        project = receipt.get("editorial_project") or {}
+        options = (project.get("proposal") or {}).get("model_knowledge_suggestions") or []
+        if index < 0 or index >= len(options):
+            raise HTTPException(status_code=404, detail="unknown model suggestion")
+        version = str(project.get("editorial_project_id") or "")
+        try:
+            return await asyncio.to_thread(
+                service().dispatch_action, execution_id, "accept-model-suggestion",
+                extra_args=[f"--index={index}"],
+                dispatch_key=f"model-suggestion-{version}-{index}",
+            )
+        except Exception as error:
+            raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
 
     @app.post(
         "/v1/plans/{execution_id}/approve-project",
