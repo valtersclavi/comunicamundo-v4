@@ -849,7 +849,9 @@ async def record_action_failure(
         if receipt is None:
             return
         await repository.record_product_receipt(execution_id, {
-            **receipt,
+            **{key: value for key, value in receipt.items() if key != "editorial_action"},
+            "status": ("project_proposed" if receipt.get("status") == "updating_project"
+                       else receipt.get("status")),
             "last_action_error": {
                 "action": action,
                 "stage": stage or action,
