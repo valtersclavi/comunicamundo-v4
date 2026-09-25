@@ -547,6 +547,7 @@ class ProductRun(StrictModel):
     request: PlanningRequest
     editorial_project: EditorialProjectRecord | None = None
     editorial_round: int = Field(default=1, ge=1)
+    editorial_engine: str = Field(default="legacy", pattern="^(legacy|matrix)$")
     content_draft: FinalTextProposal | None = None
     content_review: ContentReviewProposal | None = None
     corrected_content: FinalTextProposal | None = None
