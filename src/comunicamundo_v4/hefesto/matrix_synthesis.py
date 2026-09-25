@@ -410,6 +410,11 @@ async def propose_from_matrix(
     )
     supported = [(index, item) for index, item in enumerate(subjects)
                  if any(c["origin"] == "source" for c in routed[index])]
+    if model_choice and not any(
+        claim["origin"] == "model"
+        for group in routed.values() for claim in group
+    ):
+        raise ValueError("chosen model contribution was not integrated into a subject")
     if not supported:
         raise ValueError("matrix did not support any Editorial Project subject")
     if previous is not None and (revision_instruction is None or model_choice):
