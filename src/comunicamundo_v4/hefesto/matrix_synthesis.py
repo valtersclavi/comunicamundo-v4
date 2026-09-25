@@ -323,6 +323,25 @@ async def propose_from_matrix(
         prompt, EditorialProjectScaffold, call, 8_192,
     )
     subjects = list(scaffold.source_supported_subjects)
+    if provisional is not None:
+        supported_indexes = run.request.supported_provisional_subject_indexes
+        subjects = [
+            EditorialSubject(
+                title=provisional.subjects[index].title,
+                editorial_role=provisional.subjects[index].editorial_role,
+                depth=provisional.subjects[index].desired_depth,
+                allocated_minutes=provisional.subjects[index].allocated_minutes,
+            )
+            for index in supported_indexes
+        ]
+    elif previous is not None and revision_instruction is None:
+        existing_titles = {item.title.casefold() for item in subjects}
+        subjects.extend(
+            item for item in previous.source_supported_subjects
+            if item.title.casefold() not in existing_titles
+        )
+    if not subjects or len(subjects) > 12:
+        raise ValueError("matrix project has an invalid number of supported subjects")
     routed = await _route(
         repository, run.execution_run_id, round_number, run.request.brief,
         claims, subjects, call,
@@ -331,6 +350,16 @@ async def propose_from_matrix(
                  if any(c["origin"] == "source" for c in routed[index])]
     if not supported:
         raise ValueError("matrix did not support any Editorial Project subject")
+    if previous is not None and revision_instruction is None:
+        retained = {item.title.casefold() for _, item in supported}
+        missing = [
+            item.title for item in previous.source_supported_subjects
+            if item.title.casefold() not in retained
+        ]
+        if missing:
+            raise ValueError(
+                "enrichment cannot remove existing subjects: " + ", ".join(missing)
+            )
     if previous is not None and revision_instruction is None:
         prior = {item.title.casefold(): item for item in previous.source_supported_subjects}
         subjects = [
