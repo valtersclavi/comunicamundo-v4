@@ -253,8 +253,21 @@ async def propose_from_matrix(
         run.request.brief, claims, call,
     )
     provisional = run.request.provisional_project
-    previous = run.request.existing_editorial_project
-    anchor = (
+    previous = (
+        run.editorial_project.proposal
+        if revision_instruction is not None and run.editorial_project is not None
+        else run.request.existing_editorial_project
+    )
+    if revision_instruction is not None:
+        anchor = (
+            "Revise the existing Editorial Project according to the user's "
+            "instruction. Add, remove or change subjects, title, promise and "
+            "axis as requested; retain relevant supported content. Do not "
+            "keep a subject the user explicitly removed.\n"
+            + (previous.model_dump_json() if previous is not None else "")
+        )
+    else:
+        anchor = (
         "The approved provisional project guides the editorial decision. "
         "Keep supported subjects and their intended depth; do not invent "
         "support for unsupported subjects.\n" + provisional.model_dump_json()
@@ -264,7 +277,7 @@ async def propose_from_matrix(
         "minutes at minimum; increase total time for genuine new material.\n"
         + previous.model_dump_json()
         if previous is not None else "This is the first project from supplied sources."
-    )
+        )
     suggestions = (
         "Return empty model_knowledge_suggestions and "
         "source_enrichment_opportunities; this is not a first supplied-source round."
@@ -297,7 +310,7 @@ async def propose_from_matrix(
                  if any(c["origin"] == "source" for c in routed[index])]
     if not supported:
         raise ValueError("matrix did not support any Editorial Project subject")
-    if previous is not None:
+    if previous is not None and revision_instruction is None:
         prior = {item.title.casefold(): item for item in previous.source_supported_subjects}
         subjects = [
             item.model_copy(update={
