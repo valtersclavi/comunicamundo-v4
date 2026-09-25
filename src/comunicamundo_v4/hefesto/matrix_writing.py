@@ -88,11 +88,6 @@ async def draft_from_matrix(
     roles = await repository.matrix_subject_claim_roles(
         run.execution_run_id, run.editorial_round,
     )
-    total_words = round(
-        project.duration_minutes
-        * (140 if run.request.brief.duration_minutes <= 0 else
-           140 * 1)
-    )
     # Product-specific rate mirrors the existing writer's duration guidance.
     rates = {"report": 130, "video": 135, "voice-over": 135,
              "voiceover": 135, "podcast": 145, "presentation": 120}
@@ -108,7 +103,7 @@ async def draft_from_matrix(
         chosen = _prioritize(claims, roles.get(index, []), word_target)
         if not chosen:
             raise ValueError(f"matrix has no routed claims for subject {subject.title}")
-        chunk_count = max(1, ceil(word_target / 320))
+        chunk_count = max(1, ceil(word_target / 320), ceil(len(chosen) / 8))
         packets: list[list[dict[str, Any]]] = [[] for _ in range(chunk_count)]
         for position, claim in enumerate(chosen):
             packets[min(chunk_count - 1, position * chunk_count // len(chosen))].append(claim)
