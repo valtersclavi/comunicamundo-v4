@@ -47,6 +47,7 @@ from .contracts import (
 from .gateway import ModelCallError, ModelGateway, ModelResult
 from .editorial_matrix import MatrixExtraction, extract_selected_matrix
 from .matrix_synthesis import propose_from_matrix
+from .matrix_writing import draft_from_matrix
 from .prompts import (
     SYSTEM,
     condensation_prompt,
@@ -407,6 +408,45 @@ class Hefesto:
         )
         await self._repository.save_run(run)
         return run
+
+    async def produce_matrix_text(self, execution_run_id: UUID) -> ProductRun:
+        run = await self._required_run(execution_run_id)
+        if run.final_text is not None:
+            return run
+        if run.editorial_project is None or not run.editorial_project.approved:
+            raise ValueError("matrix writing requires an approved Editorial Project")
+        if run.state is RunState.FAILED:
+            run = run.model_copy(update={
+                "state": RunState.PROJECT_APPROVED,
+                "error_class": None, "error_message": None,
+            })
+            await self._repository.save_run(run)
+        run = await self._activate(run, RunState.PRODUCING_TEXT)
+
+        async def call(task: str, prompt: str, schema: type[BaseModel],
+                       output_tokens: int) -> BaseModel:
+            if await self._count_tokens(prompt) > 4_000:
+                raise ValueError(f"{task} exceeds its atomic input budget")
+            result = await self._call(
+                run, task_type=task, prompt=prompt, schema=schema,
+                max_output_tokens=output_tokens, thinking_tokens=0,
+            )
+            return result.value
+
+        try:
+            final = await draft_from_matrix(run, self._repository, call)
+            run = await self._save_artifact(
+                run, content_draft=final, corrected_content=final,
+                styled_text=final,
+                preservation_review=PreservationReviewProposal(
+                    approved=True,
+                    summary="Each section passed local content and preservation checks.",
+                ),
+            )
+            return await self._complete_final_text(run)
+        except Exception as error:
+            await self._fail(await self._required_run(run.execution_run_id), error)
+            raise
 
     async def produce_text(self, execution_run_id: UUID) -> ProductRun:
         run = await self._required_run(execution_run_id)
