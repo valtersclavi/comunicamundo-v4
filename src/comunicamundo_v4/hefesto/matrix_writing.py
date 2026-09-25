@@ -17,7 +17,7 @@ from .contracts import (
 
 class SectionText(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    body: str = Field(min_length=1, max_length=12_000)
+    body: str = Field(min_length=1)
 
 
 def _hash(value: str) -> str:

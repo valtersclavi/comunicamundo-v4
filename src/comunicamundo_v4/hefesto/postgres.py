@@ -546,7 +546,7 @@ class ProductRepository:
             cursor = await connection.execute(
                 """SELECT batch_id FROM hefesto_product.editorial_matrix_batches
                    WHERE execution_run_id=%s AND status='failed'
-                     AND error_message LIKE '%%MAX_TOKENS%%'""",
+                     AND (error_message LIKE '%%MAX_TOKENS%%' OR error_message LIKE 'MATRIX_SPLIT:%%')""",
                 (execution_run_id,),
             )
             return [str(row[0]).strip() for row in await cursor.fetchall()]
@@ -649,7 +649,7 @@ class ProductRepository:
             row = await connection.execute(
                 """SELECT count(*) FROM hefesto_product.editorial_matrix_batches
                    WHERE execution_run_id=%s AND status='failed'
-                     AND error_message LIKE '%%MAX_TOKENS%%'""",
+                     AND (error_message LIKE '%%MAX_TOKENS%%' OR error_message LIKE 'MATRIX_SPLIT:%%')""",
                 (execution_run_id,),
             )
             split_batches = (await row.fetchone())[0]

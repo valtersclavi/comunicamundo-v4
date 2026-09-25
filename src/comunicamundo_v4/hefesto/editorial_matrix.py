@@ -29,13 +29,13 @@ class MatrixEvidence(BaseModel):
 class MatrixClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: str = Field(pattern="^(idea|datum|qualification|limit|contradiction)$")
-    statement: str = Field(min_length=1, max_length=1200)
-    evidence: list[MatrixEvidence] = Field(min_length=1, max_length=3)
+    statement: str = Field(min_length=1)
+    evidence: list[MatrixEvidence] = Field(min_length=1)
 
 
 class MatrixExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    claims: list[MatrixClaim] = Field(default_factory=list, max_length=6)
+    claims: list[MatrixClaim] = Field(default_factory=list)
 
 
 def _chunks(passage: Passage) -> list[Passage]:
@@ -84,12 +84,12 @@ def _prompt(brief: EditorialBrief, passages: Sequence[Passage], titles: dict[int
         f"PASSAGE {_reference_id(item)}: {item.text}" for item in passages
     )
     return f"""Extract distinct editorial contributions from the selected source material.
-Return no more than six short, complete claims. Include important qualifications,
+Return distinct, short, complete claims. Split compound ideas into separate claims.\nInclude important qualifications,
 limits and contradictions, not only affirmative ideas. If a passage contains no
 contribution relevant to the brief, an empty list is valid. Do not invent evidence
 or cite a passage outside this batch. Every claim must cite its supporting,
 limiting or contradicting passage ID. Do not produce a summary of the whole
-source. Keep each statement under 360 characters.
+source. Keep statements concise without dropping substantive details.
 
 BRIEF: {brief.model_dump_json()}
 SOURCE: {source} — {titles.get(source) or "untitled"}
@@ -176,6 +176,26 @@ async def _extract_packet(
         lookup = {_reference_id(item): item for item in packet}
         validated: list[dict[str, object]] = []
         for index, claim in enumerate(result.claims):
+            if any(item.passage_id not in lookup for item in claim.evidence):
+                repair_prompt = (
+                    "Repair the evidence IDs for exactly this claim. Return one claim "
+                    "with the same kind and statement, citing IDs copied exactly "
+                    "from the passages below. Choose only passages that actually "
+                    "support, limit or contradict the statement. Return an empty "
+                    "claims list if no passage supports it. Do not add ideas.\n"
+                    f"CLAIM: {claim.model_dump_json()}\n"
+                    + "\n".join(
+                        f"PASSAGE {_reference_id(item)}: {item.text}"
+                        for item in packet
+                    )
+                )
+                repaired = await invoke(repair_prompt)
+                if (len(repaired.claims) != 1 or repaired.claims[0].kind != claim.kind
+                        or repaired.claims[0].statement != claim.statement):
+                    raise ValueError("matrix evidence repair could not ground the claim")
+                claim = claim.model_copy(update={
+                    "evidence": repaired.claims[0].evidence,
+                })
             references: list[dict[str, object]] = []
             for evidence in claim.evidence:
                 passage = lookup.get(evidence.passage_id)
@@ -226,7 +246,17 @@ async def _extract_packet(
             execution_run_id, batch_id, EXTRACTION_VERSION, tokens,
             str(error)[:2000],
         )
-        if "MAX_TOKENS" in str(error).upper():
+        splittable = (
+            "MAX_TOKENS" in str(error).upper()
+            or "TOO_LONG" in str(error).upper()
+            or "matrix evidence is not in batch" in str(error)
+            or "matrix evidence repair could not ground" in str(error)
+        )
+        if splittable:
+            await repository.fail_matrix_batch(
+                execution_run_id, batch_id, EXTRACTION_VERSION, tokens,
+                "MATRIX_SPLIT: " + str(error)[:1900],
+            )
             split_batches.add(batch_id)
             await _split_limited_packet(
                 execution_run_id, brief, packet, titles, paragraph_ids,
@@ -253,8 +283,8 @@ async def _split_limited_packet(
         parts = (packet[:middle], packet[middle:])
     else:
         words = packet[0].text.split()
-        if len(words) < 12:
-            raise ValueError("matrix passage too short to split after MAX_TOKENS")
+        if len(words) < 2:
+            raise ValueError("matrix passage cannot be split further")
         middle = len(words) // 2
         parts = (
             [packet[0].model_copy(update={"text": " ".join(words[:middle])})],

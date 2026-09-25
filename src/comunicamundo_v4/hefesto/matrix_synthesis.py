@@ -23,31 +23,31 @@ from .contracts import (
 
 class Theme(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    title: str = Field(min_length=1, max_length=120)
-    insight: str = Field(min_length=1, max_length=320)
+    title: str = Field(min_length=1)
+    insight: str = Field(min_length=1)
 
 
 class Themes(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    items: list[Theme] = Field(default_factory=list, max_length=4)
+    items: list[Theme] = Field(default_factory=list)
 
 
 class MatrixSuggestions(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    model_knowledge_suggestions: list[str] = Field(min_length=1, max_length=3)
-    source_enrichment_opportunities: list[str] = Field(min_length=1, max_length=3)
+    model_knowledge_suggestions: list[str] = Field(min_length=1)
+    source_enrichment_opportunities: list[str] = Field(min_length=1)
 
 
 class ClaimPlacement(BaseModel):
     model_config = ConfigDict(extra="forbid")
     claim_id: str
-    subject_indexes: list[int] = Field(default_factory=list, max_length=12)
+    subject_indexes: list[int] = Field(default_factory=list)
     role: str = Field(pattern="^(core|context|tension|qualification)$")
 
 
 class Placements(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    items: list[ClaimPlacement] = Field(default_factory=list, max_length=10)
+    items: list[ClaimPlacement] = Field(default_factory=list)
 
 
 class ClaimRelation(BaseModel):
@@ -55,20 +55,20 @@ class ClaimRelation(BaseModel):
     left_claim_id: str
     right_claim_id: str
     relation: str = Field(pattern="^(converges|complements|diverges)$")
-    rationale: str = Field(min_length=1, max_length=300)
+    rationale: str = Field(min_length=1)
 
 
 class ClaimRelations(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    items: list[ClaimRelation] = Field(default_factory=list, max_length=8)
+    items: list[ClaimRelation] = Field(default_factory=list)
 
 
 class SubjectReading(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    synthesis: str = Field(min_length=1, max_length=1600)
-    points: list[str] = Field(default_factory=list, max_length=6)
-    tensions: list[str] = Field(default_factory=list, max_length=4)
-    qualifications: list[str] = Field(default_factory=list, max_length=4)
+    synthesis: str = Field(min_length=1)
+    points: list[str] = Field(default_factory=list)
+    tensions: list[str] = Field(default_factory=list)
+    qualifications: list[str] = Field(default_factory=list)
 
 
 def _digest(text: str) -> str:
@@ -228,7 +228,7 @@ async def _route(
                 f"BRIEF: {brief.model_dump_json()}\nSUBJECTS: "
                 + json.dumps(
                     [{"index": i, "title": subject.title,
-                      "role": subject.editorial_role[:160]}
+                      "role": subject.editorial_role}
                      for i, subject in enumerate(subjects)],
                     ensure_ascii=False,
                 )
@@ -520,7 +520,7 @@ async def propose_from_matrix(
         })
         readings.append(EditorialKnowledgeUnit(
             title=subject.title, synthesis=value.synthesis,
-            essential_points=value.points or [value.synthesis[:300]],
+            essential_points=value.points or [value.synthesis],
             tensions=value.tensions, qualifications=value.qualifications,
             evidence=[EditorialEvidence(
                 source_ordinals=[source],
@@ -529,7 +529,7 @@ async def propose_from_matrix(
                     if any(e["source_ordinal"] == source
                            for e in claim["evidence"])
                 ),
-            ) for source in sources[:4]],
+            ) for source in sources],
         ))
     await repository.remap_matrix_subject_links(
         run.execution_run_id, round_number,

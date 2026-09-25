@@ -703,9 +703,11 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         await repository.close()
 
 
-async def compare_matrix_project(reference_id: UUID) -> UUID:
-    """Produce a separate project from persisted Test B paragraphs and selection."""
-    comparison_id = uuid5(reference_id, "matrix-comparison-v1")
+async def compare_matrix_project(reference_id: UUID, comparison_id: UUID | None = None) -> UUID:
+    """Produce a separate project from persisted source paragraphs and selection."""
+    comparison_id = comparison_id or uuid5(reference_id, "matrix-comparison-v1")
+    if comparison_id == reference_id:
+        raise ValueError("comparison execution ID must differ from reference")
     client = storage_client()
     repository, hefesto = await services()
     try:
@@ -717,6 +719,10 @@ async def compare_matrix_project(reference_id: UUID) -> UUID:
                 or reference_receipt is None or owner is None or submission is None):
             raise ValueError("reference requires a persisted Editorial Project and submission")
         existing = await repository.get_run(comparison_id)
+        if existing is not None:
+            existing_receipt = await repository.product_receipt(comparison_id)
+            if (existing_receipt or {}).get("comparison_reference_execution_run_id") != str(reference_id):
+                raise ValueError("comparison execution ID belongs to another run")
         if existing is not None and existing.editorial_project is not None:
             print(json.dumps({
                 "status": "project_proposed",
@@ -1278,7 +1284,7 @@ async def run(args: argparse.Namespace) -> None:
         )
         return
     if args.command == "compare-matrix":
-        await compare_matrix_project(args.execution_run_id)
+        await compare_matrix_project(args.execution_run_id, args.comparison_execution_run_id)
         return
     if args.command == "extract-matrix":
         repository, hefesto = await services()
@@ -1400,6 +1406,7 @@ def parser() -> argparse.ArgumentParser:
     planning.add_argument("--engine", choices=["legacy", "matrix"], default="legacy")
     comparison = commands.add_parser("compare-matrix")
     comparison.add_argument("--execution-run-id", type=UUID, required=True)
+    comparison.add_argument("--comparison-execution-run-id", type=UUID)
     matrix = commands.add_parser("extract-matrix")
     matrix.add_argument("--execution-run-id", type=UUID, required=True)
     revision = commands.add_parser("revise-project")

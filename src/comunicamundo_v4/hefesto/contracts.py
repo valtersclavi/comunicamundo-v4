@@ -404,15 +404,8 @@ class ProvisionalEditorialProject(StrictModel):
 
 class EditorialEvidence(StrictModel):
     source_ordinals: list[int] = Field(min_length=1)
-    contribution: str = Field(min_length=1, max_length=1_000)
-    verbatim_excerpt: str | None = Field(default=None, max_length=1_000)
-
-    @field_validator("contribution", "verbatim_excerpt", mode="before")
-    @classmethod
-    def trim_long_evidence_text(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        return _truncate_text(value, 1_000)
+    contribution: str = Field(min_length=1)
+    verbatim_excerpt: str | None = Field(default=None)
 
 
 class SubjectCorpusEvidence(StrictModel):
@@ -420,25 +413,18 @@ class SubjectCorpusEvidence(StrictModel):
 
 
 class EditorialKnowledgeUnit(StrictModel):
-    title: str = Field(min_length=1, max_length=140)
-    synthesis: str = Field(min_length=1, max_length=2_000)
-    essential_points: list[str] = Field(min_length=1, max_length=6)
-    tensions: list[str] = Field(default_factory=list, max_length=4)
-    qualifications: list[str] = Field(default_factory=list, max_length=4)
-    evidence: list[EditorialEvidence] = Field(min_length=1, max_length=4)
-
-    @field_validator("synthesis", mode="before")
-    @classmethod
-    def trim_long_synthesis(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        return _truncate_text(value, 2_000)
+    title: str = Field(min_length=1)
+    synthesis: str = Field(min_length=1)
+    essential_points: list[str] = Field(min_length=1)
+    tensions: list[str] = Field(default_factory=list)
+    qualifications: list[str] = Field(default_factory=list)
+    evidence: list[EditorialEvidence] = Field(min_length=1)
 
 
 class EditorialCorpus(StrictModel):
-    governing_understanding: str = Field(min_length=1, max_length=1_400)
-    units: list[EditorialKnowledgeUnit] = Field(min_length=1, max_length=36)
-    forbidden_inferences: list[str] = Field(default_factory=list, max_length=6)
+    governing_understanding: str = Field(min_length=1)
+    units: list[EditorialKnowledgeUnit] = Field(min_length=1)
+    forbidden_inferences: list[str] = Field(default_factory=list)
 
 
 class EditorialSubject(StrictModel):
@@ -454,8 +440,8 @@ class EditorialProjectScaffold(StrictModel):
     narrative_axis: NarrativeAxisProposal
     duration_minutes: int = Field(ge=1)
     source_supported_subjects: list[EditorialSubject] = Field(min_length=1, max_length=12)
-    corpus_governing_understanding: str = Field(min_length=1, max_length=1_400)
-    forbidden_inferences: list[str] = Field(default_factory=list, max_length=6)
+    corpus_governing_understanding: str = Field(min_length=1)
+    forbidden_inferences: list[str] = Field(default_factory=list)
     model_knowledge_suggestions: list[str] = Field(default_factory=list)
     source_enrichment_opportunities: list[str] = Field(default_factory=list)
 
