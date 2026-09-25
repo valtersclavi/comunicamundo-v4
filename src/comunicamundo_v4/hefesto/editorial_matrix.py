@@ -29,7 +29,7 @@ class MatrixEvidence(BaseModel):
 class MatrixClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: str = Field(pattern="^(idea|datum|qualification|limit|contradiction)$")
-    statement: str = Field(min_length=1, max_length=360)
+    statement: str = Field(min_length=1, max_length=1200)
     evidence: list[MatrixEvidence] = Field(min_length=1, max_length=3)
 
 
