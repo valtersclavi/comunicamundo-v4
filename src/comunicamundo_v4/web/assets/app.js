@@ -316,7 +316,8 @@ function renderRun(run) {
   if (project) renderProject(project, provisional);
   $("#approve-project").hidden = !["project_proposed", "provisional_project_proposed"].includes(status) || state.pendingStatus === status;
   $("#approve-project").textContent = status === "provisional_project_proposed" ? "Aprovar pré-projeto" : "Aprovar Projeto Editorial";
-  $("#project-chat").hidden = !["provisional_project_proposed", "project_proposed", "updating_project"].includes(status);
+  $("#project-chat").hidden = !project;
+  $("#project-message").disabled = status === "updating_project";
   $("#revise-project").disabled = status === "updating_project" || state.pendingStatus === status;
   $("#project-suggestions").querySelectorAll("button").forEach((button) => {
     button.disabled = status === "updating_project" || state.pendingStatus === status;
