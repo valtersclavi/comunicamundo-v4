@@ -511,8 +511,9 @@ async def _restore_editable_receipt(
     if prior is not None:
         await repository.record_product_receipt(execution_id, {
             **{key: value for key, value in prior.items()
-               if key != "editorial_action"},
-            "status": "project_proposed",
+               if key not in {"editorial_action", "editorial_previous_status"}},
+            "status": prior.get("editorial_previous_status", prior.get("status")),
+
             "generated_at": datetime.now(UTC).isoformat(),
         })
 
@@ -527,7 +528,9 @@ async def revise_project(execution_id: UUID, instruction_uri: str) -> None:
     repository, hefesto = await services()
     try:
         run = await repository.get_run(execution_id)
-        if run is None or run.state is not RunState.PROJECT_PROPOSED:
+        if run is None or run.state not in {
+            RunState.PROJECT_PROPOSED, RunState.PROJECT_APPROVED, RunState.TEXT_READY,
+        }:
             raise ValueError("Editorial Project is not awaiting revision")
         prior_receipt = await repository.product_receipt(execution_id)
         try:
@@ -866,8 +869,10 @@ async def record_action_failure(
         if receipt is None:
             return
         await repository.record_product_receipt(execution_id, {
-            **{key: value for key, value in receipt.items() if key != "editorial_action"},
-            "status": ("project_proposed" if receipt.get("status") == "updating_project"
+            **{key: value for key, value in receipt.items()
+               if key not in {"editorial_action", "editorial_previous_status"}},
+            "status": (receipt.get("editorial_previous_status")
+                       if receipt.get("status") == "updating_project"
                        else receipt.get("status")),
             "last_action_error": {
                 "action": action,
