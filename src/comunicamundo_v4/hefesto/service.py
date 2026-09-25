@@ -312,6 +312,7 @@ class Hefesto:
                 "state": RunState.PROJECT_PROPOSED,
                 "editorial_project": record,
                 "editorial_round": round_number,
+                "editorial_engine": "matrix",
                 "error_class": None, "error_message": None,
                 "updated_at": datetime.now(UTC),
             })
