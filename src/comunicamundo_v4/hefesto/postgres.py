@@ -699,6 +699,28 @@ class ProductRepository:
                         (execution_run_id, source_id),
                     )
 
+    async def rollback_model_contribution(
+        self, execution_run_id: UUID, round_number: int, claim_id: str,
+    ) -> None:
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """DELETE FROM hefesto_product.editorial_subject_claims
+                       WHERE execution_run_id=%s AND round_number=%s""",
+                    (execution_run_id, round_number),
+                )
+                await connection.execute(
+                    """DELETE FROM hefesto_product.editorial_matrix_work
+                       WHERE execution_run_id=%s AND round_number=%s""",
+                    (execution_run_id, round_number),
+                )
+                await connection.execute(
+                    """DELETE FROM hefesto_product.editorial_claims
+                       WHERE execution_run_id=%s AND claim_id=%s
+                         AND origin='model' AND round_number=%s""",
+                    (execution_run_id, claim_id, round_number),
+                )
+
     async def save_model_contribution(
         self, execution_run_id: UUID, round_number: int,
         suggestion_index: int, statement: str,
