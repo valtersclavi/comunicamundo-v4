@@ -958,6 +958,15 @@ async def run(args: argparse.Namespace) -> None:
             dispatch_key=args.dispatch_key,
         )
         return
+    if args.command == "extract-matrix":
+        repository, hefesto = await services()
+        try:
+            await hefesto.extract_matrix(args.execution_run_id)
+            report = await repository.matrix_report(args.execution_run_id)
+            print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
+        finally:
+            await repository.close()
+        return
     if args.command == "resume-plan":
         try:
             await resume_plan(args.execution_run_id)
@@ -1033,6 +1042,8 @@ def parser() -> argparse.ArgumentParser:
     planning = commands.add_parser("plan")
     _input_transport(planning)
     planning.add_argument("--execution-run-id", type=UUID)
+    matrix = commands.add_parser("extract-matrix")
+    matrix.add_argument("--execution-run-id", type=UUID, required=True)
     resume = commands.add_parser("resume-plan")
     resume.add_argument("--execution-run-id", type=UUID, required=True)
     resume.add_argument("--dispatch-key")
