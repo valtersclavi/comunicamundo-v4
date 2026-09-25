@@ -45,6 +45,8 @@ class AccessStore(Protocol):
     async def get_upload(self, upload_id: UUID, owner_id: str) -> dict[str, Any] | None: ...
     async def complete_upload(self, upload_id: UUID, owner_id: str) -> None: ...
     async def owns_source(self, owner_id: str, object_uri: str) -> bool: ...
+    async def claim_editorial_action(self, execution_id: UUID, token: str) -> bool: ...
+    async def release_editorial_action(self, execution_id: UUID, token: str) -> None: ...
 
 
 class AuthStore(Protocol):
@@ -87,6 +89,12 @@ class PostgresAccessStore:
 
     async def owns_source(self, owner_id: str, object_uri: str) -> bool:
         return bool(await self._call("owns_source", owner_id, object_uri))
+
+    async def claim_editorial_action(self, execution_id: UUID, token: str) -> bool:
+        return bool(await self._call("claim_editorial_action", execution_id, token))
+
+    async def release_editorial_action(self, execution_id: UUID, token: str) -> None:
+        await self._call("release_editorial_action", execution_id, token)
 
 
 class PostgresAuthStore:
@@ -817,13 +825,17 @@ def create_app(
             name=f"hefesto-product/executions/{execution_id}/project-revisions/{digest}.json",
             payload={"message": revision.message},
         )
+        token = f"revise-project-{digest[:16]}"
+        if not await access.claim_editorial_action(execution_id, token):
+            raise HTTPException(status_code=409, detail="project is already being updated")
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "revise-project",
                 extra_args=[f"--instruction={uri}"],
-                dispatch_key=f"revise-project-{digest[:16]}",
+                dispatch_key=token,
             )
         except Exception as error:
+            await access.release_editorial_action(execution_id, token)
             raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
 
     @app.post(
@@ -841,13 +853,17 @@ def create_app(
         if index < 0 or index >= len(options):
             raise HTTPException(status_code=404, detail="unknown model suggestion")
         version = str(project.get("editorial_project_id") or "")
+        token = f"model-suggestion-{version}-{index}"
+        if not await access.claim_editorial_action(execution_id, token):
+            raise HTTPException(status_code=409, detail="project is already being updated")
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "accept-model-suggestion",
                 extra_args=[f"--index={index}"],
-                dispatch_key=f"model-suggestion-{version}-{index}",
+                dispatch_key=token,
             )
         except Exception as error:
+            await access.release_editorial_action(execution_id, token)
             raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
 
     @app.post(
@@ -865,13 +881,17 @@ def create_app(
         if index < 0 or index >= len(options):
             raise HTTPException(status_code=404, detail="unknown source opportunity")
         version = str(project.get("editorial_project_id") or "")
+        token = f"source-suggestion-{version}-{index}"
+        if not await access.claim_editorial_action(execution_id, token):
+            raise HTTPException(status_code=409, detail="project is already being updated")
         try:
             return await asyncio.to_thread(
                 service().dispatch_action, execution_id, "enrich-project-source",
                 extra_args=[f"--index={index}"],
-                dispatch_key=f"source-suggestion-{version}-{index}",
+                dispatch_key=token,
             )
         except Exception as error:
+            await access.release_editorial_action(execution_id, token)
             raise HTTPException(status_code=503, detail=f"dispatch failed: {error}") from error
 
     @app.post(
