@@ -67,7 +67,7 @@ async def plan(args: argparse.Namespace) -> None:
     if input_request.source_mode is SourceMode.FIND_FOR_ME:
         try:
             await _propose_provisional_project(
-                input_request, execution_id, client, bucket_name, args.engine,
+                input_request, execution_id, client, bucket_name, getattr(args, "engine", "legacy"),
             )
         except Exception as error:
             await _record_pre_run_failure(
@@ -227,7 +227,7 @@ async def plan(args: argparse.Namespace) -> None:
             ingestion.request, execution_run_id=execution_id
         )
         await repository.save_run(prepared.model_copy(
-            update={"editorial_engine": args.engine}
+            update={"editorial_engine": getattr(args, "engine", "legacy")}
         ))
         stages.append({
             "stage": "relational_structure",
