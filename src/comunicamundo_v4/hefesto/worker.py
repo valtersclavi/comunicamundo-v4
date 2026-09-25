@@ -516,10 +516,14 @@ async def revise_project(execution_id: UUID, instruction_uri: str) -> None:
         run = await repository.get_run(execution_id)
         if run is None or run.state is not RunState.PROJECT_PROPOSED:
             raise ValueError("Editorial Project is not awaiting revision")
-        await hefesto.propose_matrix_project(
-            execution_id, revision_instruction=message,
-        )
-        await _persist_product_receipt(hefesto, client, execution_id, [])
+        try:
+            await hefesto.propose_matrix_project(
+                execution_id, revision_instruction=message,
+            )
+            await _persist_product_receipt(hefesto, client, execution_id, [])
+        except Exception:
+            await repository.save_run(run)
+            raise
     finally:
         await repository.close()
 
@@ -535,19 +539,26 @@ async def accept_model_suggestion(execution_id: UUID, index: int) -> None:
         if index < 0 or index >= len(suggestions):
             raise ValueError("unknown model suggestion")
         statement = suggestions[index]
-        await repository.save_model_contribution(
+        claim_id = await repository.save_model_contribution(
             execution_id, run.editorial_round + 1, index, statement,
         )
-        await hefesto.propose_matrix_project(
-            execution_id,
-            revision_instruction=(
-                "Integrate this small model-knowledge contribution into the "
-                "relevant existing subject without presenting it as sourced "
-                f"evidence: {statement}"
-            ),
-            model_choice=True,
-        )
-        await _persist_product_receipt(hefesto, client, execution_id, [])
+        try:
+            await hefesto.propose_matrix_project(
+                execution_id,
+                revision_instruction=(
+                    "Integrate this small model-knowledge contribution into the "
+                    "relevant existing subject without presenting it as sourced "
+                    f"evidence: {statement}"
+                ),
+                model_choice=True,
+            )
+            await _persist_product_receipt(hefesto, client, execution_id, [])
+        except Exception:
+            await repository.rollback_model_contribution(
+                execution_id, run.editorial_round + 1, claim_id,
+            )
+            await repository.save_run(run)
+            raise
     finally:
         await repository.close()
 
