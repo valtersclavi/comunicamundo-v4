@@ -317,6 +317,10 @@ function renderRun(run) {
   $("#approve-project").hidden = !["project_proposed", "provisional_project_proposed"].includes(status) || state.pendingStatus === status;
   $("#approve-project").textContent = status === "provisional_project_proposed" ? "Aprovar pré-projeto" : "Aprovar Projeto Editorial";
   $("#project-chat").hidden = !["provisional_project_proposed", "project_proposed"].includes(status);
+  $("#revise-project").disabled = state.pendingStatus === status;
+  $("#project-suggestions").querySelectorAll("button").forEach((button) => {
+    button.disabled = state.pendingStatus === status;
+  });
   $("#produce-text").hidden = status !== "project_approved" || Boolean(run.final_text) || state.pendingStatus === "project_approved";
   $("#project-approval-copy").textContent =
     status === "provisional_project_proposed"
