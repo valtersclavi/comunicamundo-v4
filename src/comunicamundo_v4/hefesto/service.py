@@ -288,7 +288,7 @@ class Hefesto:
             return run
         if run.state not in {
             RunState.COMPREHENDING, RunState.PROJECT_PROPOSED,
-            RunState.PROJECT_APPROVED,
+            RunState.PROJECT_APPROVED, RunState.TEXT_READY,
         }:
             raise ValueError("matrix project requires selected sources")
         await self.extract_matrix(execution_run_id)
@@ -320,6 +320,9 @@ class Hefesto:
                 "editorial_project": record,
                 "editorial_round": round_number,
                 "editorial_engine": "matrix",
+                "content_draft": None, "content_review": None,
+                "corrected_content": None, "styled_text": None,
+                "preservation_review": None, "final_text": None,
                 "error_class": None, "error_message": None,
                 "updated_at": datetime.now(UTC),
             })
