@@ -598,6 +598,86 @@ class ProductRepository:
             "source_claims": claims,
         }
 
+    async def matrix_claims(self, execution_run_id: UUID) -> list[dict[str, Any]]:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT c.claim_id, c.kind, c.statement, c.origin,
+                          e.source_ordinal, e.passage_id, e.role
+                   FROM hefesto_product.editorial_claims c
+                   LEFT JOIN hefesto_product.editorial_claim_evidence e
+                     ON e.execution_run_id=c.execution_run_id
+                    AND e.claim_id=c.claim_id
+                   WHERE c.execution_run_id=%s AND c.status='active'
+                   ORDER BY c.created_at,c.claim_id,e.source_ordinal,e.passage_id""",
+                (execution_run_id,),
+            )
+            values = await rows.fetchall()
+        claims: dict[str, dict[str, Any]] = {}
+        for claim_id, kind, statement, origin, ordinal, passage_id, role in values:
+            claim = claims.setdefault(str(claim_id).strip(), {
+                "claim_id": str(claim_id).strip(), "kind": kind,
+                "statement": statement, "origin": origin, "evidence": [],
+            })
+            if passage_id is not None:
+                claim["evidence"].append({
+                    "source_ordinal": ordinal, "passage_id": str(passage_id).strip(),
+                    "role": role,
+                })
+        return list(claims.values())
+
+    async def matrix_work(
+        self, execution_run_id: UUID, round_number: int, task: str,
+        unit_id: str, input_digest: str,
+    ) -> dict[str, Any] | None:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT payload FROM hefesto_product.editorial_matrix_work
+                   WHERE execution_run_id=%s AND round_number=%s
+                     AND task=%s AND unit_id=%s AND input_digest=%s""",
+                (execution_run_id, round_number, task, unit_id, input_digest),
+            )
+            row = await rows.fetchone()
+            return dict(row[0]) if row else None
+
+    async def save_matrix_work(
+        self, execution_run_id: UUID, round_number: int, task: str,
+        unit_id: str, input_digest: str, payload: dict[str, Any],
+    ) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """INSERT INTO hefesto_product.editorial_matrix_work
+                   (execution_run_id,round_number,task,unit_id,input_digest,payload)
+                   VALUES (%s,%s,%s,%s,%s,%s::jsonb)
+                   ON CONFLICT (execution_run_id,round_number,task,unit_id)
+                   DO UPDATE SET input_digest=excluded.input_digest,
+                                 payload=excluded.payload,
+                                 created_at=now()
+                   WHERE hefesto_product.editorial_matrix_work.input_digest
+                         <> excluded.input_digest""",
+                (execution_run_id, round_number, task, unit_id, input_digest,
+                 json.dumps(payload, ensure_ascii=False)),
+            )
+
+    async def replace_matrix_subject_links(
+        self, execution_run_id: UUID, round_number: int, subject_index: int,
+        assignments: Sequence[tuple[str, str]],
+    ) -> None:
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """DELETE FROM hefesto_product.editorial_subject_claims
+                       WHERE execution_run_id=%s AND round_number=%s
+                         AND subject_index=%s""",
+                    (execution_run_id, round_number, subject_index),
+                )
+                for claim_id, role in assignments:
+                    await connection.execute(
+                        """INSERT INTO hefesto_product.editorial_subject_claims
+                           (execution_run_id,round_number,subject_index,claim_id,role)
+                           VALUES (%s,%s,%s,%s,%s)""",
+                        (execution_run_id, round_number, subject_index, claim_id, role),
+                    )
+
     async def save_condensation(
         self, execution_run_id: UUID, unit: EditorialCondensation
     ) -> None:
