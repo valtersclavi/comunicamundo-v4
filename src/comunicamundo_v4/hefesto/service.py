@@ -393,6 +393,8 @@ class Hefesto:
             )
             await self._repository.save_run(run)
         await self.select(execution_run_id)
+        if run.editorial_engine == "matrix":
+            return await self.propose_matrix_project(execution_run_id)
         return await self.propose_project(execution_run_id)
 
     async def approve_project(self, execution_run_id: UUID) -> ProductRun:
