@@ -153,7 +153,9 @@ async def _route(
             "none.\n"
             f"BRIEF: {brief.model_dump_json()}\nSUBJECTS: "
             + json.dumps(
-                [item.model_dump(mode="json") for item in subjects],
+                [{"index": i, "title": item.title,
+                  "role": item.editorial_role[:160]}
+                 for i, item in enumerate(subjects)],
                 ensure_ascii=False,
             )
             + "\nCLAIMS: "
@@ -174,6 +176,8 @@ async def _route(
                     raise ValueError("matrix route contains an unknown subject")
                 routed[index].append(known[placement.claim_id])
                 links[index].append((placement.claim_id, placement.role))
+        if seen != set(known):
+            raise ValueError("matrix routing omitted claims from the packet")
     for index, assignments in links.items():
         await repository.replace_matrix_subject_links(
             execution_id, round_number, index, assignments,
