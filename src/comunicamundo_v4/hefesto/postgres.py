@@ -792,6 +792,18 @@ class ProductRepository:
                         (execution_run_id, first, second, relation, rationale),
                     )
 
+    async def matrix_divergent_claim_ids(self, execution_run_id: UUID) -> set[str]:
+        async with self._pool.connection() as connection:
+            row = await connection.execute(
+                """SELECT left_claim_id FROM hefesto_product.editorial_claim_relations
+                   WHERE execution_run_id=%s AND relation='diverges'
+                   UNION
+                   SELECT right_claim_id FROM hefesto_product.editorial_claim_relations
+                   WHERE execution_run_id=%s AND relation='diverges'""",
+                (execution_run_id, execution_run_id),
+            )
+            return {str(item[0]).strip() for item in await row.fetchall()}
+
     async def matrix_claims(self, execution_run_id: UUID) -> list[dict[str, Any]]:
         async with self._pool.connection() as connection:
             rows = await connection.execute(
