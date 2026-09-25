@@ -586,6 +586,7 @@ class Hefesto:
             "status": run.state.value,
             "project_id": str(run.project_id),
             "execution_run_id": str(run.execution_run_id),
+            "editorial_engine": run.editorial_engine,
             "provisional_editorial_project": (
                 run.request.provisional_project.model_dump(mode="json")
                 if run.request.provisional_project else None
