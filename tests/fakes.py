@@ -30,6 +30,7 @@ from comunicamundo_v4.hefesto.contracts import (
     SubjectCorpusNuance,
 )
 from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
+from comunicamundo_v4.hefesto.matrix_synthesis import MatrixSuggestions
 
 
 class MemoryRepository:
@@ -234,6 +235,11 @@ class FakeGateway:
         }:
             value = SubjectMaterialDigest(
                 reading="A compact subject-specific reading with its source grounding."
+            )
+        elif task_type == "editorial_project_suggestions":
+            value = MatrixSuggestions(
+                model_knowledge_suggestions=["Optional model suggestion"],
+                source_enrichment_opportunities=["Additional source opportunity"],
             )
         elif task_type == "editorial_project_scaffold":
             duration = int(re.search(r'"duration_minutes":\s*(\d+)', prompt).group(1))
