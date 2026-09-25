@@ -462,6 +462,16 @@ class ProductRepository:
             )
             return [str(row[0]).strip() for row in await cursor.fetchall()]
 
+    async def matrix_split_batches(self, execution_run_id: UUID) -> list[str]:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """SELECT batch_id FROM hefesto_product.editorial_matrix_batches
+                   WHERE execution_run_id=%s AND status='failed'
+                     AND error_message LIKE '%%MAX_TOKENS%%'""",
+                (execution_run_id,),
+            )
+            return [str(row[0]).strip() for row in await cursor.fetchall()]
+
     async def save_matrix_batch(
         self,
         execution_run_id: UUID,
@@ -558,6 +568,13 @@ class ProductRepository:
             )
             statuses = {status: count for status, count in await rows.fetchall()}
             row = await connection.execute(
+                """SELECT count(*) FROM hefesto_product.editorial_matrix_batches
+                   WHERE execution_run_id=%s AND status='failed'
+                     AND error_message LIKE '%%MAX_TOKENS%%'""",
+                (execution_run_id,),
+            )
+            split_batches = (await row.fetchone())[0]
+            row = await connection.execute(
                 """SELECT count(DISTINCT passage_id),
                           count(DISTINCT source_id)
                    FROM hefesto_product.editorial_matrix_coverage
@@ -574,7 +591,8 @@ class ProductRepository:
         return {
             "execution_run_id": str(execution_run_id),
             "completed_batches": statuses.get("completed", 0),
-            "failed_batches": statuses.get("failed", 0),
+            "failed_batches": statuses.get("failed", 0) - split_batches,
+            "split_batches": split_batches,
             "examined_passages": passages,
             "represented_sources": sources,
             "source_claims": claims,
