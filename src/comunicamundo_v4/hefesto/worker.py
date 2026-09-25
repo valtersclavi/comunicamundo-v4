@@ -703,6 +703,101 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         await repository.close()
 
 
+async def compare_matrix_project(reference_id: UUID) -> UUID:
+    """Produce a separate project from persisted Test B paragraphs and selection."""
+    comparison_id = uuid5(reference_id, "matrix-comparison-v1")
+    client = storage_client()
+    repository, hefesto = await services()
+    try:
+        reference = await repository.get_run(reference_id)
+        reference_receipt = await repository.product_receipt(reference_id)
+        owner = await repository.submission_owner(reference_id)
+        submission = await repository.submission_request(reference_id)
+        if (reference is None or reference.editorial_project is None
+                or reference_receipt is None or owner is None or submission is None):
+            raise ValueError("reference requires a persisted Editorial Project and submission")
+        existing = await repository.get_run(comparison_id)
+        if existing is not None and existing.editorial_project is not None:
+            print(json.dumps({
+                "status": "project_proposed",
+                "reference_execution_run_id": str(reference_id),
+                "comparison_execution_run_id": str(comparison_id),
+            }), flush=True)
+            return comparison_id
+        if existing is None:
+            active = reference.model_copy(update={
+                "execution_run_id": comparison_id,
+                "state": RunState.COMPREHENDING,
+                "editorial_project": None,
+                "editorial_round": 1,
+                "editorial_engine": "matrix",
+                "content_draft": None, "content_review": None,
+                "corrected_content": None, "styled_text": None,
+                "preservation_review": None, "final_text": None,
+                "error_class": None, "error_message": None,
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+            })
+            await repository.save_run(active)
+            counts = await repository.clone_editorial_inputs(
+                reference_id, comparison_id,
+            )
+            await repository.register_submission(
+                comparison_id, reference.project_id, owner,
+                submission.model_dump(mode="json"),
+            )
+            initial = {
+                "status": "comprehending",
+                "execution_run_id": str(comparison_id),
+                "project_id": str(reference.project_id),
+                "editorial_engine": "matrix",
+                "comparison_reference_execution_run_id": str(reference_id),
+                "input": {
+                    **(reference_receipt.get("input") or {}),
+                    "status": "reused_persisted_structure",
+                    "reused_from_execution_run_id": str(reference_id),
+                },
+                "stages": [{
+                    "stage": "source_reuse", "status": "completed",
+                    "duration_ms": 0, **counts,
+                }],
+                "generated_at": datetime.now(UTC).isoformat(),
+            }
+            await repository.record_product_receipt(comparison_id, initial)
+        else:
+            await repository.clone_editorial_inputs(reference_id, comparison_id)
+            active = existing.model_copy(update={
+                "state": RunState.COMPREHENDING,
+                "editorial_project": None,
+                "error_class": None, "error_message": None,
+                "updated_at": datetime.now(UTC),
+            })
+            await repository.save_run(active)
+        await hefesto.propose_matrix_project(comparison_id)
+        await _persist_product_receipt(hefesto, client, comparison_id, [{
+            "stage": "source_reuse", "status": "completed", "duration_ms": 0,
+        }, {
+            "stage": "editorial_comprehension", "status": "completed",
+            "duration_ms": 0,
+        }])
+        return comparison_id
+    except Exception as error:
+        receipt = await repository.product_receipt(comparison_id)
+        if receipt is not None:
+            await repository.record_product_receipt(comparison_id, {
+                **receipt, "status": "failed",
+                "last_action_error": {
+                    "action": "compare-matrix", "error_class": type(error).__name__,
+                    "error_message": str(error)[:4000],
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+                "generated_at": datetime.now(UTC).isoformat(),
+            })
+        raise
+    finally:
+        await repository.close()
+
+
 async def resume_plan(execution_id: UUID) -> None:
     client = storage_client()
     repository, hefesto = await services()
@@ -1178,6 +1273,9 @@ async def run(args: argparse.Namespace) -> None:
             dispatch_key=args.dispatch_key,
         )
         return
+    if args.command == "compare-matrix":
+        await compare_matrix_project(args.execution_run_id)
+        return
     if args.command == "extract-matrix":
         repository, hefesto = await services()
         try:
@@ -1296,6 +1394,8 @@ def parser() -> argparse.ArgumentParser:
     _input_transport(planning)
     planning.add_argument("--execution-run-id", type=UUID)
     planning.add_argument("--engine", choices=["legacy", "matrix"], default="legacy")
+    comparison = commands.add_parser("compare-matrix")
+    comparison.add_argument("--execution-run-id", type=UUID, required=True)
     matrix = commands.add_parser("extract-matrix")
     matrix.add_argument("--execution-run-id", type=UUID, required=True)
     revision = commands.add_parser("revise-project")
