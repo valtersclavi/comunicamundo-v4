@@ -625,6 +625,34 @@ class ProductRepository:
                 })
         return list(claims.values())
 
+    async def remap_matrix_subject_links(
+        self, execution_run_id: UUID, round_number: int,
+        retained_indexes: Sequence[int],
+    ) -> None:
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                rows = await connection.execute(
+                    """SELECT subject_index,claim_id,role
+                       FROM hefesto_product.editorial_subject_claims
+                       WHERE execution_run_id=%s AND round_number=%s""",
+                    (execution_run_id, round_number),
+                )
+                assignments = await rows.fetchall()
+                await connection.execute(
+                    """DELETE FROM hefesto_product.editorial_subject_claims
+                       WHERE execution_run_id=%s AND round_number=%s""",
+                    (execution_run_id, round_number),
+                )
+                mapping = {old: new for new, old in enumerate(retained_indexes)}
+                for old, claim_id, role in assignments:
+                    if old in mapping:
+                        await connection.execute(
+                            """INSERT INTO hefesto_product.editorial_subject_claims
+                               (execution_run_id,round_number,subject_index,claim_id,role)
+                               VALUES (%s,%s,%s,%s,%s)""",
+                            (execution_run_id, round_number, mapping[old], claim_id, role),
+                        )
+
     async def matrix_subject_claim_roles(
         self, execution_run_id: UUID, round_number: int,
     ) -> dict[int, list[tuple[str, str]]]:
