@@ -46,6 +46,7 @@ from .contracts import (
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
 from .editorial_matrix import MatrixExtraction, extract_selected_matrix
+from .matrix_synthesis import propose_from_matrix
 from .prompts import (
     SYSTEM,
     condensation_prompt,
@@ -256,6 +257,54 @@ class Hefesto:
             titles, count_tokens=self._count_tokens, invoke=invoke,
             repository=self._repository,
         )
+
+    async def propose_matrix_project(
+        self, execution_run_id: UUID, *, revision_instruction: str | None = None
+    ) -> ProductRun:
+        """Build the opt-in editorial project from persisted claims."""
+        run = await self._required_run(execution_run_id)
+        if run.editorial_project is not None and revision_instruction is None:
+            return run
+        if run.state not in {
+            RunState.COMPREHENDING, RunState.PROJECT_PROPOSED,
+            RunState.PROJECT_APPROVED,
+        }:
+            raise ValueError("matrix project requires selected sources")
+        await self.extract_matrix(execution_run_id)
+        round_number = run.editorial_round + (1 if revision_instruction else 0)
+
+        async def call(task: str, prompt: str, schema: type[BaseModel],
+                       output_tokens: int) -> BaseModel:
+            if await self._count_tokens(prompt) > 4_000:
+                raise ValueError(f"{task} exceeds its atomic input budget")
+            result = await self._call(
+                run, task_type=task, prompt=prompt, schema=schema,
+                max_output_tokens=output_tokens, thinking_tokens=0,
+            )
+            return result.value
+
+        try:
+            proposal = await propose_from_matrix(
+                run, self._repository, call, round_number=round_number,
+                revision_instruction=revision_instruction,
+            )
+            record = EditorialProjectRecord(
+                execution_run_id=run.execution_run_id,
+                project_id=run.project_id,
+                proposal=proposal,
+            )
+            proposed = run.model_copy(update={
+                "state": RunState.PROJECT_PROPOSED,
+                "editorial_project": record,
+                "editorial_round": round_number,
+                "error_class": None, "error_message": None,
+                "updated_at": datetime.now(UTC),
+            })
+            await self._repository.save_run(proposed)
+            return proposed
+        except Exception as error:
+            await self._fail(run, error)
+            raise
 
     async def propose_project(self, execution_run_id: UUID) -> ProductRun:
         run = await self._required_run(execution_run_id)
