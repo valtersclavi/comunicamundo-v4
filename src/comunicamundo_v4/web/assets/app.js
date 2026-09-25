@@ -315,7 +315,7 @@ function renderRun(run) {
   if (project) renderProject(project, provisional);
   $("#approve-project").hidden = !["project_proposed", "provisional_project_proposed"].includes(status) || state.pendingStatus === status;
   $("#approve-project").textContent = status === "provisional_project_proposed" ? "Aprovar pré-projeto" : "Aprovar Projeto Editorial";
-  $("#provisional-chat").hidden = status !== "provisional_project_proposed";
+  $("#project-chat").hidden = !["provisional_project_proposed", "project_proposed"].includes(status);
   $("#produce-text").hidden = status !== "project_approved" || Boolean(run.final_text) || state.pendingStatus === "project_approved";
   $("#project-approval-copy").textContent =
     status === "provisional_project_proposed"
@@ -338,6 +338,13 @@ function renderProject(project, provisional = false) {
   $("#project-duration").textContent = `${project.duration_minutes} minutos`;
   const subjects = project.source_supported_subjects || project.subjects || [];
   $("#subjects").innerHTML = subjects.map((item) => `<article class="subject"><div class="subject-head"><h4>${escapeHtml(item.title)}</h4><strong>${item.allocated_minutes} min</strong></div><p>${escapeHtml(item.editorial_role)}</p><p>${escapeHtml(item.depth || item.desired_depth)}</p></article>`).join("") + (provisional ? '<p class="muted">Projeto editorial a ser sustentado pelas fontes encontradas.</p>' : "");
+  const model = provisional ? [] : (project.model_knowledge_suggestions || []);
+  const sources = provisional ? [] : (project.source_enrichment_opportunities || []);
+  $("#project-suggestions").hidden = !model.length && !sources.length;
+  $("#project-suggestions").innerHTML = [
+    model.length ? '<h3>Contribuições do LLM</h3><p>Pequenos acréscimos para assuntos existentes.</p>' + model.map((item, index) => `<article class="subject"><p>${escapeHtml(item)}</p><button class="secondary-button" data-suggestion="model" data-index="${index}" type="button">Incluir contribuição</button></article>`).join("") : "",
+    sources.length ? '<h3>Enriquecimento com fontes</h3><p>O Hefesto buscará uma fonte para sustentar o assunto escolhido e apresentará um novo projeto.</p>' + sources.map((item, index) => `<article class="subject"><p>${escapeHtml(item)}</p><button class="secondary-button" data-suggestion="source" data-index="${index}" type="button">Buscar fonte</button></article>`).join("") : ""
+  ].join("");
 }
 
 function renderFinalText(record) {
@@ -372,16 +379,29 @@ async function runAction(action, button, busyLabel, currentStatus) {
   finally { button.disabled = false; button.textContent = label; }
 }
 
-async function reviseProvisional() {
-  const message = $("#provisional-message").value.trim();
+async function reviseProject() {
+  const message = $("#project-message").value.trim();
   if (!message) return showError($("#run-error"), "Escreva a alteração desejada.");
   clearError($("#run-error"));
-  const button = $("#revise-provisional"); button.disabled = true; button.textContent = "Revisando…";
+  const provisional = state.currentStatus === "provisional_project_proposed";
+  const button = $("#revise-project"); button.disabled = true; button.textContent = "Revisando…";
   try {
-    await api(`/v1/plans/${state.current}/revise-provisional-project`, { method: "POST", body: JSON.stringify({ message }) });
-    state.pendingSignature = state.currentProjectSignature; state.pendingStatus = "provisional_project_proposed"; $("#provisional-message").value = ""; await poll();
+    const route = provisional ? "revise-provisional-project" : "revise-project";
+    await api(`/v1/plans/${state.current}/${route}`, { method: "POST", body: JSON.stringify({ message }) });
+    state.pendingSignature = state.currentProjectSignature; state.pendingStatus = state.currentStatus; $("#project-message").value = ""; await poll();
   } catch (error) { state.pendingStatus = null; state.pendingSignature = null; showError($("#run-error"), error); }
   finally { button.disabled = false; button.textContent = "Enviar alterações"; }
+}
+
+async function chooseSuggestion(kind, index, button) {
+  button.disabled = true;
+  clearError($("#run-error"));
+  try {
+    const route = kind === "model" ? `model-suggestions/${index}/accept` : `source-suggestions/${index}/accept`;
+    await api(`/v1/plans/${state.current}/${route}`, { method: "POST" });
+    state.pendingSignature = state.currentProjectSignature; state.pendingStatus = state.currentStatus; await poll();
+  } catch (error) { state.pendingStatus = null; state.pendingSignature = null; showError($("#run-error"), error); }
+  finally { button.disabled = false; }
 }
 
 async function loadHistory() {
@@ -408,7 +428,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   dropzone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
   $("#resume-plan").addEventListener("click", () => runAction("resume", $("#resume-plan"), "Retomando…", state.currentStatus));
   $("#approve-project").addEventListener("click", () => { const provisional = state.currentStatus === "provisional_project_proposed"; runAction(provisional ? "approve-provisional-project" : "approve-project", $("#approve-project"), provisional ? "Aprovando pré-projeto…" : "Aprovando…", state.currentStatus); });
-  $("#revise-provisional").addEventListener("click", reviseProvisional);
+  $("#revise-project").addEventListener("click", reviseProject);
+  $("#project-suggestions").addEventListener("click", (event) => { const button = event.target.closest("button[data-suggestion]"); if (button) chooseSuggestion(button.dataset.suggestion, Number(button.dataset.index), button); });
   $("#produce-text").addEventListener("click", () => runAction("produce-text", $("#produce-text"), "Gerando…", "project_approved"));
   $("#new-plan").addEventListener("click", newPlan); $("#back-to-form").addEventListener("click", newPlan);
   $("#history").addEventListener("click", (event) => { const item = event.target.closest(".history-item"); if (item) openExecution(item.dataset.id, item.dataset.title); });
