@@ -32,6 +32,12 @@ class Themes(BaseModel):
     items: list[Theme] = Field(default_factory=list, max_length=4)
 
 
+class MatrixSuggestions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model_knowledge_suggestions: list[str] = Field(min_length=1, max_length=3)
+    source_enrichment_opportunities: list[str] = Field(min_length=1, max_length=3)
+
+
 class ClaimPlacement(BaseModel):
     model_config = ConfigDict(extra="forbid")
     claim_id: str
@@ -366,6 +372,25 @@ async def propose_from_matrix(
         run.execution_run_id, round_number,
         [index for index, _ in supported],
     )
+    suggestions_result = None
+    if provisional is None and previous is None and round_number == 1:
+        suggestion_prompt = (
+            "Offer two distinct kinds of optional editorial additions for "
+            "this first project. Model-knowledge suggestions must be small "
+            "atomic contributions to existing subjects that need no new "
+            "source and are explicitly not documentary evidence. Source "
+            "enrichment opportunities must be broader gaps or directions "
+            "that require finding a new source. Provide one to three of "
+            "each type. Do not name or fabricate sources.\n"
+            f"BRIEF: {run.request.brief.model_dump_json()}\n"
+            f"SUBJECTS: {json.dumps([item.title for item in subjects], ensure_ascii=False)}\n"
+            f"AXIS: {scaffold.narrative_axis.model_dump_json()}"
+        )
+        suggestions_result = await _cached(
+            repository, run.execution_run_id, round_number,
+            "matrix_suggestions", suggestion_prompt,
+            MatrixSuggestions, call, 1_536,
+        )
     duration = max(
         scaffold.duration_minutes,
         ceil(sum(item.allocated_minutes for item in subjects)),
@@ -382,11 +407,11 @@ async def propose_from_matrix(
             forbidden_inferences=scaffold.forbidden_inferences,
         ),
         model_knowledge_suggestions=(
-            [] if provisional is not None or previous is not None or round_number > 1
-            else scaffold.model_knowledge_suggestions
+            suggestions_result.model_knowledge_suggestions
+            if suggestions_result is not None else []
         ),
         source_enrichment_opportunities=(
-            [] if provisional is not None or previous is not None or round_number > 1
-            else scaffold.source_enrichment_opportunities
+            suggestions_result.source_enrichment_opportunities
+            if suggestions_result is not None else []
         ),
     )
