@@ -13,7 +13,7 @@ from google.cloud import storage
 from google.api_core.exceptions import NotFound
 
 from .gateway import VertexGateway
-from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, SourceMode
+from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, RunState, SourceMode
 from .ingestion import IngestionResult, ingest, ingest_acquired
 from .maintenance import clean_operational_history
 from .postgres import ProductRepository, apply_migrations
