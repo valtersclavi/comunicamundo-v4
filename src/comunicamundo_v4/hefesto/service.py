@@ -46,7 +46,7 @@ from .contracts import (
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
 from .editorial_matrix import MatrixExtraction, extract_selected_matrix
-from .matrix_synthesis import propose_from_matrix
+from .matrix_synthesis import MatrixSuggestions, propose_from_matrix
 from .matrix_writing import draft_from_matrix
 from .prompts import (
     SYSTEM,
@@ -1265,6 +1265,27 @@ class Hefesto:
             ),
             "source_supported_subjects": subjects,
         })
+        suggestions = None
+        if (
+            run.request.provisional_project is None
+            and run.request.existing_editorial_project is None
+        ):
+            suggestion_prompt = (
+                "For this first source-backed Editorial Project, provide "
+                "one to three small optional model-knowledge contributions "
+                "within existing subjects, requiring no search, and one to "
+                "three broader opportunities that need new documentary "
+                "sources. Do not claim model knowledge came from a source. "
+                "Do not invent source identities.\n"
+                f"BRIEF: {run.request.brief.model_dump_json()}\n"
+                f"AXIS: {scaffold.narrative_axis.model_dump_json()}\n"
+                f"SUBJECTS: {', '.join(item.title for item in subjects)}"
+            )
+            suggestions = (await self._call(
+                run, task_type="editorial_project_suggestions",
+                prompt=suggestion_prompt, schema=MatrixSuggestions,
+                max_output_tokens=1_536, thinking_tokens=0,
+            )).value
         value = EditorialProjectProposal(
             working_title=scaffold.working_title,
             editorial_promise=scaffold.editorial_promise,
@@ -1282,8 +1303,12 @@ class Hefesto:
                     scaffold.forbidden_inferences,
                 ),
             ),
-            model_knowledge_suggestions=[],
-            source_enrichment_opportunities=[],
+            model_knowledge_suggestions=(
+                suggestions.model_knowledge_suggestions if suggestions else []
+            ),
+            source_enrichment_opportunities=(
+                suggestions.source_enrichment_opportunities if suggestions else []
+            ),
         )
         project = EditorialProjectRecord(
             execution_run_id=run.execution_run_id,
