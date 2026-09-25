@@ -265,6 +265,7 @@ async def propose_from_matrix(
     *,
     round_number: int = 1,
     revision_instruction: str | None = None,
+    model_choice: bool = False,
 ) -> EditorialProjectProposal:
     claims = await repository.matrix_claims(run.execution_run_id)
     if not claims:
@@ -279,7 +280,14 @@ async def propose_from_matrix(
         if revision_instruction is not None and run.editorial_project is not None
         else run.request.existing_editorial_project
     )
-    if revision_instruction is not None:
+    if model_choice:
+        anchor = (
+            "Integrate only the chosen small model-knowledge contribution "
+            "inside the existing subjects. Preserve title, promise, axis, "
+            "subjects and duration. Do not present model knowledge as "
+            "documentary evidence.\n" + _previous_project_context(previous)
+        )
+    elif revision_instruction is not None:
         anchor = (
             "Revise the existing Editorial Project according to the user's "
             "instruction. Add, remove or change subjects, title, promise and "
@@ -323,7 +331,9 @@ async def propose_from_matrix(
         prompt, EditorialProjectScaffold, call, 8_192,
     )
     subjects = list(scaffold.source_supported_subjects)
-    if provisional is not None:
+    if model_choice and previous is not None:
+        subjects = list(previous.source_supported_subjects)
+    elif provisional is not None:
         supported_indexes = run.request.supported_provisional_subject_indexes
         subjects = [
             EditorialSubject(
@@ -350,7 +360,7 @@ async def propose_from_matrix(
                  if any(c["origin"] == "source" for c in routed[index])]
     if not supported:
         raise ValueError("matrix did not support any Editorial Project subject")
-    if previous is not None and revision_instruction is None:
+    if previous is not None and (revision_instruction is None or model_choice):
         retained = {item.title.casefold() for _, item in supported}
         missing = [
             item.title for item in previous.source_supported_subjects
@@ -360,7 +370,7 @@ async def propose_from_matrix(
             raise ValueError(
                 "enrichment cannot remove existing subjects: " + ", ".join(missing)
             )
-    if previous is not None and revision_instruction is None:
+    if previous is not None and (revision_instruction is None or model_choice):
         prior = {item.title.casefold(): item for item in previous.source_supported_subjects}
         subjects = [
             item.model_copy(update={
@@ -425,10 +435,10 @@ async def propose_from_matrix(
         ceil(sum(item.allocated_minutes for item in subjects)),
     )
     return EditorialProjectProposal(
-        working_title=scaffold.working_title,
-        editorial_promise=scaffold.editorial_promise,
-        narrative_axis=scaffold.narrative_axis,
-        duration_minutes=duration,
+        working_title=previous.working_title if model_choice and previous else scaffold.working_title,
+        editorial_promise=previous.editorial_promise if model_choice and previous else scaffold.editorial_promise,
+        narrative_axis=previous.narrative_axis if model_choice and previous else scaffold.narrative_axis,
+        duration_minutes=previous.duration_minutes if model_choice and previous else duration,
         source_supported_subjects=subjects,
         editorial_corpus=EditorialCorpus(
             governing_understanding=scaffold.corpus_governing_understanding,
