@@ -625,6 +625,22 @@ class ProductRepository:
                 })
         return list(claims.values())
 
+    async def matrix_subject_claim_roles(
+        self, execution_run_id: UUID, round_number: int,
+    ) -> dict[int, list[tuple[str, str]]]:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT subject_index,claim_id,role
+                   FROM hefesto_product.editorial_subject_claims
+                   WHERE execution_run_id=%s AND round_number=%s
+                   ORDER BY subject_index,claim_id""",
+                (execution_run_id, round_number),
+            )
+            result: dict[int, list[tuple[str, str]]] = {}
+            for index, claim_id, role in await rows.fetchall():
+                result.setdefault(index, []).append((str(claim_id).strip(), role))
+            return result
+
     async def matrix_work(
         self, execution_run_id: UUID, round_number: int, task: str,
         unit_id: str, input_digest: str,
