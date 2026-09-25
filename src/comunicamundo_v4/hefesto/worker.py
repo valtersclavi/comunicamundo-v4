@@ -564,6 +564,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         await repository.close()
         raise ValueError("unknown source enrichment opportunity")
     opportunity = options[index]
+    added_ids: list[UUID] = []
     try:
         gateway = VertexGateway(
             project=required("GOOGLE_CLOUD_PROJECT"),
@@ -612,6 +613,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         )
         offset = len(original.request.sources)
         additions = list(ingested.request.sources)
+        added_ids = [source.source_id for source in additions]
         paragraphs = [
             item.model_copy(update={"source_ordinal": offset + rank})
             for rank, source in enumerate(additions, start=1)
@@ -644,7 +646,6 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         await repository.save_run(active)
         await hefesto.select(execution_id)
         await hefesto.extract_matrix(execution_id)
-        new_source_ids = {source.source_id for source in additions}
         claims = await repository.matrix_claims(execution_id)
         if not any(
             item["origin"] == "source"
@@ -655,6 +656,10 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         await hefesto.propose_matrix_project(execution_id)
         await _persist_product_receipt(hefesto, client, execution_id, [])
     except Exception:
+        if added_ids:
+            await repository.rollback_enrichment_sources(
+                execution_id, added_ids, original.editorial_round,
+            )
         latest = await repository.get_run(execution_id)
         if latest is not None and latest.editorial_project is None:
             await repository.save_run(original)
