@@ -774,6 +774,24 @@ class ProductRepository:
             )
         return claim_id
 
+    async def save_matrix_relations(
+        self, execution_run_id: UUID,
+        relations: Sequence[tuple[str, str, str, str]],
+    ) -> None:
+        if not relations:
+            return
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                for left, right, relation, rationale in relations:
+                    first, second = sorted((left, right))
+                    await connection.execute(
+                        """INSERT INTO hefesto_product.editorial_claim_relations
+                           (execution_run_id,left_claim_id,right_claim_id,relation,rationale)
+                           VALUES (%s,%s,%s,%s,%s)
+                           ON CONFLICT DO NOTHING""",
+                        (execution_run_id, first, second, relation, rationale),
+                    )
+
     async def matrix_claims(self, execution_run_id: UUID) -> list[dict[str, Any]]:
         async with self._pool.connection() as connection:
             rows = await connection.execute(
