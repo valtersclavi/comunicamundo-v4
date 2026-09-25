@@ -533,7 +533,10 @@ async def _continue_to_project(
         await hefesto.record_stages(execution_id, [{
             "stage": active_stage, "status": "running", "duration_ms": 0,
         }])
-        await hefesto.propose_project(execution_id)
+        if os.environ.get("HEFESTO_EDITORIAL_ENGINE", "legacy") == "matrix":
+            await hefesto.propose_matrix_project(execution_id)
+        else:
+            await hefesto.propose_project(execution_id)
         stages.append({
             "stage": active_stage,
             "status": "completed",
@@ -597,7 +600,11 @@ async def _continue_to_text(
     execution_id: UUID,
 ) -> None:
     try:
-        await hefesto.produce_text(execution_id)
+        run = await repository.get_run(execution_id)
+        if run is not None and run.editorial_engine == "matrix":
+            await hefesto.produce_matrix_text(execution_id)
+        else:
+            await hefesto.produce_text(execution_id)
     except Exception:
         await _persist_product_receipt(hefesto, client, execution_id, [])
         raise
