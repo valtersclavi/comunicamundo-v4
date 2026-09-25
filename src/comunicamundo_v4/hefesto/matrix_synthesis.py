@@ -146,20 +146,13 @@ async def _themes(
     themes: list[Theme] = []
     for offset in range(0, len(claims), 8):
         packet = [_claim_input(item) for item in claims[offset:offset + 8]]
-        prompt = (
-            "Identify up to four distinct editorial ideas across these claims. "
-            "Preserve material contradictions, limits and unexpected angles. "
-            "Do not invent claims. Output short titles and insights.\n"
-            f"BRIEF: {brief.model_dump_json()}\nCLAIMS: "
-            f"{json.dumps(packet, ensure_ascii=False)}"
-        )
         results = await _packet_call(
             repository, execution_id, round_number, "matrix_themes",
             packet,
             lambda items: (
                 "Identify up to four distinct editorial ideas across these claims. "
                 "Preserve material contradictions, limits and unexpected angles. "
-                "Do not invent claims. Output short titles and insights.\\n"
+                "Do not invent claims. Output short titles and insights.\n"
                 f"BRIEF: {brief.model_dump_json()}\\nCLAIMS: "
                 + json.dumps(items, ensure_ascii=False)
             ),
@@ -172,21 +165,22 @@ async def _themes(
         level += 1
         merged: list[Theme] = []
         for offset in range(0, len(themes), 10):
-            prompt = (
-                "Group overlapping editorial themes into up to four meaningful "
-                "directions. Preserve tensions and distinctive angles. Keep "
-                "specific meaning; do not add unsupported facts.\n"
-                f"BRIEF: {brief.model_dump_json()}\nTHEMES: "
-                + json.dumps(
-                    [item.model_dump() for item in themes[offset:offset + 10]],
-                    ensure_ascii=False,
-                )
-            )
-            result = await _cached(
+            group = themes[offset:offset + 10]
+            results = await _packet_call(
                 repository, execution_id, round_number,
-                f"matrix_theme_merge_{level}", prompt, Themes, call, 2_048,
+                f"matrix_theme_merge_{level}", group,
+                lambda items: (
+                    "Group overlapping editorial themes into up to four "
+                    "meaningful directions. Preserve tensions, limits and "
+                    "distinctive angles. Do not add unsupported facts.\\n"
+                    f"BRIEF: {brief.model_dump_json()}\\nTHEMES: "
+                    + json.dumps([item.model_dump() for item in items],
+                                 ensure_ascii=False)
+                ),
+                Themes, call, 2_048,
             )
-            merged.extend(result.items)
+            for result in results:
+                merged.extend(result.items)
         if len(merged) >= len(themes):
             raise ValueError("matrix thematic merge did not reduce its input")
         themes = merged
@@ -207,37 +201,40 @@ async def _route(
     }
     for offset in range(0, len(claims), 10):
         packet = claims[offset:offset + 10]
-        prompt = (
-            "Assign each relevant claim to every editorial subject it can "
-            "materially develop. Return only IDs present in this packet. "
-            "Keep disagreements as tensions; do not turn a model-origin claim "
-            "into source evidence. A claim may belong to several subjects or "
-            "none.\n"
-            f"BRIEF: {brief.model_dump_json()}\nSUBJECTS: "
-            + json.dumps(
-                [{"index": i, "title": item.title,
-                  "role": item.editorial_role[:160]}
-                 for i, item in enumerate(subjects)],
-                ensure_ascii=False,
-            )
-            + "\nCLAIMS: "
-            + json.dumps([_claim_input(item) for item in packet], ensure_ascii=False)
-        )
-        result = await _cached(
+        results = await _packet_call(
             repository, execution_id, round_number,
-            "matrix_claim_routing", prompt, Placements, call, 2_048,
+            "matrix_claim_routing", packet,
+            lambda items: (
+                "Assign every listed claim to each editorial subject it "
+                "can materially develop. Return each claim ID exactly once "
+                "with its subject indexes (or an empty list). Preserve "
+                "contradictions and do not treat model knowledge as source "
+                "evidence.\\n"
+                f"BRIEF: {brief.model_dump_json()}\\nSUBJECTS: "
+                + json.dumps(
+                    [{"index": i, "title": subject.title,
+                      "role": subject.editorial_role[:160]}
+                     for i, subject in enumerate(subjects)],
+                    ensure_ascii=False,
+                )
+                + "\\nCLAIMS: "
+                + json.dumps([_claim_input(item) for item in items],
+                             ensure_ascii=False)
+            ),
+            Placements, call, 2_048,
         )
         known = {item["claim_id"]: item for item in packet}
         seen: set[str] = set()
-        for placement in result.items:
-            if placement.claim_id not in known or placement.claim_id in seen:
-                raise ValueError("matrix route contains an unknown or duplicate claim")
-            seen.add(placement.claim_id)
-            for index in set(placement.subject_indexes):
-                if index < 0 or index >= len(subjects):
-                    raise ValueError("matrix route contains an unknown subject")
-                routed[index].append(known[placement.claim_id])
-                links[index].append((placement.claim_id, placement.role))
+        for result in results:
+          for placement in result.items:
+              if placement.claim_id not in known or placement.claim_id in seen:
+                  raise ValueError("matrix route contains an unknown or duplicate claim")
+              seen.add(placement.claim_id)
+              for index in set(placement.subject_indexes):
+                  if index < 0 or index >= len(subjects):
+                      raise ValueError("matrix route contains an unknown subject")
+                  routed[index].append(known[placement.claim_id])
+                  links[index].append((placement.claim_id, placement.role))
         if seen != set(known):
             raise ValueError("matrix routing omitted claims from the packet")
     for index, assignments in links.items():
@@ -254,21 +251,21 @@ async def _reading(
 ) -> SubjectReading:
     readings: list[SubjectReading] = []
     for offset in range(0, len(claims), 8):
-        prompt = (
-            "Write a concise editorial reading for this subject from these "
-            "claims. Preserve qualifications, disagreements and uncertainty. "
-            "Do not claim a model-origin contribution came from a source.\n"
-            f"SUBJECT: {subject.model_dump_json()}\nCLAIMS: "
-            + json.dumps(
-                [_claim_input(item) for item in claims[offset:offset + 8]],
-                ensure_ascii=False,
-            )
+        packet = claims[offset:offset + 8]
+        results = await _packet_call(
+            repository, execution_id, round_number,
+            "matrix_subject_reading", packet,
+            lambda items: (
+                "Write a concise editorial reading from these claims. "
+                "Preserve qualifications, disagreements and uncertainty; "
+                "distinguish model knowledge from sources.\\n"
+                f"SUBJECT: {subject.model_dump_json()}\\nCLAIMS: "
+                + json.dumps([_claim_input(item) for item in items],
+                             ensure_ascii=False)
+            ),
+            SubjectReading, call, 2_048,
         )
-        result = await _cached(
-            repository, execution_id, round_number, "matrix_subject_reading",
-            prompt, SubjectReading, call, 2_048,
-        )
-        readings.append(result)
+        readings.extend(results)
     level = 0
     while len(readings) > 1:
         level += 1
@@ -278,23 +275,22 @@ async def _reading(
             if len(group) == 1:
                 merged.append(group[0])
                 continue
-            prompt = (
-                "Integrate these partial editorial readings for the same "
-                "subject. Preserve distinct ideas, tensions and limits. "
-                "This is a short presentation layer; the original claims "
-                "remain available to the writer.\n"
-                f"SUBJECT: {subject.model_dump_json()}\nREADINGS: "
-                + json.dumps(
-                    [item.model_dump(mode="json") for item in group],
-                    ensure_ascii=False,
-                )
-            )
-            result = await _cached(
+            results = await _packet_call(
                 repository, execution_id, round_number,
-                f"matrix_subject_merge_{level}", prompt, SubjectReading,
-                call, 2_048,
+                f"matrix_subject_merge_{level}", group,
+                lambda items: (
+                    "Integrate these partial editorial readings. Preserve "
+                    "distinct ideas, tensions and limits. The original "
+                    "matrix remains available to the writer.\\n"
+                    f"SUBJECT: {subject.model_dump_json()}\\nREADINGS: "
+                    + json.dumps(
+                        [item.model_dump(mode="json") for item in items],
+                        ensure_ascii=False,
+                    )
+                ),
+                SubjectReading, call, 2_048,
             )
-            merged.append(result)
+            merged.extend(results)
         readings = merged
     return readings[0]
 
