@@ -545,6 +545,7 @@ async def accept_model_suggestion(execution_id: UUID, index: int) -> None:
                 "relevant existing subject without presenting it as sourced "
                 f"evidence: {statement}"
             ),
+            model_choice=True,
         )
         await _persist_product_receipt(hefesto, client, execution_id, [])
     finally:
