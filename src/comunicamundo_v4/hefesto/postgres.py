@@ -204,16 +204,18 @@ class ProductRepository:
         async with self._pool.connection() as connection:
             row = await connection.execute(
                 """UPDATE hefesto_product.submissions
-                   SET receipt_payload=jsonb_set(
-                         jsonb_set(receipt_payload, '{status}',
-                                   '"updating_project"'::jsonb),
-                         '{editorial_action}', %s::jsonb
+                   SET receipt_payload=receipt_payload || jsonb_build_object(
+                         'status', 'updating_project',
+                         'editorial_action', %s,
+                         'editorial_previous_status', receipt_payload->>'status'
                        ),
                        updated_at=now()
                    WHERE execution_run_id=%s
-                     AND receipt_payload->>'status'='project_proposed'
+                     AND receipt_payload->>'status' IN (
+                       'project_proposed','project_approved','text_ready'
+                     )
                    RETURNING execution_run_id""",
-                (json.dumps(action_token), execution_run_id),
+                (action_token, execution_run_id),
             )
             return await row.fetchone() is not None
 
@@ -223,10 +225,13 @@ class ProductRepository:
         async with self._pool.connection() as connection:
             await connection.execute(
                 """UPDATE hefesto_product.submissions
-                   SET receipt_payload=jsonb_set(
-                         receipt_payload - 'editorial_action',
-                         '{status}', '"project_proposed"'::jsonb
-                       ),updated_at=now()
+                   SET receipt_payload=(
+                         receipt_payload - 'editorial_action'
+                                         - 'editorial_previous_status'
+                       ) || jsonb_build_object(
+                         'status', receipt_payload->>'editorial_previous_status'
+                       ),
+                       updated_at=now()
                    WHERE execution_run_id=%s
                      AND receipt_payload->>'status'='updating_project'
                      AND receipt_payload->>'editorial_action'=%s""",
