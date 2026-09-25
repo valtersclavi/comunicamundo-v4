@@ -50,6 +50,19 @@ class Placements(BaseModel):
     items: list[ClaimPlacement] = Field(default_factory=list, max_length=10)
 
 
+class ClaimRelation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    left_claim_id: str
+    right_claim_id: str
+    relation: str = Field(pattern="^(converges|complements|diverges)$")
+    rationale: str = Field(min_length=1, max_length=300)
+
+
+class ClaimRelations(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[ClaimRelation] = Field(default_factory=list, max_length=8)
+
+
 class SubjectReading(BaseModel):
     model_config = ConfigDict(extra="forbid")
     synthesis: str = Field(min_length=1, max_length=1600)
@@ -244,6 +257,57 @@ async def _route(
     return routed
 
 
+async def _relations(
+    repository: object, execution_id: UUID, round_number: int,
+    routed: dict[int, list[dict[str, Any]]],
+    call: Callable[[str, str, type[BaseModel], int], Awaitable[BaseModel]],
+) -> None:
+    """Relate small windows within each subject, preserving source disagreements."""
+    for subject_index, claims in routed.items():
+        # Interleave claims by source so a window can compare different sources.
+        groups: dict[int, list[dict[str, Any]]] = {}
+        for claim in claims:
+            ordinals = [e["source_ordinal"] for e in claim["evidence"]]
+            groups.setdefault(min(ordinals) if ordinals else 0, []).append(claim)
+        ordered = []
+        while any(groups.values()):
+            for source in sorted(groups):
+                if groups[source]:
+                    ordered.append(groups[source].pop(0))
+        for offset in range(0, len(ordered), 8):
+            packet = ordered[offset:offset + 8]
+            if len(packet) < 2:
+                continue
+            results = await _packet_call(
+                repository, execution_id, round_number, "matrix_claim_relations",
+                packet,
+                lambda items: (
+                    "Identify only material convergences, complements and "
+                    "divergences between these contributions to the same "
+                    "editorial subject. Return at most eight pairs; an empty "
+                    "list is valid. Do not invent IDs or erase disagreements. "
+                    "Model knowledge is not source evidence.\n"
+                    f"SUBJECT INDEX: {subject_index}\nCLAIMS: "
+                    + json.dumps([_claim_input(item) for item in items],
+                                 ensure_ascii=False)
+                ),
+                ClaimRelations, call, 2_048,
+            )
+            known = {item["claim_id"] for item in packet}
+            validated = []
+            for result in results:
+                for relation in result.items:
+                    if (relation.left_claim_id not in known
+                            or relation.right_claim_id not in known
+                            or relation.left_claim_id == relation.right_claim_id):
+                        raise ValueError("matrix relation contains invalid claim IDs")
+                    validated.append((
+                        relation.left_claim_id, relation.right_claim_id,
+                        relation.relation, relation.rationale,
+                    ))
+            await repository.save_matrix_relations(execution_id, validated)
+
+
 async def _reading(
     repository: object, execution_id: UUID, round_number: int,
     subject: EditorialSubject, claims: Sequence[dict[str, Any]],
@@ -408,6 +472,7 @@ async def propose_from_matrix(
         repository, run.execution_run_id, round_number, run.request.brief,
         claims, subjects, call,
     )
+    await _relations(repository, run.execution_run_id, round_number, routed, call)
     supported = [(index, item) for index, item in enumerate(subjects)
                  if any(c["origin"] == "source" for c in routed[index])]
     if model_choice and not any(
