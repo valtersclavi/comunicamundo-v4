@@ -504,6 +504,19 @@ async def revise_provisional(execution_id: UUID, instruction_uri: str) -> None:
         await repository.close()
 
 
+async def _restore_editable_receipt(
+    repository: ProductRepository, execution_id: UUID,
+    prior: dict[str, object] | None,
+) -> None:
+    if prior is not None:
+        await repository.record_product_receipt(execution_id, {
+            **{key: value for key, value in prior.items()
+               if key != "editorial_action"},
+            "status": "project_proposed",
+            "generated_at": datetime.now(UTC).isoformat(),
+        })
+
+
 async def revise_project(execution_id: UUID, instruction_uri: str) -> None:
     client = storage_client()
     bucket, name = instruction_uri.removeprefix("gs://").split("/", 1)
@@ -516,6 +529,7 @@ async def revise_project(execution_id: UUID, instruction_uri: str) -> None:
         run = await repository.get_run(execution_id)
         if run is None or run.state is not RunState.PROJECT_PROPOSED:
             raise ValueError("Editorial Project is not awaiting revision")
+        prior_receipt = await repository.product_receipt(execution_id)
         try:
             await hefesto.propose_matrix_project(
                 execution_id, revision_instruction=message,
@@ -523,6 +537,7 @@ async def revise_project(execution_id: UUID, instruction_uri: str) -> None:
             await _persist_product_receipt(hefesto, client, execution_id, [])
         except Exception:
             await repository.save_run(run)
+            await _restore_editable_receipt(repository, execution_id, prior_receipt)
             raise
     finally:
         await repository.close()
@@ -539,6 +554,7 @@ async def accept_model_suggestion(execution_id: UUID, index: int) -> None:
         if index < 0 or index >= len(suggestions):
             raise ValueError("unknown model suggestion")
         statement = suggestions[index]
+        prior_receipt = await repository.product_receipt(execution_id)
         claim_id = await repository.save_model_contribution(
             execution_id, run.editorial_round + 1, index, statement,
         )
@@ -558,6 +574,7 @@ async def accept_model_suggestion(execution_id: UUID, index: int) -> None:
                 execution_id, run.editorial_round + 1, claim_id,
             )
             await repository.save_run(run)
+            await _restore_editable_receipt(repository, execution_id, prior_receipt)
             raise
     finally:
         await repository.close()
@@ -576,6 +593,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         await repository.close()
         raise ValueError("unknown source enrichment opportunity")
     opportunity = options[index]
+    prior_receipt = await repository.product_receipt(execution_id)
     added_ids: list[UUID] = []
     try:
         gateway = VertexGateway(
@@ -676,6 +694,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
                 execution_id, added_ids, original.editorial_round,
             )
         await repository.save_run(original)
+        await _restore_editable_receipt(repository, execution_id, prior_receipt)
         raise
     finally:
         await repository.close()
