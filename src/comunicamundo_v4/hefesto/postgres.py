@@ -453,6 +453,102 @@ class ProductRepository:
             values = await rows.fetchall()
         return [SelectionBatch.model_validate(item[0]) for item in values]
 
+    async def completed_matrix_batches(self, execution_run_id: UUID) -> list[str]:
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                """SELECT batch_id FROM hefesto_product.editorial_matrix_batches
+                   WHERE execution_run_id=%s AND status='completed'""",
+                (execution_run_id,),
+            )
+            return [str(row[0]).strip() for row in await cursor.fetchall()]
+
+    async def save_matrix_batch(
+        self,
+        execution_run_id: UUID,
+        batch_id: str,
+        version: str,
+        input_tokens: int,
+        coverage: Sequence[dict[str, Any]],
+        claims: Sequence[dict[str, Any]],
+    ) -> None:
+        """Commit claims, references and examined passages in one transaction."""
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                row = await connection.execute(
+                    """SELECT status FROM hefesto_product.editorial_matrix_batches
+                       WHERE execution_run_id=%s AND batch_id=%s FOR UPDATE""",
+                    (execution_run_id, batch_id),
+                )
+                previous = await row.fetchone()
+                if previous and previous[0] == "completed":
+                    return
+                await connection.execute(
+                    """INSERT INTO hefesto_product.editorial_matrix_batches
+                       (execution_run_id,batch_id,extraction_version,status,input_tokens,error_message)
+                       VALUES (%s,%s,%s,'completed',%s,NULL)
+                       ON CONFLICT (execution_run_id,batch_id) DO UPDATE SET
+                         status='completed',input_tokens=excluded.input_tokens,
+                         error_message=NULL,updated_at=now()""",
+                    (execution_run_id, batch_id, version, input_tokens),
+                )
+                for item in coverage:
+                    await connection.execute(
+                        """INSERT INTO hefesto_product.editorial_matrix_coverage
+                           (execution_run_id,batch_id,passage_id,paragraph_id,
+                            source_id,source_ordinal)
+                           VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                        (
+                            execution_run_id, batch_id, item["passage_id"],
+                            item["paragraph_id"], item["source_id"],
+                            item["source_ordinal"],
+                        ),
+                    )
+                for claim in claims:
+                    await connection.execute(
+                        """INSERT INTO hefesto_product.editorial_claims
+                           (execution_run_id,claim_id,batch_id,origin,kind,statement)
+                           VALUES (%s,%s,%s,'source',%s,%s)
+                           ON CONFLICT DO NOTHING""",
+                        (
+                            execution_run_id, claim["claim_id"], batch_id,
+                            claim["kind"], claim["statement"],
+                        ),
+                    )
+                    for evidence in claim["evidence"]:
+                        await connection.execute(
+                            """INSERT INTO hefesto_product.editorial_claim_evidence
+                               (execution_run_id,claim_id,passage_id,paragraph_id,
+                                source_id,source_ordinal,role)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                            (
+                                execution_run_id, claim["claim_id"],
+                                evidence["passage_id"], evidence["paragraph_id"],
+                                evidence["source_id"], evidence["source_ordinal"],
+                                evidence["role"],
+                            ),
+                        )
+
+    async def fail_matrix_batch(
+        self,
+        execution_run_id: UUID,
+        batch_id: str,
+        version: str,
+        input_tokens: int,
+        error_message: str,
+    ) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """INSERT INTO hefesto_product.editorial_matrix_batches
+                   (execution_run_id,batch_id,extraction_version,status,
+                    input_tokens,error_message)
+                   VALUES (%s,%s,%s,'failed',%s,%s)
+                   ON CONFLICT (execution_run_id,batch_id) DO UPDATE SET
+                     status='failed',error_message=excluded.error_message,
+                     updated_at=now()
+                   WHERE hefesto_product.editorial_matrix_batches.status <> 'completed'""",
+                (execution_run_id, batch_id, version, input_tokens, error_message),
+            )
+
     async def save_condensation(
         self, execution_run_id: UUID, unit: EditorialCondensation
     ) -> None:
