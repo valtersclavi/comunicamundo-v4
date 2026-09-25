@@ -264,12 +264,14 @@ class SubmissionService:
             if existing.get("status") != "failed":
                 return existing
         try:
-            operation = self._dispatcher.run([
+            args = [
                 "plan",
                 f"--request={request_uri}",
                 f"--execution-run-id={execution_id}",
-                f"--engine={engine}",
-            ])
+            ]
+            if engine != "legacy":
+                args.append(f"--engine={engine}")
+            operation = self._dispatcher.run(args)
         except Exception as error:
             failed = {
                 **claim,
