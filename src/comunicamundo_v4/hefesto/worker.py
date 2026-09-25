@@ -1001,6 +1001,10 @@ async def _persist_product_receipt(
     stored_counts = await hefesto.structure_counts(execution_id) if ingestion is not None else {}
     receipt = {
         **(await hefesto.receipt(execution_id)),
+        "comparison_reference_execution_run_id": (
+            previous_receipt.get("comparison_reference_execution_run_id")
+            if isinstance(previous_receipt, dict) else None
+        ),
         "input": (
             {
                 "status": ingestion.receipt.status,
