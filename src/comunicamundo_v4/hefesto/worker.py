@@ -254,7 +254,7 @@ async def _propose_provisional_project(
     execution_id: UUID,
     client: storage.Client,
     bucket_name: str,
-    engine: str,
+    engine: str = "legacy",
 ) -> None:
     from .contracts import EditorialInputRequest
 
