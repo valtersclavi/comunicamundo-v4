@@ -598,6 +598,24 @@ class ProductRepository:
             "source_claims": claims,
         }
 
+    async def save_model_contribution(
+        self, execution_run_id: UUID, round_number: int,
+        suggestion_index: int, statement: str,
+    ) -> str:
+        claim_id = sha256(
+            f"model:{execution_run_id}:{round_number}:{suggestion_index}:"
+            f"{statement}".encode()
+        ).hexdigest()
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """INSERT INTO hefesto_product.editorial_claims
+                   (execution_run_id,claim_id,round_number,origin,kind,statement)
+                   VALUES (%s,%s,%s,'model','idea',%s)
+                   ON CONFLICT DO NOTHING""",
+                (execution_run_id, claim_id, round_number, statement),
+            )
+        return claim_id
+
     async def matrix_claims(self, execution_run_id: UUID) -> list[dict[str, Any]]:
         async with self._pool.connection() as connection:
             rows = await connection.execute(
