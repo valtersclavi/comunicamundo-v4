@@ -495,6 +495,53 @@ async def revise_provisional(execution_id: UUID, instruction_uri: str) -> None:
         await repository.close()
 
 
+async def revise_project(execution_id: UUID, instruction_uri: str) -> None:
+    client = storage_client()
+    bucket, name = instruction_uri.removeprefix("gs://").split("/", 1)
+    instruction = json.loads(client.bucket(bucket).blob(name).download_as_bytes())
+    message = str(instruction.get("message") or "").strip()
+    if not message:
+        raise ValueError("revision instruction is empty")
+    repository, hefesto = await services()
+    try:
+        run = await repository.get_run(execution_id)
+        if run is None or run.state is not RunState.PROJECT_PROPOSED:
+            raise ValueError("Editorial Project is not awaiting revision")
+        await hefesto.propose_matrix_project(
+            execution_id, revision_instruction=message,
+        )
+        await _persist_product_receipt(hefesto, client, execution_id, [])
+    finally:
+        await repository.close()
+
+
+async def accept_model_suggestion(execution_id: UUID, index: int) -> None:
+    client = storage_client()
+    repository, hefesto = await services()
+    try:
+        run = await repository.get_run(execution_id)
+        if run is None or run.state is not RunState.PROJECT_PROPOSED:
+            raise ValueError("Editorial Project is not awaiting suggestions")
+        suggestions = run.editorial_project.proposal.model_knowledge_suggestions
+        if index < 0 or index >= len(suggestions):
+            raise ValueError("unknown model suggestion")
+        statement = suggestions[index]
+        await repository.save_model_contribution(
+            execution_id, run.editorial_round + 1, index, statement,
+        )
+        await hefesto.propose_matrix_project(
+            execution_id,
+            revision_instruction=(
+                "Integrate this small model-knowledge contribution into the "
+                "relevant existing subject without presenting it as sourced "
+                f"evidence: {statement}"
+            ),
+        )
+        await _persist_product_receipt(hefesto, client, execution_id, [])
+    finally:
+        await repository.close()
+
+
 async def resume_plan(execution_id: UUID) -> None:
     client = storage_client()
     repository, hefesto = await services()
@@ -974,6 +1021,24 @@ async def run(args: argparse.Namespace) -> None:
         finally:
             await repository.close()
         return
+    if args.command in {"revise-project", "accept-model-suggestion"}:
+        try:
+            if args.command == "revise-project":
+                await revise_project(args.execution_run_id, args.instruction)
+            else:
+                await accept_model_suggestion(args.execution_run_id, args.index)
+        except Exception as error:
+            await record_action_failure(args.execution_run_id, args.command, error)
+            mark_action_dispatch(
+                storage_client(), args.execution_run_id, args.command, "failed",
+                error, dispatch_key=args.dispatch_key,
+            )
+            raise
+        mark_action_dispatch(
+            storage_client(), args.execution_run_id, args.command,
+            "completed", dispatch_key=args.dispatch_key,
+        )
+        return
     if args.command == "resume-plan":
         try:
             await resume_plan(args.execution_run_id)
@@ -1051,6 +1116,14 @@ def parser() -> argparse.ArgumentParser:
     planning.add_argument("--execution-run-id", type=UUID)
     matrix = commands.add_parser("extract-matrix")
     matrix.add_argument("--execution-run-id", type=UUID, required=True)
+    revision = commands.add_parser("revise-project")
+    revision.add_argument("--execution-run-id", type=UUID, required=True)
+    revision.add_argument("--instruction", required=True)
+    revision.add_argument("--dispatch-key")
+    model_suggestion = commands.add_parser("accept-model-suggestion")
+    model_suggestion.add_argument("--execution-run-id", type=UUID, required=True)
+    model_suggestion.add_argument("--index", type=int, required=True)
+    model_suggestion.add_argument("--dispatch-key")
     resume = commands.add_parser("resume-plan")
     resume.add_argument("--execution-run-id", type=UUID, required=True)
     resume.add_argument("--dispatch-key")
