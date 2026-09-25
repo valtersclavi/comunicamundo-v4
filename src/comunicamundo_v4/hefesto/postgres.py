@@ -598,6 +598,107 @@ class ProductRepository:
             "source_claims": claims,
         }
 
+    async def rollback_enrichment_sources(
+        self, execution_run_id: UUID, source_ids: Sequence[UUID],
+        previous_round: int,
+    ) -> None:
+        """Remove only newly appended rows if a point enrichment cannot be used."""
+        if not source_ids:
+            return
+        async with self._pool.connection() as connection:
+            async with connection.transaction():
+                for source_id in source_ids:
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.editorial_subject_claims
+                           WHERE execution_run_id=%s AND round_number>%s""",
+                        (execution_run_id, previous_round),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.editorial_matrix_work
+                           WHERE execution_run_id=%s AND round_number>%s""",
+                        (execution_run_id, previous_round),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.editorial_claim_relations
+                           WHERE execution_run_id=%s AND (
+                             left_claim_id IN (
+                               SELECT claim_id FROM hefesto_product.editorial_claim_evidence
+                               WHERE execution_run_id=%s AND source_id=%s
+                             ) OR right_claim_id IN (
+                               SELECT claim_id FROM hefesto_product.editorial_claim_evidence
+                               WHERE execution_run_id=%s AND source_id=%s
+                             )
+                           )""",
+                        (execution_run_id, execution_run_id, source_id,
+                         execution_run_id, source_id),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.editorial_claim_evidence
+                           WHERE execution_run_id=%s AND source_id=%s""",
+                        (execution_run_id, source_id),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.editorial_claims c
+                           WHERE c.execution_run_id=%s AND c.origin='source'
+                             AND NOT EXISTS (
+                               SELECT 1 FROM hefesto_product.editorial_claim_evidence e
+                               WHERE e.execution_run_id=c.execution_run_id
+                                 AND e.claim_id=c.claim_id
+                             )""",
+                        (execution_run_id,),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.editorial_matrix_coverage
+                           WHERE execution_run_id=%s AND source_id=%s""",
+                        (execution_run_id, source_id),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.editorial_matrix_batches b
+                           WHERE b.execution_run_id=%s
+                             AND NOT EXISTS (
+                               SELECT 1 FROM hefesto_product.editorial_matrix_coverage c
+                               WHERE c.execution_run_id=b.execution_run_id
+                                 AND c.batch_id=b.batch_id
+                             )
+                             AND NOT EXISTS (
+                               SELECT 1 FROM hefesto_product.editorial_claims c
+                               WHERE c.execution_run_id=b.execution_run_id
+                                 AND c.batch_id=b.batch_id
+                             )""",
+                        (execution_run_id,),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.selection_batches
+                           WHERE execution_run_id=%s AND source_id=%s""",
+                        (execution_run_id, source_id),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.paragraph_assets
+                           WHERE execution_run_id=%s AND paragraph_id IN (
+                             SELECT paragraph_id FROM hefesto_product.paragraphs
+                             WHERE execution_run_id=%s AND source_id=%s
+                           )""",
+                        (execution_run_id, execution_run_id, source_id),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.source_assets
+                           WHERE execution_run_id=%s AND source_id=%s""",
+                        (execution_run_id, source_id),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.sentences
+                           WHERE execution_run_id=%s AND paragraph_id IN (
+                             SELECT paragraph_id FROM hefesto_product.paragraphs
+                             WHERE execution_run_id=%s AND source_id=%s
+                           )""",
+                        (execution_run_id, execution_run_id, source_id),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.paragraphs
+                           WHERE execution_run_id=%s AND source_id=%s""",
+                        (execution_run_id, source_id),
+                    )
+
     async def save_model_contribution(
         self, execution_run_id: UUID, round_number: int,
         suggestion_index: int, statement: str,
