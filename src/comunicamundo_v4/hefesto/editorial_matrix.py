@@ -74,10 +74,14 @@ def _chunks(passage: Passage) -> list[Passage]:
     return [passage.model_copy(update={"text": item}) for item in pieces if item.strip()]
 
 
+def _reference_id(passage: Passage) -> str:
+    return sha256((passage.passage_id + ":" + passage.text).encode()).hexdigest()
+
+
 def _prompt(brief: EditorialBrief, passages: Sequence[Passage], titles: dict[int, str | None]) -> str:
     source = passages[0].source_ordinal
     material = "\n\n".join(
-        f"PASSAGE {item.passage_id}: {item.text}" for item in passages
+        f"PASSAGE {_reference_id(item)}: {item.text}" for item in passages
     )
     return f"""Extract distinct editorial contributions from the selected source material.
 Return no more than six short, complete claims. Include important qualifications,
@@ -161,7 +165,7 @@ async def _extract_packet(
         return
     try:
         result = await invoke(prompt)
-        lookup = {item.passage_id: item for item in packet}
+        lookup = {_reference_id(item): item for item in packet}
         validated: list[dict[str, object]] = []
         for index, claim in enumerate(result.claims):
             references: list[dict[str, object]] = []
@@ -214,9 +218,20 @@ async def _extract_packet(
             execution_run_id, batch_id, EXTRACTION_VERSION, tokens,
             str(error)[:2000],
         )
-        if "MAX_TOKENS" in str(error).upper() and len(packet) > 1:
-            middle = len(packet) // 2
-            for part in (packet[:middle], packet[middle:]):
+        if "MAX_TOKENS" in str(error).upper():
+            if len(packet) > 1:
+                middle = len(packet) // 2
+                parts = (packet[:middle], packet[middle:])
+            else:
+                words = packet[0].text.split()
+                if len(words) < 12:
+                    raise
+                middle = len(words) // 2
+                parts = (
+                    [packet[0].model_copy(update={"text": " ".join(words[:middle])})],
+                    [packet[0].model_copy(update={"text": " ".join(words[middle:])})],
+                )
+            for part in parts:
                 await _extract_packet(
                     execution_run_id, brief, part, titles, paragraph_ids,
                     existing, count_tokens, invoke, repository,
