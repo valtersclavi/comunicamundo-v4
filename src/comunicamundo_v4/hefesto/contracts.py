@@ -546,6 +546,7 @@ class ProductRun(StrictModel):
     state: RunState = RunState.SOURCE_STRUCTURE_READY
     request: PlanningRequest
     editorial_project: EditorialProjectRecord | None = None
+    editorial_round: int = Field(default=1, ge=1)
     content_draft: FinalTextProposal | None = None
     content_review: ContentReviewProposal | None = None
     corrected_content: FinalTextProposal | None = None
