@@ -239,19 +239,51 @@ async def _route(
             Placements, call, 2_048,
         )
         known = {item["claim_id"]: item for item in packet}
-        seen: set[str] = set()
-        for result in results:
-            for placement in result.items:
-                if placement.claim_id not in known or placement.claim_id in seen:
-                    raise ValueError("matrix route contains an unknown or duplicate claim")
-                seen.add(placement.claim_id)
-                for index in set(placement.subject_indexes):
-                    if index < 0 or index >= len(subjects):
-                        raise ValueError("matrix route contains an unknown subject")
-                    routed[index].append(known[placement.claim_id])
-                    links[index].append((placement.claim_id, placement.role))
-        if seen != set(known):
-            raise ValueError("matrix routing omitted claims from the packet")
+        placements = [placement for result in results for placement in result.items]
+
+        def valid(items: list[ClaimPlacement]) -> bool:
+            ids = [item.claim_id for item in items]
+            return (
+                len(ids) == len(known)
+                and set(ids) == set(known)
+                and all(
+                    all(0 <= index < len(subjects) for index in item.subject_indexes)
+                    for item in items
+                )
+            )
+
+        if not valid(placements):
+            # Repair only this packet. The original output stays checkpointed and
+            # the repair has its own cache key for safe continuation.
+            repair_prompt = (
+                "Correct the claim routing below. Return exactly one placement for "
+                "EACH ID in VALID_IDS, with no other IDs, no duplicates, and only "
+                "subject indexes from SUBJECTS. Preserve valid placements and their "
+                "roles; decide missing claims from their statements. An empty "
+                "subject_indexes list is allowed when no subject fits.\n"
+                "VALID_IDS: " + json.dumps(list(known)) + "\nSUBJECTS: "
+                + json.dumps([{"index": i, "title": subject.title}
+                              for i, subject in enumerate(subjects)], ensure_ascii=False)
+                + "\nCLAIMS: " + json.dumps(
+                    [_claim_input(item) for item in packet], ensure_ascii=False
+                )
+                + "\nPREVIOUS_PLACEMENTS: " + json.dumps(
+                    [item.model_dump(mode="json") for item in placements],
+                    ensure_ascii=False,
+                )
+            )
+            repaired = await _cached(
+                repository, execution_id, round_number,
+                "matrix_claim_routing_repair", repair_prompt, Placements,
+                call, 2_048,
+            )
+            placements = repaired.items
+            if not valid(placements):
+                raise ValueError("matrix route repair still contains invalid claim IDs or indexes")
+        for placement in placements:
+            for index in set(placement.subject_indexes):
+                routed[index].append(known[placement.claim_id])
+                links[index].append((placement.claim_id, placement.role))
     for index, assignments in links.items():
         await repository.replace_matrix_subject_links(
             execution_id, round_number, index, assignments,
