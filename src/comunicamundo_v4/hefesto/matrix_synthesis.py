@@ -42,7 +42,7 @@ class ClaimPlacement(BaseModel):
     model_config = ConfigDict(extra="forbid")
     claim_id: str
     subject_indexes: list[int] = Field(default_factory=list)
-    role: str = Field(pattern="^(core|context|tension|qualification)$")
+    role: str = "context"
 
 
 class Placements(BaseModel):
@@ -53,14 +53,14 @@ class Placements(BaseModel):
 class ClaimDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     subject_indexes: list[int] = Field(default_factory=list)
-    role: str = Field(pattern="^(core|context|tension|qualification)$")
+    role: str = "context"
 
 
 class ClaimRelation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     left_claim_id: str
     right_claim_id: str
-    relation: str = Field(pattern="^(converges|complements|diverges)$")
+    relation: str = Field(min_length=1)
     rationale: str = Field(min_length=1)
 
 
@@ -334,13 +334,13 @@ async def _route(
                 retained[claim_id] = ClaimPlacement(
                     claim_id=claim_id,
                     subject_indexes=decision.subject_indexes,
-                    role=decision.role,
+                    role=(decision.role if decision.role in {"core", "context", "tension", "qualification"} else "context"),
                 )
             placements = list(retained.values())
         for placement in placements:
             for index in set(placement.subject_indexes):
                 routed[index].append(known[placement.claim_id])
-                links[index].append((placement.claim_id, placement.role))
+                links[index].append((placement.claim_id, placement.role if placement.role in {"core", "context", "tension", "qualification"} else "context"))
     for index, assignments in links.items():
         await repository.replace_matrix_subject_links(
             execution_id, round_number, index, assignments,
@@ -390,8 +390,13 @@ async def _relations(
                 for relation in result.items:
                     if (relation.left_claim_id not in known
                             or relation.right_claim_id not in known
-                            or relation.left_claim_id == relation.right_claim_id):
-                        raise ValueError("matrix relation contains invalid claim IDs")
+                            or relation.left_claim_id == relation.right_claim_id
+                            or relation.relation not in {
+                                "converges", "complements", "diverges"
+                            }):
+                        # An optional link cannot invent an ID or relationship.
+                        # Its claims remain intact in the matrix and subject reading.
+                        continue
                     validated.append((
                         relation.left_claim_id, relation.right_claim_id,
                         relation.relation, relation.rationale,
