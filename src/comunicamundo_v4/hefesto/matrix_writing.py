@@ -46,7 +46,7 @@ async def _cached(
 
 
 def _prioritize(
-    claims: list[dict[str, Any]], roles: list[tuple[str, str]], word_target: int,
+    claims: list[dict[str, Any]], roles: list[tuple[str, str]],
     divergent: set[str],
 ) -> list[dict[str, Any]]:
     by_id = {item["claim_id"]: item for item in claims}
@@ -60,33 +60,28 @@ def _prioritize(
             pair[1]["claim_id"],
         ),
     )
-    limit = min(40, max(4, word_target // 28))
     chosen: list[dict[str, Any]] = []
     used: set[str] = set()
-    # Explicitly accepted model contributions must survive the selection limit.
+    # Order the complete set for writing. Every routed contribution is
+    # assigned to a section packet; priority changes order, never coverage.
     for _, claim in ordered:
-        if claim["origin"] == "model" and len(chosen) < limit:
+        if claim["origin"] == "model":
             chosen.append(claim)
             used.add(claim["claim_id"])
-    # Preserve disagreements and source diversity before filling with core claims.
     for _, claim in ordered:
-        if (len(chosen) < limit and claim["claim_id"] in divergent
-                and claim["claim_id"] not in used):
+        if claim["claim_id"] in divergent and claim["claim_id"] not in used:
             chosen.append(claim)
             used.add(claim["claim_id"])
     for wanted in ("contradiction", "limit", "qualification"):
         for _, claim in ordered:
-            if len(chosen) < limit and claim["kind"] == wanted and claim["claim_id"] not in used:
+            if claim["kind"] == wanted and claim["claim_id"] not in used:
                 chosen.append(claim)
                 used.add(claim["claim_id"])
-                break
     for _, claim in ordered:
-        if len(chosen) >= limit:
-            break
         if claim["claim_id"] not in used:
             chosen.append(claim)
             used.add(claim["claim_id"])
-    return chosen[:limit]
+    return chosen
 
 
 async def draft_from_matrix(
@@ -112,7 +107,7 @@ async def draft_from_matrix(
         word_target = max(
             80, round(total_words * subject.allocated_minutes / minutes),
         )
-        chosen = _prioritize(claims, roles.get(index, []), word_target, divergent)
+        chosen = _prioritize(claims, roles.get(index, []), divergent)
         if not chosen:
             raise ValueError(f"matrix has no routed claims for subject {subject.title}")
         chunk_count = max(1, ceil(word_target / 160), ceil(len(chosen) / 4))
