@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .contracts import (
     EditorialBrief, EditorialCorpus, EditorialEvidence, EditorialKnowledgeUnit,
     EditorialProjectProposal, EditorialProjectScaffold, EditorialSubject,
-    PlanningRequest,
+    NarrativeAxisProposal, PlanningRequest,
 )
 
 
@@ -30,6 +30,13 @@ class Theme(BaseModel):
 class Themes(BaseModel):
     model_config = ConfigDict(extra="forbid")
     items: list[Theme] = Field(default_factory=list)
+
+
+class ProjectHeader(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    working_title: str = Field(min_length=1)
+    editorial_promise: str = Field(min_length=1)
+    narrative_axis: NarrativeAxisProposal
 
 
 class MatrixSuggestions(BaseModel):
@@ -166,12 +173,14 @@ async def _themes(
     for offset in range(0, len(claims), 8):
         packet = [_claim_input(item) for item in claims[offset:offset + 8]]
         results = await _packet_call(
-            repository, execution_id, round_number, "matrix_themes",
+            repository, execution_id, round_number, "matrix_themes_complete",
             packet,
             lambda items: (
-                "Identify up to four distinct editorial ideas across these claims. "
-                "Preserve material contradictions, limits and unexpected angles. "
-                "Do not invent claims. Output short titles and insights.\n"
+                "Identify every distinct editorial idea across these claims. "
+                "Preserve contradictions, limits and unexpected angles as "
+                "distinct themes where needed. Do not invent claims or impose "
+                "a number of themes. Each insight must retain its substantive "
+                "content; split compound ideas into separate themes.\n"
                 f"BRIEF: {brief.model_dump_json()}\nCLAIMS: "
                 + json.dumps(items, ensure_ascii=False)
             ),
@@ -179,34 +188,9 @@ async def _themes(
         )
         for result in results:
             themes.extend(result.items)
-    level = 0
-    while len(themes) > 12:
-        level += 1
-        merged: list[Theme] = []
-        for offset in range(0, len(themes), 10):
-            group = themes[offset:offset + 10]
-            results = await _packet_call(
-                repository, execution_id, round_number,
-                f"matrix_theme_merge_{level}", group,
-                lambda items: (
-                    "Group overlapping editorial themes into up to four "
-                    "meaningful directions. Preserve tensions, limits and "
-                    "distinctive angles. Do not add unsupported facts.\n"
-                    f"BRIEF: {brief.model_dump_json()}\nTHEMES: "
-                    + json.dumps([item.model_dump() for item in items],
-                                 ensure_ascii=False)
-                ),
-                Themes, call, 2_048,
-            )
-            for result in results:
-                merged.extend(result.items)
-        if len(merged) >= len(themes):
-            raise ValueError("matrix thematic merge did not reduce its input")
-        themes = merged
     if not themes:
         raise ValueError("matrix thematic reading produced no supported direction")
     return themes
-
 
 async def _route(
     repository: object, execution_id: UUID, round_number: int,
@@ -220,104 +204,65 @@ async def _route(
     links: dict[int, list[tuple[str, str]]] = {
         index: [] for index in range(len(subjects))
     }
-    for offset in range(0, len(claims), 10):
-        packet = claims[offset:offset + 10]
-        results = await _packet_call(
-            repository, execution_id, round_number,
-            "matrix_claim_routing", packet,
-            lambda items: (
-                "Assign every listed claim to each editorial subject it "
-                "can materially develop. Return each claim ID exactly once "
-                "with its subject indexes (or an empty list). Preserve "
-                "contradictions and do not treat model knowledge as source "
-                "evidence.\n"
-                f"BRIEF: {brief.model_dump_json()}\nSUBJECTS: "
-                + json.dumps(
-                    [{"index": i, "title": subject.title,
-                      "role": subject.editorial_role}
-                     for i, subject in enumerate(subjects)],
-                    ensure_ascii=False,
-                )
-                + "\nCLAIMS: "
-                + json.dumps([_claim_input(item) for item in items],
-                             ensure_ascii=False)
-            ),
-            Placements, call, 2_048,
+    # Every claim is considered against every subject, in bounded packets.
+    # Subject indexes remain global so a packet cannot change their identity.
+    for subject_offset in range(0, len(subjects), 8):
+        subject_indexes = range(
+            subject_offset, min(len(subjects), subject_offset + 8)
         )
-        known = {item["claim_id"]: item for item in packet}
-        placements = [placement for result in results for placement in result.items]
-
-        def valid(items: list[ClaimPlacement]) -> bool:
-            ids = [item.claim_id for item in items]
-            return (
-                len(ids) == len(known)
-                and set(ids) == set(known)
-                and all(
-                    all(0 <= index < len(subjects) for index in item.subject_indexes)
-                    for item in items
-                )
-            )
-
-        if not valid(placements):
-            # Repair only this packet. The original output stays checkpointed and
-            # the repair has its own cache key for safe continuation.
-            repair_prompt = (
-                "Correct the claim routing below. Return exactly one placement for "
-                "EACH ID in VALID_IDS, with no other IDs, no duplicates, and only "
-                "subject indexes from SUBJECTS. Preserve valid placements and their "
-                "roles; decide missing claims from their statements. An empty "
-                "subject_indexes list is allowed when no subject fits.\n"
-                "VALID_IDS: " + json.dumps(list(known)) + "\nSUBJECTS: "
-                + json.dumps([{"index": i, "title": subject.title}
-                              for i, subject in enumerate(subjects)], ensure_ascii=False)
-                + "\nCLAIMS: " + json.dumps(
-                    [_claim_input(item) for item in packet], ensure_ascii=False
-                )
-                + "\nPREVIOUS_PLACEMENTS: " + json.dumps(
-                    [item.model_dump(mode="json") for item in placements],
-                    ensure_ascii=False,
-                )
-            )
-            repaired = await _cached(
+        allowed = set(subject_indexes)
+        subject_input = [
+            {"index": index, "title": subjects[index].title,
+             "role": subjects[index].editorial_role}
+            for index in subject_indexes
+        ]
+        for offset in range(0, len(claims), 10):
+            packet = claims[offset:offset + 10]
+            results = await _packet_call(
                 repository, execution_id, round_number,
-                "matrix_claim_routing_repair", repair_prompt, Placements,
-                call, 2_048,
+                "matrix_claim_routing", packet,
+                lambda items: (
+                    "Assign every listed claim to each editorial subject it "
+                    "can materially develop. Return each claim ID exactly once "
+                    "with its subject indexes (or an empty list). Preserve "
+                    "contradictions and do not treat model knowledge as source "
+                    "evidence.\n"
+                    f"BRIEF: {brief.model_dump_json()}\nSUBJECTS: "
+                    + json.dumps(subject_input, ensure_ascii=False)
+                    + "\nCLAIMS: "
+                    + json.dumps([_claim_input(item) for item in items],
+                                 ensure_ascii=False)
+                ),
+                Placements, call, 2_048,
             )
-            # Keep valid assignments from both responses. The model may still
-            # miscopy a long ID in the repair response; decide missing claims
-            # individually without asking it to reproduce their IDs.
-            candidates = [*placements, *repaired.items]
+            known = {item["claim_id"]: item for item in packet}
             retained: dict[str, ClaimPlacement] = {}
-            for item in candidates:
-                if item.claim_id not in known:
-                    continue
-                indexes = [
-                    index for index in item.subject_indexes
-                    if 0 <= index < len(subjects)
-                ]
-                if item.claim_id not in retained:
-                    retained[item.claim_id] = item.model_copy(
-                        update={"subject_indexes": indexes}
-                    )
-                else:
-                    prior = retained[item.claim_id]
-                    retained[item.claim_id] = prior.model_copy(update={
-                        "subject_indexes": sorted(
-                            set(prior.subject_indexes) | set(indexes)
+            for result in results:
+                for item in result.items:
+                    if item.claim_id not in known:
+                        continue
+                    indexes = [index for index in item.subject_indexes
+                               if index in allowed]
+                    if item.claim_id not in retained:
+                        retained[item.claim_id] = item.model_copy(
+                            update={"subject_indexes": indexes}
                         )
-                    })
+                    else:
+                        prior = retained[item.claim_id]
+                        retained[item.claim_id] = prior.model_copy(update={
+                            "subject_indexes": sorted(
+                                set(prior.subject_indexes) | set(indexes)
+                            )
+                        })
             for claim_id, claim in known.items():
                 if claim_id in retained:
                     continue
                 prompt = (
                     "Route this ONE source claim to relevant editorial subjects. "
-                    "Return only subject_indexes and role; the claim ID is managed "
-                    "by the program. An empty subject_indexes list is valid.\n"
-                    "SUBJECTS: " + json.dumps(
-                        [{"index": i, "title": subject.title}
-                         for i, subject in enumerate(subjects)],
-                        ensure_ascii=False,
-                    ) + "\nCLAIM: " + json.dumps(
+                    "Return only subject_indexes and role; its ID is managed "
+                    "by the program. An empty list is valid.\nSUBJECTS: "
+                    + json.dumps(subject_input, ensure_ascii=False)
+                    + "\nCLAIM: " + json.dumps(
                         _claim_input(claim), ensure_ascii=False
                     )
                 )
@@ -326,27 +271,27 @@ async def _route(
                     "matrix_claim_routing_single", prompt, ClaimDecision,
                     call, 768,
                 )
-                if any(
-                    index < 0 or index >= len(subjects)
-                    for index in decision.subject_indexes
-                ):
+                if any(index not in allowed
+                       for index in decision.subject_indexes):
                     raise ValueError("individual matrix route contains an unknown subject")
                 retained[claim_id] = ClaimPlacement(
                     claim_id=claim_id,
                     subject_indexes=decision.subject_indexes,
-                    role=(decision.role if decision.role in {"core", "context", "tension", "qualification"} else "context"),
+                    role=decision.role,
                 )
-            placements = list(retained.values())
-        for placement in placements:
-            for index in set(placement.subject_indexes):
-                routed[index].append(known[placement.claim_id])
-                links[index].append((placement.claim_id, placement.role if placement.role in {"core", "context", "tension", "qualification"} else "context"))
+            for placement in retained.values():
+                role = (placement.role
+                        if placement.role in {
+                            "core", "context", "tension", "qualification"
+                        } else "context")
+                for index in set(placement.subject_indexes):
+                    routed[index].append(known[placement.claim_id])
+                    links[index].append((placement.claim_id, role))
     for index, assignments in links.items():
         await repository.replace_matrix_subject_links(
             execution_id, round_number, index, assignments,
         )
     return routed
-
 
 async def _relations(
     repository: object, execution_id: UUID, round_number: int,
@@ -463,10 +408,6 @@ def _previous_project_context(previous: EditorialProjectProposal | None) -> str:
         "editorial_promise": previous.editorial_promise,
         "narrative_axis": previous.narrative_axis.model_dump(mode="json"),
         "duration_minutes": previous.duration_minutes,
-        "subjects": [
-            item.model_dump(mode="json")
-            for item in previous.source_supported_subjects
-        ],
     }, ensure_ascii=False)
 
 
@@ -492,6 +433,27 @@ async def propose_from_matrix(
         if revision_instruction is not None and run.editorial_project is not None
         else run.request.existing_editorial_project
     )
+    # Prior editorial directions are separate packet items. A large existing
+    # project cannot overflow the fixed prefix of every scaffold call.
+    if provisional is not None:
+        themes.extend(
+            Theme(
+                title=provisional.subjects[index].title,
+                insight=(
+                    provisional.subjects[index].editorial_role + " — "
+                    + provisional.subjects[index].desired_depth
+                ),
+            )
+            for index in run.request.supported_provisional_subject_indexes
+        )
+    elif previous is not None:
+        themes.extend(
+            Theme(
+                title=item.title,
+                insight=item.editorial_role + " — " + item.depth,
+            )
+            for item in previous.source_supported_subjects
+        )
     if model_choice:
         anchor = (
             "Integrate only the chosen small model-knowledge contribution "
@@ -511,7 +473,10 @@ async def propose_from_matrix(
         anchor = (
         "The approved provisional project guides the editorial decision. "
         "Keep supported subjects and their intended depth; do not invent "
-        "support for unsupported subjects.\n" + provisional.model_dump_json()
+        "support for unsupported subjects.\n" + json.dumps(
+            provisional.model_dump(mode="json", exclude={"subjects"}),
+            ensure_ascii=False,
+        )
         if provisional is not None else
         "Reevaluate the complete project, including the Narrative Axis, "
         "after enrichment. Preserve existing subjects and their allocated "
@@ -527,21 +492,112 @@ async def propose_from_matrix(
         "need no new source, and broader source-enrichment opportunities, "
         "which require new documentary support. Keep both lists short."
     )
-    prompt = (
-        "Develop a coherent Editorial Project scaffold with a Narrative Axis "
-        "and substantive subjects, grounded in the matrix themes below. "
-        "Preserve meaningful contradictions and limits. Do not pretend "
-        "the presentation themes exhaust the matrix. Return a compact "
-        "governing understanding and forbidden inferences. "
+    prompt_prefix = (
+        "Develop an Editorial Project scaffold with a Narrative Axis and "
+        "substantive subjects from EVERY theme in this packet. Group only "
+        "truly overlapping directions; preserve distinct ideas, limits and "
+        "contradictions. Other packets are processed separately and will be "
+        "integrated without dropping subjects. Return governing understanding "
+        "and forbidden inferences without a fixed count. "
         + suggestions + "\n" + anchor + "\n"
         + (f"USER REVISION: {revision_instruction}\n" if revision_instruction else "")
         + f"BRIEF: {run.request.brief.model_dump_json()}\nTHEMES: "
-        + json.dumps([item.model_dump() for item in themes], ensure_ascii=False)
     )
-    scaffold = await _cached(
-        repository, run.execution_run_id, round_number, "matrix_scaffold",
-        prompt, EditorialProjectScaffold, call, 8_192,
-    )
+    scaffolds: list[EditorialProjectScaffold] = []
+    for offset in range(0, len(themes), 8):
+        scaffolds.extend(await _packet_call(
+            repository, run.execution_run_id, round_number,
+            "matrix_scaffold_part", themes[offset:offset + 8],
+            lambda items: prompt_prefix + json.dumps(
+                [item.model_dump() for item in items], ensure_ascii=False,
+            ),
+            EditorialProjectScaffold, call, 8_192,
+        ))
+    if len(scaffolds) == 1:
+        scaffold = scaffolds[0]
+    else:
+        headers: list[ProjectHeader] = [
+            ProjectHeader(
+                working_title=item.working_title,
+                editorial_promise=item.editorial_promise,
+                narrative_axis=item.narrative_axis,
+            ) for item in scaffolds
+        ]
+        level = 0
+        while len(headers) > 1:
+            level += 1
+            merged_headers: list[ProjectHeader] = []
+            for offset in range(0, len(headers), 2):
+                pair = headers[offset:offset + 2]
+                if len(pair) == 1:
+                    merged_headers.append(pair[0])
+                    continue
+                header_prompt = (
+                    "Integrate these two editorial framings into one coherent "
+                    "title, promise and Narrative Axis. Every underlying "
+                    "subject and corpus note is retained separately; the "
+                    "framing should accommodate both without flattening "
+                    "their differences.\nBRIEF: "
+                    + run.request.brief.model_dump_json()
+                    + "\nFRAMINGS: "
+                    + json.dumps(
+                        [item.model_dump(mode="json") for item in pair],
+                        ensure_ascii=False,
+                    )
+                )
+                merged_headers.append(await _cached(
+                    repository, run.execution_run_id, round_number,
+                    f"matrix_header_merge_{level}", header_prompt,
+                    ProjectHeader, call, 1_536,
+                ))
+            headers = merged_headers
+        by_title: dict[str, EditorialSubject] = {}
+        for part in scaffolds:
+            for item in part.source_supported_subjects:
+                key = item.title.casefold()
+                if key not in by_title:
+                    by_title[key] = item
+                else:
+                    previous_subject = by_title[key]
+                    by_title[key] = previous_subject.model_copy(update={
+                        "editorial_role": "\n".join(dict.fromkeys(
+                            [previous_subject.editorial_role, item.editorial_role]
+                        )),
+                        "depth": "\n".join(dict.fromkeys(
+                            [previous_subject.depth, item.depth]
+                        )),
+                        "allocated_minutes": max(
+                            previous_subject.allocated_minutes,
+                            item.allocated_minutes,
+                        ),
+                    })
+        scaffold = EditorialProjectScaffold(
+            working_title=headers[0].working_title,
+            editorial_promise=headers[0].editorial_promise,
+            narrative_axis=headers[0].narrative_axis,
+            duration_minutes=max(
+                max(part.duration_minutes for part in scaffolds),
+                ceil(sum(item.allocated_minutes for item in by_title.values())),
+            ),
+            source_supported_subjects=list(by_title.values()),
+            corpus_governing_understanding="\n\n".join(
+                part.corpus_governing_understanding for part in scaffolds
+            ),
+            forbidden_inferences=list(dict.fromkeys(
+                inference
+                for part in scaffolds for inference in part.forbidden_inferences
+            )),
+            model_knowledge_suggestions=list(dict.fromkeys(
+                suggestion
+                for part in scaffolds
+                for suggestion in part.model_knowledge_suggestions
+            )),
+            source_enrichment_opportunities=list(dict.fromkeys(
+                opportunity
+                for part in scaffolds
+                for opportunity in part.source_enrichment_opportunities
+            )),
+        )
     subjects = list(scaffold.source_supported_subjects)
     if model_choice and previous is not None:
         subjects = list(previous.source_supported_subjects)
@@ -562,8 +618,8 @@ async def propose_from_matrix(
             item for item in previous.source_supported_subjects
             if item.title.casefold() not in existing_titles
         )
-    if not subjects or len(subjects) > 12:
-        raise ValueError("matrix project has an invalid number of supported subjects")
+    if not subjects:
+        raise ValueError("matrix project has no supported subjects")
     routed = await _route(
         repository, run.execution_run_id, round_number, run.request.brief,
         claims, subjects, call,
@@ -631,22 +687,34 @@ async def propose_from_matrix(
     )
     suggestions_result = None
     if provisional is None and previous is None and round_number == 1:
-        suggestion_prompt = (
-            "Offer two distinct kinds of optional editorial additions for "
-            "this first project. Model-knowledge suggestions must be small "
-            "atomic contributions to existing subjects that need no new "
-            "source and are explicitly not documentary evidence. Source "
-            "enrichment opportunities must be broader gaps or directions "
-            "that require finding a new source. Provide one to three of "
-            "each type. Do not name or fabricate sources.\n"
-            f"BRIEF: {run.request.brief.model_dump_json()}\n"
-            f"SUBJECTS: {json.dumps([item.title for item in subjects], ensure_ascii=False)}\n"
-            f"AXIS: {scaffold.narrative_axis.model_dump_json()}"
-        )
-        suggestions_result = await _cached(
+        suggestion_results = await _packet_call(
             repository, run.execution_run_id, round_number,
-            "matrix_suggestions", suggestion_prompt,
+            "matrix_suggestions", subjects,
+            lambda items: (
+                "Offer two distinct kinds of optional editorial additions "
+                "relevant to THESE subjects. Model-knowledge suggestions must "
+                "be small atomic contributions that need no new source and "
+                "are explicitly not documentary evidence. Source-enrichment "
+                "opportunities must be broader gaps that require a new "
+                "source. Do not fabricate sources.\n"
+                f"BRIEF: {run.request.brief.model_dump_json()}\nSUBJECTS: "
+                + json.dumps([item.title for item in items],
+                             ensure_ascii=False)
+                + f"\nAXIS: {scaffold.narrative_axis.model_dump_json()}"
+            ),
             MatrixSuggestions, call, 1_536,
+        )
+        suggestions_result = MatrixSuggestions(
+            model_knowledge_suggestions=list(dict.fromkeys(
+                suggestion
+                for result in suggestion_results
+                for suggestion in result.model_knowledge_suggestions
+            )),
+            source_enrichment_opportunities=list(dict.fromkeys(
+                opportunity
+                for result in suggestion_results
+                for opportunity in result.source_enrichment_opportunities
+            )),
         )
     duration = max(
         scaffold.duration_minutes,
