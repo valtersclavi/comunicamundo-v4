@@ -115,100 +115,125 @@ async def draft_from_matrix(
         for position, claim in enumerate(chosen):
             packets[min(chunk_count - 1, position * chunk_count // len(chosen))].append(claim)
         pieces: list[str] = []
-        for part, packet in enumerate(packets):
+        async def write_packet(packet: list[dict[str, Any]], part_label: str) -> None:
             if not packet:
-                continue
-            target = max(90, round(word_target / chunk_count))
-            evidence = [{
-                "id": item["claim_id"], "kind": item["kind"],
-                "text": item["statement"], "origin": item["origin"],
-                "sources": sorted({e["source_ordinal"] for e in item["evidence"]}),
-            } for item in packet]
-            prompt = (
-                f"Write one coherent part ({part + 1}/{chunk_count}) of this "
-                f"approved subject in {run.request.brief.output_language}. "
-                f"Aim for about {target} words. Respect the Narrative Axis. "
-                "Use the listed contributions; distinguish model knowledge "
-                "from documentary support, retain limits and contradictions. "
-                "No invented facts, source names, quotes or source ordinals. "
-                "Do not introduce an unrelated subject. Avoid repeated "
-                "openings or conclusions between parts.\n"
-                f"BRIEF: {run.request.brief.model_dump_json()}\n"
-                f"AXIS: {project.narrative_axis.model_dump_json()}\n"
-                f"SUBJECT: {subject.model_dump_json()}\n"
-                f"PREVIOUS ENDING: {pieces[-1][-360:] if pieces else ''}\n"
-                f"CONTRIBUTIONS: {json.dumps(evidence, ensure_ascii=False)}"
-            )
-            draft = await _cached(
-                run, repository, "matrix_section_draft", prompt,
-                SectionText, call, 2_048,
-            )
-            review_prompt = (
-                "Review this one section part against the approved subject "
-                "and its contributions. Identify factual gaps, dropped "
-                "qualifications, unjustified inferences and needless "
-                "repetition. Return only actionable issues.\n"
-                f"SUBJECT: {subject.model_dump_json()}\n"
-                f"CONTRIBUTIONS: {json.dumps(evidence, ensure_ascii=False)}\n"
-                f"DRAFT: {draft.body}"
-            )
-            review = await _cached(
-                run, repository, "matrix_section_review", review_prompt,
-                ContentReviewProposal, call, 1_536,
-            )
-            text = draft.body
-            if review.issues:
-                correction_prompt = (
-                    "Correct only the issues listed. Preserve everything "
-                    "already right. Return the complete corrected section part.\n"
-                    f"DRAFT: {text}\nISSUES: {review.model_dump_json()}"
+                return
+            try:
+                target = max(90, round(word_target / chunk_count))
+                evidence = [{
+                    "id": item["claim_id"], "kind": item["kind"],
+                    "text": item["statement"], "origin": item["origin"],
+                    "sources": sorted({e["source_ordinal"] for e in item["evidence"]}),
+                } for item in packet]
+                prompt = (
+                    f"Write one coherent part ({part_label}) of this "
+                    f"approved subject in {run.request.brief.output_language}. "
+                    f"Allow at least {target} words and expand as needed to cover every contribution. Respect the Narrative Axis. "
+                    "Use the listed contributions; distinguish model knowledge "
+                    "from documentary support, retain limits and contradictions. "
+                    "No invented facts, source names, quotes or source ordinals. "
+                    "Do not introduce an unrelated subject. Avoid repeated "
+                    "openings or conclusions between parts.\n"
+                    f"BRIEF: {run.request.brief.model_dump_json()}\n"
+                    f"AXIS: {project.narrative_axis.model_dump_json()}\n"
+                    f"SUBJECT: {subject.model_dump_json()}\n"
+                    f"PREVIOUS ENDING: {pieces[-1][-360:] if pieces else ''}\n"
+                    f"CONTRIBUTIONS: {json.dumps(evidence, ensure_ascii=False)}"
                 )
-                correction = await _cached(
-                    run, repository, "matrix_section_correction",
-                    correction_prompt, SectionText, call, 2_048,
+                draft = await _cached(
+                    run, repository, "matrix_section_draft", prompt,
+                    SectionText, call, 2_048,
                 )
-                text = correction.body
-            style_prompt = (
-                f"Style this section part for a {run.request.brief.product} "
-                f"for {run.request.brief.audience} in "
-                f"{run.request.brief.output_language}. Preserve every "
-                "substantive idea, limit, fact and uncertainty. Return only "
-                f"the section part, without a title.\nCONTENT: {text}"
-            )
-            styled = await _cached(
-                run, repository, "matrix_section_style", style_prompt,
-                SectionText, call, 2_048,
-            )
-            preservation_prompt = (
-                "Compare content and styled text. Approve only when every "
-                "substantive idea and qualification is preserved.\n"
-                f"CONTENT: {text}\nSTYLED: {styled.body}"
-            )
-            preservation = await _cached(
-                run, repository, "matrix_section_preservation",
-                preservation_prompt, PreservationReviewProposal, call, 1_024,
-            )
-            if not preservation.approved:
-                repair_prompt = (
-                    "Repair only these substantive differences in the "
-                    "styled text; keep its form where possible.\n"
-                    f"CONTENT: {text}\nSTYLED: {styled.body}\n"
-                    f"DIFFERENCES: {preservation.model_dump_json()}"
+                review_prompt = (
+                    "Review this one section part against the approved subject "
+                    "and its contributions. Identify factual gaps, dropped "
+                    "qualifications, unjustified inferences and needless "
+                    "repetition. Return only actionable issues.\n"
+                    f"SUBJECT: {subject.model_dump_json()}\n"
+                    f"CONTRIBUTIONS: {json.dumps(evidence, ensure_ascii=False)}\n"
+                    f"DRAFT: {draft.body}"
                 )
-                repaired = await _cached(
-                    run, repository, "matrix_section_repair",
-                    repair_prompt, SectionText, call, 2_048,
+                review = await _cached(
+                    run, repository, "matrix_section_review", review_prompt,
+                    ContentReviewProposal, call, 1_536,
                 )
-                final_check = await _cached(
-                    run, repository, "matrix_section_recheck",
-                    f"Compare content and styled text for substantive "
-                    f"preservation.\nCONTENT: {text}\nSTYLED: {repaired.body}",
-                    PreservationReviewProposal, call, 1_024,
+                text = draft.body
+                if review.issues:
+                    correction_prompt = (
+                        "Correct only the issues listed. Preserve everything "
+                        "already right. Return the complete corrected section part.\n"
+                        f"DRAFT: {text}\nISSUES: {review.model_dump_json()}"
+                    )
+                    correction = await _cached(
+                        run, repository, "matrix_section_correction",
+                        correction_prompt, SectionText, call, 2_048,
+                    )
+                    text = correction.body
+                style_prompt = (
+                    f"Style this section part for a {run.request.brief.product} "
+                    f"for {run.request.brief.audience} in "
+                    f"{run.request.brief.output_language}. Preserve every "
+                    "substantive idea, limit, fact and uncertainty. Return only "
+                    f"the section part, without a title.\nCONTENT: {text}"
                 )
-                if not final_check.approved:
-                    raise ValueError("matrix section failed preservation review")
-                styled = repaired
-            pieces.append(styled.body.strip())
+                styled = await _cached(
+                    run, repository, "matrix_section_style", style_prompt,
+                    SectionText, call, 2_048,
+                )
+                preservation_prompt = (
+                    "Compare content and styled text. Approve only when every "
+                    "substantive idea and qualification is preserved.\n"
+                    f"CONTENT: {text}\nSTYLED: {styled.body}"
+                )
+                preservation = await _cached(
+                    run, repository, "matrix_section_preservation",
+                    preservation_prompt, PreservationReviewProposal, call, 1_024,
+                )
+                if not preservation.approved:
+                    repair_prompt = (
+                        "Repair only these substantive differences in the "
+                        "styled text; keep its form where possible.\n"
+                        f"CONTENT: {text}\nSTYLED: {styled.body}\n"
+                        f"DIFFERENCES: {preservation.model_dump_json()}"
+                    )
+                    repaired = await _cached(
+                        run, repository, "matrix_section_repair",
+                        repair_prompt, SectionText, call, 2_048,
+                    )
+                    final_check = await _cached(
+                        run, repository, "matrix_section_recheck",
+                        f"Compare content and styled text for substantive "
+                        f"preservation.\nCONTENT: {text}\nSTYLED: {repaired.body}",
+                        PreservationReviewProposal, call, 1_024,
+                    )
+                    if not final_check.approved:
+                        raise ValueError("matrix section failed preservation review")
+                    styled = repaired
+                pieces.append(styled.body.strip())
+            except Exception as error:
+                limited = (
+                    "MAX_TOKENS" in str(error).upper()
+                    or "ATOMIC INPUT BUDGET" in str(error).upper()
+                )
+                if not limited:
+                    raise
+                if len(packet) > 1:
+                    middle = len(packet) // 2
+                    halves = (packet[:middle], packet[middle:])
+                else:
+                    words = packet[0]["statement"].split()
+                    if len(words) < 2:
+                        raise
+                    middle = len(words) // 2
+                    halves = (
+                        [{**packet[0], "statement": " ".join(words[:middle])}],
+                        [{**packet[0], "statement": " ".join(words[middle:])}],
+                    )
+                for part_index, half in enumerate(halves, start=1):
+                    await write_packet(half, f"{part_label}.{part_index}")
+
+        for part, packet in enumerate(packets, start=1):
+            await write_packet(packet, f"{part}/{chunk_count}")
         sections.append(f"{subject.title}\n\n" + "\n\n".join(pieces))
     return FinalTextProposal(
         title=project.working_title,
