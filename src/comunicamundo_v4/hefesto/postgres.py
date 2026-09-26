@@ -206,7 +206,7 @@ class ProductRepository:
                 """UPDATE hefesto_product.submissions
                    SET receipt_payload=receipt_payload || jsonb_build_object(
                          'status', 'updating_project',
-                         'editorial_action', %s,
+                         'editorial_action', %s::text,
                          'editorial_previous_status', receipt_payload->>'status'
                        ),
                        updated_at=now()
