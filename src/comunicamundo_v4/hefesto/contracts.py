@@ -101,7 +101,7 @@ class SourceSelectionProposal(StrictModel):
 
 class SourceCandidateJudgment(StrictModel):
     decision: str = Field(pattern=r"^(acquire|skip)$")
-    covered_subject_indexes: list[int] = Field(default_factory=list, max_length=16)
+    covered_subject_indexes: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def decision_matches_subject_coverage(self) -> "SourceCandidateJudgment":
@@ -336,7 +336,7 @@ class EditorialCondensationProposal(StrictModel):
 class SubjectPassageAssignment(StrictModel):
     source_ordinal: int = Field(ge=1)
     passage_ordinal: int = Field(ge=1)
-    subject_indexes: list[int] = Field(min_length=1, max_length=12)
+    subject_indexes: list[int] = Field(min_length=1)
 
 
 class SubjectPassageRouting(StrictModel):
@@ -398,7 +398,7 @@ class ProvisionalEditorialProject(StrictModel):
     editorial_promise: str = Field(min_length=1)
     narrative_axis: NarrativeAxisProposal
     duration_minutes: int = Field(ge=1)
-    subjects: list[ProvisionalEditorialSubject] = Field(min_length=1, max_length=12)
+    subjects: list[ProvisionalEditorialSubject] = Field(min_length=1)
     disclaimer: str = Field(min_length=1)
 
 
@@ -439,7 +439,7 @@ class EditorialProjectScaffold(StrictModel):
     editorial_promise: str = Field(min_length=1)
     narrative_axis: NarrativeAxisProposal
     duration_minutes: int = Field(ge=1)
-    source_supported_subjects: list[EditorialSubject] = Field(min_length=1, max_length=12)
+    source_supported_subjects: list[EditorialSubject] = Field(min_length=1)
     corpus_governing_understanding: str = Field(min_length=1)
     forbidden_inferences: list[str] = Field(default_factory=list)
     model_knowledge_suggestions: list[str] = Field(default_factory=list)
@@ -451,7 +451,7 @@ class EditorialProjectProposal(StrictModel):
     editorial_promise: str = Field(min_length=1)
     narrative_axis: NarrativeAxisProposal
     duration_minutes: int = Field(ge=1)
-    source_supported_subjects: list[EditorialSubject] = Field(min_length=1, max_length=12)
+    source_supported_subjects: list[EditorialSubject] = Field(min_length=1)
     # The key is required in newly generated projects. PostgreSQL normalizes
     # projects created before the editorial corpus existed to an explicit null.
     editorial_corpus: EditorialCorpus | None
