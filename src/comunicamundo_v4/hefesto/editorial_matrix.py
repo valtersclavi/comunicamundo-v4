@@ -84,12 +84,12 @@ def _prompt(brief: EditorialBrief, passages: Sequence[Passage], titles: dict[int
         f"PASSAGE {_reference_id(item)}: {item.text}" for item in passages
     )
     return f"""Extract distinct editorial contributions from the selected source material.
-Return distinct, short, complete claims. Split compound ideas into separate claims.\nInclude important qualifications,
+Return every distinct, complete claim relevant to the brief. Split compound ideas into separate claims.\nInclude important qualifications,
 limits and contradictions, not only affirmative ideas. If a passage contains no
 contribution relevant to the brief, an empty list is valid. Do not invent evidence
 or cite a passage outside this batch. Every claim must cite its supporting,
 limiting or contradicting passage ID. Do not produce a summary of the whole
-source. Keep statements concise without dropping substantive details.
+source. Preserve each substantive detail; split further when needed.
 
 BRIEF: {brief.model_dump_json()}
 SOURCE: {source} — {titles.get(source) or "untitled"}
@@ -162,14 +162,10 @@ async def _extract_packet(
     prompt = _prompt(brief, packet, titles)
     tokens = await count_tokens(prompt)
     if tokens > INPUT_TOKEN_LIMIT:
-        if len(packet) < 2:
-            raise ValueError("one matrix passage exceeds the input token budget")
-        middle = len(packet) // 2
-        for part in (packet[:middle], packet[middle:]):
-            await _extract_packet(
-                execution_run_id, brief, part, titles, paragraph_ids,
-                existing, split_batches, count_tokens, invoke, repository,
-            )
+        await _split_limited_packet(
+            execution_run_id, brief, packet, titles, paragraph_ids,
+            existing, split_batches, count_tokens, invoke, repository,
+        )
         return
     try:
         result = await invoke(prompt)
