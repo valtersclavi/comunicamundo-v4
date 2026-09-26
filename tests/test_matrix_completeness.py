@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
-from comunicamundo_v4.hefesto.contracts import EditorialBrief, EditorialSubject
+from comunicamundo_v4.hefesto.contracts import (
+    EditorialBrief, EditorialProjectScaffold, EditorialSubject,
+)
+import comunicamundo_v4.hefesto.matrix_synthesis as matrix_synthesis
 from comunicamundo_v4.hefesto.matrix_synthesis import (
     Placements, Themes, _route, _themes,
 )
@@ -121,3 +125,98 @@ def test_writing_does_not_drop_claims_after_forty() -> None:
     assert {item["claim_id"] for item in result} == {
         item["claim_id"] for item in source
     }
+
+
+def test_scaffold_assembles_all_distinct_subjects(monkeypatch) -> None:
+    async def scenario() -> None:
+        repository = WorkRepository()
+        source_claims = claims(17)
+
+        async def matrix_claims(execution_id):
+            return source_claims
+
+        async def remap_matrix_subject_links(execution_id, round_number, indexes):
+            return None
+
+        repository.matrix_claims = matrix_claims
+        repository.remap_matrix_subject_links = remap_matrix_subject_links
+
+        async def route(repository, execution_id, round_number, brief, claims, subjects, call):
+            return {index: list(claims) for index in range(len(subjects))}
+
+        async def relations(*args):
+            return None
+
+        async def reading(repository, execution_id, round_number, subject, claims, call):
+            return matrix_synthesis.SubjectReading(
+                synthesis=subject.title, points=[subject.title],
+            )
+
+        monkeypatch.setattr(matrix_synthesis, "_route", route)
+        monkeypatch.setattr(matrix_synthesis, "_relations", relations)
+        monkeypatch.setattr(matrix_synthesis, "_reading", reading)
+
+        seen_packets = []
+        async def call(task, prompt, schema, output_tokens):
+            if task == "matrix_themes_complete":
+                packet = json.loads(prompt.split("CLAIMS: ", 1)[1])
+                return Themes.model_validate({"items": [
+                    {"title": item["id"], "insight": item["statement"]}
+                    for item in packet
+                ]})
+            if task == "matrix_scaffold_part":
+                packet = json.loads(prompt.split("THEMES: ", 1)[1])
+                seen_packets.append(len(packet))
+                return EditorialProjectScaffold.model_validate({
+                    "working_title": "Complete project",
+                    "editorial_promise": "Cover the distinct evidence",
+                    "narrative_axis": {
+                        "statement": "Preserve the whole picture",
+                        "rationale": "Every contribution matters",
+                    },
+                    "duration_minutes": 10,
+                    "source_supported_subjects": [
+                        {
+                            "title": item["title"],
+                            "editorial_role": item["insight"],
+                            "depth": item["insight"],
+                            "allocated_minutes": 1,
+                        }
+                        for item in packet
+                    ],
+                    "corpus_governing_understanding": "Retain every direction",
+                })
+            if task.startswith("matrix_header_merge"):
+                return matrix_synthesis.ProjectHeader.model_validate({
+                    "working_title": "Complete project",
+                    "editorial_promise": "Cover the distinct evidence",
+                    "narrative_axis": {
+                        "statement": "Preserve the whole picture",
+                        "rationale": "Every contribution matters",
+                    },
+                })
+            if task == "matrix_suggestions":
+                return matrix_synthesis.MatrixSuggestions(
+                    model_knowledge_suggestions=["One small contribution"],
+                    source_enrichment_opportunities=["One documented gap"],
+                )
+            raise AssertionError(task)
+
+        run = SimpleNamespace(
+            execution_run_id=uuid4(),
+            request=SimpleNamespace(
+                brief=brief(),
+                provisional_project=None,
+                existing_editorial_project=None,
+            ),
+            editorial_project=None,
+        )
+        proposal = await matrix_synthesis.propose_from_matrix(
+            run, repository, call,
+        )
+        assert len(proposal.source_supported_subjects) == 17
+        assert len(proposal.editorial_corpus.units) == 17
+        assert sum(seen_packets) == 17
+        assert max(seen_packets) <= 8
+
+    asyncio.run(scenario())
