@@ -1,0 +1,31 @@
+name: Diagnose Hefesto API error
+on:
+  push:
+    paths:
+      - .github/workflows/diagnose-hefesto-api.yml
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: comunicamundo-v4
+          workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+          service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Read bounded API errors
+        run: |
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="hefesto-v4-api" AND timestamp>="2026-09-26T21:30:00Z" AND severity>=ERROR' --project=comunicamundo-v4 --limit=30 --format=json > api-errors.json
+          python - <<'PY'
+          import json
+          with open("api-errors.json") as file:
+              entries=json.load(file)
+          print("API errors:",len(entries))
+          for entry in entries:
+              value=entry.get("textPayload") or entry.get("jsonPayload") or ""
+              print(entry.get("timestamp"),str(value)[-5000:])
+          PY
