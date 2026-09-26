@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       execution_run_id:
-        description: Existing execution UUID; inspection without model calls
+        description: Existing execution UUID; read stored receipt only
         required: true
         type: string
 permissions:
@@ -12,52 +12,33 @@ permissions:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     env:
       PROJECT_ID: comunicamundo-v4
-      REGION: us-central1
+      BUCKET: comunicamundo-v4-hefesto-30524898837
       EXECUTION_ID: ${{ inputs.execution_run_id }}
     steps:
       - name: Validate execution ID
-        run: '[[ "${EXECUTION_ID}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]'
+        run: '[[ "${EXECUTION_ID}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]'
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
           service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Inspect using existing runtime identity
+      - name: Read persisted receipt
         shell: bash
         run: |
-          since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          gcloud run jobs execute hefesto-v4-rebuild \
-            --project="${PROJECT_ID}" --region="${REGION}" \
-            --args="inspect,--execution-run-id=${EXECUTION_ID}" --wait
-          query="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"hefesto-v4-rebuild\" AND timestamp>=\"${since}\""
-          gcloud logging read "${query}" --project="${PROJECT_ID}" --limit=1000 --format=json > "${RUNNER_TEMP}/logs.json"
+          gcloud storage cat "gs://${BUCKET}/hefesto-product/executions/${EXECUTION_ID}/receipt.json" > "${RUNNER_TEMP}/receipt.json"
           python - <<'PY'
           import json, os
           from pathlib import Path
-          entries = json.loads((Path(os.environ["RUNNER_TEMP"]) / "logs.json").read_text())
-          execution_id = os.environ["EXECUTION_ID"]
-          found = False
-          for entry in entries:
-              payload = entry.get("textPayload") or ""
-              if execution_id not in payload or '"usage"' not in payload:
-                  continue
-              try:
-                  receipt = json.loads(payload)
-              except json.JSONDecodeError:
-                  continue
-              if receipt.get("execution_run_id") == execution_id:
-                  print(json.dumps({
-                      "execution_run_id": execution_id,
-                      "status": receipt.get("status"),
-                      "usage": receipt.get("usage"),
-                      "stages": receipt.get("stages"),
-                  }, ensure_ascii=False, indent=2))
-                  found = True
-                  break
-          if not found:
-              raise SystemExit("inspection receipt was not found in Cloud Run logs")
+          receipt = json.loads((Path(os.environ["RUNNER_TEMP"]) / "receipt.json").read_text())
+          assert receipt["execution_run_id"] == os.environ["EXECUTION_ID"]
+          print(json.dumps({
+              "execution_run_id": receipt["execution_run_id"],
+              "status": receipt.get("status"),
+              "usage": receipt.get("usage"),
+              "stages": receipt.get("stages"),
+          }, ensure_ascii=False, indent=2))
           PY
