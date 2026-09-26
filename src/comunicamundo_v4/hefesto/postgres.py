@@ -367,6 +367,12 @@ class ProductRepository:
         if not value:
             return None
         payload = dict(value[0])
+        payload.pop("editorial_engine", None)
+        project_record = payload.get("editorial_project")
+        if isinstance(project_record, dict):
+            proposal = project_record.get("proposal")
+            if isinstance(proposal, dict):
+                proposal.setdefault("editorial_corpus", None)
         project_record = payload.get("editorial_project")
         if isinstance(project_record, dict):
             proposal = project_record.get("proposal")
@@ -374,44 +380,45 @@ class ProductRepository:
                 proposal.setdefault("editorial_corpus", None)
         return ProductRun.model_validate(payload)
 
-    async def clone_editorial_inputs(
-        self, source_execution_id: UUID, target_execution_id: UUID,
-    ) -> dict[str, int]:
-        """Reuse persisted structure and selection for an isolated matrix comparison."""
-        tables = (
-            ("paragraphs", "paragraph_id,source_id,source_ordinal,paragraph_ordinal,text,payload"),
-            ("sentences", "paragraph_id,sentence_id,ordinal,text"),
-            ("source_assets", "asset_id,source_id,source_ordinal,asset_ordinal,kind,role,page_no,caption,text_representation,blob_uri,structured_uri,binary_sha256,payload"),
-            ("paragraph_assets", "paragraph_id,asset_id,relation,distance,is_primary,payload"),
-            ("selection_batches", "batch_id,source_id,source_ordinal,first_passage_ordinal,last_passage_ordinal,input_tokens,payload"),
-        )
-        counts: dict[str, int] = {}
+    async def rollback_enrichment_sources(
+        self, execution_run_id: UUID, source_ids: Sequence[UUID],
+        previous_round: int,
+    ) -> None:
+        """Remove only the rows added for a failed source enrichment."""
         async with self._pool.connection() as connection:
             async with connection.transaction():
-                for table, columns in tables:
+                for source_id in source_ids:
                     await connection.execute(
-                        f"""INSERT INTO hefesto_product.{table}
-                            (execution_run_id,{columns})
-                            SELECT %s,{columns} FROM hefesto_product.{table}
-                            WHERE execution_run_id=%s ON CONFLICT DO NOTHING""",
-                        (target_execution_id, source_execution_id),
+                        """DELETE FROM hefesto_product.selection_batches
+                           WHERE execution_run_id=%s AND source_id=%s""",
+                        (execution_run_id, source_id),
                     )
-                    row = await connection.execute(
-                        f"""SELECT count(*) FROM hefesto_product.{table}
-                            WHERE execution_run_id=%s""",
-                        (target_execution_id,),
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.paragraph_assets
+                           WHERE execution_run_id=%s AND paragraph_id IN (
+                             SELECT paragraph_id FROM hefesto_product.paragraphs
+                             WHERE execution_run_id=%s AND source_id=%s
+                           )""",
+                        (execution_run_id, execution_run_id, source_id),
                     )
-                    counts[table] = (await row.fetchone())[0]
-                    row = await connection.execute(
-                        f"""SELECT count(*) FROM hefesto_product.{table}
-                            WHERE execution_run_id=%s""",
-                        (source_execution_id,),
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.source_assets
+                           WHERE execution_run_id=%s AND source_id=%s""",
+                        (execution_run_id, source_id),
                     )
-                    if counts[table] != (await row.fetchone())[0]:
-                        raise ValueError(f"matrix comparison copied incomplete {table}")
-                if not counts["paragraphs"] or not counts["selection_batches"]:
-                    raise ValueError("matrix comparison requires persisted structure and selection")
-        return counts
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.sentences
+                           WHERE execution_run_id=%s AND paragraph_id IN (
+                             SELECT paragraph_id FROM hefesto_product.paragraphs
+                             WHERE execution_run_id=%s AND source_id=%s
+                           )""",
+                        (execution_run_id, execution_run_id, source_id),
+                    )
+                    await connection.execute(
+                        """DELETE FROM hefesto_product.paragraphs
+                           WHERE execution_run_id=%s AND source_id=%s""",
+                        (execution_run_id, source_id),
+                    )
 
     async def save_structure(
         self,
@@ -531,446 +538,6 @@ class ProductRepository:
             )
             values = await rows.fetchall()
         return [SelectionBatch.model_validate(item[0]) for item in values]
-
-    async def completed_matrix_batches(self, execution_run_id: UUID) -> list[str]:
-        async with self._pool.connection() as connection:
-            cursor = await connection.execute(
-                """SELECT batch_id FROM hefesto_product.editorial_matrix_batches
-                   WHERE execution_run_id=%s AND status='completed'""",
-                (execution_run_id,),
-            )
-            return [str(row[0]).strip() for row in await cursor.fetchall()]
-
-    async def matrix_split_batches(self, execution_run_id: UUID) -> list[str]:
-        async with self._pool.connection() as connection:
-            cursor = await connection.execute(
-                """SELECT batch_id FROM hefesto_product.editorial_matrix_batches
-                   WHERE execution_run_id=%s AND status='failed'
-                     AND (error_message LIKE '%%MAX_TOKENS%%' OR error_message LIKE 'MATRIX_SPLIT:%%')""",
-                (execution_run_id,),
-            )
-            return [str(row[0]).strip() for row in await cursor.fetchall()]
-
-    async def save_matrix_batch(
-        self,
-        execution_run_id: UUID,
-        batch_id: str,
-        version: str,
-        input_tokens: int,
-        coverage: Sequence[dict[str, Any]],
-        claims: Sequence[dict[str, Any]],
-    ) -> None:
-        """Commit claims, references and examined passages in one transaction."""
-        async with self._pool.connection() as connection:
-            async with connection.transaction():
-                row = await connection.execute(
-                    """SELECT status FROM hefesto_product.editorial_matrix_batches
-                       WHERE execution_run_id=%s AND batch_id=%s FOR UPDATE""",
-                    (execution_run_id, batch_id),
-                )
-                previous = await row.fetchone()
-                if previous and previous[0] == "completed":
-                    return
-                await connection.execute(
-                    """INSERT INTO hefesto_product.editorial_matrix_batches
-                       (execution_run_id,batch_id,extraction_version,status,input_tokens,error_message)
-                       VALUES (%s,%s,%s,'completed',%s,NULL)
-                       ON CONFLICT (execution_run_id,batch_id) DO UPDATE SET
-                         status='completed',input_tokens=excluded.input_tokens,
-                         error_message=NULL,updated_at=now()""",
-                    (execution_run_id, batch_id, version, input_tokens),
-                )
-                for item in coverage:
-                    await connection.execute(
-                        """INSERT INTO hefesto_product.editorial_matrix_coverage
-                           (execution_run_id,batch_id,passage_id,paragraph_id,
-                            source_id,source_ordinal)
-                           VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
-                        (
-                            execution_run_id, batch_id, item["passage_id"],
-                            item["paragraph_id"], item["source_id"],
-                            item["source_ordinal"],
-                        ),
-                    )
-                for claim in claims:
-                    await connection.execute(
-                        """INSERT INTO hefesto_product.editorial_claims
-                           (execution_run_id,claim_id,batch_id,origin,kind,statement)
-                           VALUES (%s,%s,%s,'source',%s,%s)
-                           ON CONFLICT DO NOTHING""",
-                        (
-                            execution_run_id, claim["claim_id"], batch_id,
-                            claim["kind"], claim["statement"],
-                        ),
-                    )
-                    for evidence in claim["evidence"]:
-                        await connection.execute(
-                            """INSERT INTO hefesto_product.editorial_claim_evidence
-                               (execution_run_id,claim_id,passage_id,paragraph_id,
-                                source_id,source_ordinal,role)
-                               VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
-                            (
-                                execution_run_id, claim["claim_id"],
-                                evidence["passage_id"], evidence["paragraph_id"],
-                                evidence["source_id"], evidence["source_ordinal"],
-                                evidence["role"],
-                            ),
-                        )
-
-    async def fail_matrix_batch(
-        self,
-        execution_run_id: UUID,
-        batch_id: str,
-        version: str,
-        input_tokens: int,
-        error_message: str,
-    ) -> None:
-        async with self._pool.connection() as connection:
-            await connection.execute(
-                """INSERT INTO hefesto_product.editorial_matrix_batches
-                   (execution_run_id,batch_id,extraction_version,status,
-                    input_tokens,error_message)
-                   VALUES (%s,%s,%s,'failed',%s,%s)
-                   ON CONFLICT (execution_run_id,batch_id) DO UPDATE SET
-                     status='failed',error_message=excluded.error_message,
-                     updated_at=now()
-                   WHERE hefesto_product.editorial_matrix_batches.status <> 'completed'""",
-                (execution_run_id, batch_id, version, input_tokens, error_message),
-            )
-
-    async def matrix_report(self, execution_run_id: UUID) -> dict[str, object]:
-        async with self._pool.connection() as connection:
-            rows = await connection.execute(
-                """SELECT status, count(*) FROM hefesto_product.editorial_matrix_batches
-                   WHERE execution_run_id=%s GROUP BY status""",
-                (execution_run_id,),
-            )
-            statuses = {status: count for status, count in await rows.fetchall()}
-            row = await connection.execute(
-                """SELECT count(*) FROM hefesto_product.editorial_matrix_batches
-                   WHERE execution_run_id=%s AND status='failed'
-                     AND (error_message LIKE '%%MAX_TOKENS%%' OR error_message LIKE 'MATRIX_SPLIT:%%')""",
-                (execution_run_id,),
-            )
-            split_batches = (await row.fetchone())[0]
-            row = await connection.execute(
-                """SELECT count(DISTINCT passage_id),
-                          count(DISTINCT source_id)
-                   FROM hefesto_product.editorial_matrix_coverage
-                   WHERE execution_run_id=%s""",
-                (execution_run_id,),
-            )
-            passages, sources = await row.fetchone()
-            row = await connection.execute(
-                """SELECT count(*) FROM hefesto_product.editorial_claims
-                   WHERE execution_run_id=%s AND status='active'""",
-                (execution_run_id,),
-            )
-            claims = (await row.fetchone())[0]
-        return {
-            "execution_run_id": str(execution_run_id),
-            "completed_batches": statuses.get("completed", 0),
-            "failed_batches": statuses.get("failed", 0) - split_batches,
-            "split_batches": split_batches,
-            "examined_passages": passages,
-            "represented_sources": sources,
-            "source_claims": claims,
-        }
-
-    async def rollback_enrichment_sources(
-        self, execution_run_id: UUID, source_ids: Sequence[UUID],
-        previous_round: int,
-    ) -> None:
-        """Remove only newly appended rows if a point enrichment cannot be used."""
-        if not source_ids:
-            return
-        async with self._pool.connection() as connection:
-            async with connection.transaction():
-                for source_id in source_ids:
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.editorial_subject_claims
-                           WHERE execution_run_id=%s AND round_number>%s""",
-                        (execution_run_id, previous_round),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.editorial_matrix_work
-                           WHERE execution_run_id=%s AND round_number>%s""",
-                        (execution_run_id, previous_round),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.editorial_claim_relations
-                           WHERE execution_run_id=%s AND (
-                             left_claim_id IN (
-                               SELECT claim_id FROM hefesto_product.editorial_claim_evidence
-                               WHERE execution_run_id=%s AND source_id=%s
-                             ) OR right_claim_id IN (
-                               SELECT claim_id FROM hefesto_product.editorial_claim_evidence
-                               WHERE execution_run_id=%s AND source_id=%s
-                             )
-                           )""",
-                        (execution_run_id, execution_run_id, source_id,
-                         execution_run_id, source_id),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.editorial_claim_evidence
-                           WHERE execution_run_id=%s AND source_id=%s""",
-                        (execution_run_id, source_id),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.editorial_claims c
-                           WHERE c.execution_run_id=%s AND c.origin='source'
-                             AND NOT EXISTS (
-                               SELECT 1 FROM hefesto_product.editorial_claim_evidence e
-                               WHERE e.execution_run_id=c.execution_run_id
-                                 AND e.claim_id=c.claim_id
-                             )""",
-                        (execution_run_id,),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.editorial_matrix_coverage
-                           WHERE execution_run_id=%s AND source_id=%s""",
-                        (execution_run_id, source_id),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.editorial_matrix_batches b
-                           WHERE b.execution_run_id=%s
-                             AND NOT EXISTS (
-                               SELECT 1 FROM hefesto_product.editorial_matrix_coverage c
-                               WHERE c.execution_run_id=b.execution_run_id
-                                 AND c.batch_id=b.batch_id
-                             )
-                             AND NOT EXISTS (
-                               SELECT 1 FROM hefesto_product.editorial_claims c
-                               WHERE c.execution_run_id=b.execution_run_id
-                                 AND c.batch_id=b.batch_id
-                             )""",
-                        (execution_run_id,),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.selection_batches
-                           WHERE execution_run_id=%s AND source_id=%s""",
-                        (execution_run_id, source_id),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.paragraph_assets
-                           WHERE execution_run_id=%s AND paragraph_id IN (
-                             SELECT paragraph_id FROM hefesto_product.paragraphs
-                             WHERE execution_run_id=%s AND source_id=%s
-                           )""",
-                        (execution_run_id, execution_run_id, source_id),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.source_assets
-                           WHERE execution_run_id=%s AND source_id=%s""",
-                        (execution_run_id, source_id),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.sentences
-                           WHERE execution_run_id=%s AND paragraph_id IN (
-                             SELECT paragraph_id FROM hefesto_product.paragraphs
-                             WHERE execution_run_id=%s AND source_id=%s
-                           )""",
-                        (execution_run_id, execution_run_id, source_id),
-                    )
-                    await connection.execute(
-                        """DELETE FROM hefesto_product.paragraphs
-                           WHERE execution_run_id=%s AND source_id=%s""",
-                        (execution_run_id, source_id),
-                    )
-
-    async def rollback_model_contribution(
-        self, execution_run_id: UUID, round_number: int, claim_id: str,
-    ) -> None:
-        async with self._pool.connection() as connection:
-            async with connection.transaction():
-                await connection.execute(
-                    """DELETE FROM hefesto_product.editorial_subject_claims
-                       WHERE execution_run_id=%s AND round_number=%s""",
-                    (execution_run_id, round_number),
-                )
-                await connection.execute(
-                    """DELETE FROM hefesto_product.editorial_matrix_work
-                       WHERE execution_run_id=%s AND round_number=%s""",
-                    (execution_run_id, round_number),
-                )
-                await connection.execute(
-                    """DELETE FROM hefesto_product.editorial_claims
-                       WHERE execution_run_id=%s AND claim_id=%s
-                         AND origin='model' AND round_number=%s""",
-                    (execution_run_id, claim_id, round_number),
-                )
-
-    async def save_model_contribution(
-        self, execution_run_id: UUID, round_number: int,
-        suggestion_index: int, statement: str,
-    ) -> str:
-        claim_id = sha256(
-            f"model:{execution_run_id}:{round_number}:{suggestion_index}:"
-            f"{statement}".encode()
-        ).hexdigest()
-        async with self._pool.connection() as connection:
-            await connection.execute(
-                """INSERT INTO hefesto_product.editorial_claims
-                   (execution_run_id,claim_id,round_number,origin,kind,statement)
-                   VALUES (%s,%s,%s,'model','idea',%s)
-                   ON CONFLICT DO NOTHING""",
-                (execution_run_id, claim_id, round_number, statement),
-            )
-        return claim_id
-
-    async def save_matrix_relations(
-        self, execution_run_id: UUID,
-        relations: Sequence[tuple[str, str, str, str]],
-    ) -> None:
-        if not relations:
-            return
-        async with self._pool.connection() as connection:
-            async with connection.transaction():
-                for left, right, relation, rationale in relations:
-                    first, second = sorted((left, right))
-                    await connection.execute(
-                        """INSERT INTO hefesto_product.editorial_claim_relations
-                           (execution_run_id,left_claim_id,right_claim_id,relation,rationale)
-                           VALUES (%s,%s,%s,%s,%s)
-                           ON CONFLICT DO NOTHING""",
-                        (execution_run_id, first, second, relation, rationale),
-                    )
-
-    async def matrix_divergent_claim_ids(self, execution_run_id: UUID) -> set[str]:
-        async with self._pool.connection() as connection:
-            row = await connection.execute(
-                """SELECT left_claim_id FROM hefesto_product.editorial_claim_relations
-                   WHERE execution_run_id=%s AND relation='diverges'
-                   UNION
-                   SELECT right_claim_id FROM hefesto_product.editorial_claim_relations
-                   WHERE execution_run_id=%s AND relation='diverges'""",
-                (execution_run_id, execution_run_id),
-            )
-            return {str(item[0]).strip() for item in await row.fetchall()}
-
-    async def matrix_claims(self, execution_run_id: UUID) -> list[dict[str, Any]]:
-        async with self._pool.connection() as connection:
-            rows = await connection.execute(
-                """SELECT c.claim_id, c.kind, c.statement, c.origin,
-                          e.source_ordinal, e.passage_id, e.role
-                   FROM hefesto_product.editorial_claims c
-                   LEFT JOIN hefesto_product.editorial_claim_evidence e
-                     ON e.execution_run_id=c.execution_run_id
-                    AND e.claim_id=c.claim_id
-                   WHERE c.execution_run_id=%s AND c.status='active'
-                   ORDER BY c.created_at,c.claim_id,e.source_ordinal,e.passage_id""",
-                (execution_run_id,),
-            )
-            values = await rows.fetchall()
-        claims: dict[str, dict[str, Any]] = {}
-        for claim_id, kind, statement, origin, ordinal, passage_id, role in values:
-            claim = claims.setdefault(str(claim_id).strip(), {
-                "claim_id": str(claim_id).strip(), "kind": kind,
-                "statement": statement, "origin": origin, "evidence": [],
-            })
-            if passage_id is not None:
-                claim["evidence"].append({
-                    "source_ordinal": ordinal, "passage_id": str(passage_id).strip(),
-                    "role": role,
-                })
-        return list(claims.values())
-
-    async def remap_matrix_subject_links(
-        self, execution_run_id: UUID, round_number: int,
-        retained_indexes: Sequence[int],
-    ) -> None:
-        async with self._pool.connection() as connection:
-            async with connection.transaction():
-                rows = await connection.execute(
-                    """SELECT subject_index,claim_id,role
-                       FROM hefesto_product.editorial_subject_claims
-                       WHERE execution_run_id=%s AND round_number=%s""",
-                    (execution_run_id, round_number),
-                )
-                assignments = await rows.fetchall()
-                await connection.execute(
-                    """DELETE FROM hefesto_product.editorial_subject_claims
-                       WHERE execution_run_id=%s AND round_number=%s""",
-                    (execution_run_id, round_number),
-                )
-                mapping = {old: new for new, old in enumerate(retained_indexes)}
-                for old, claim_id, role in assignments:
-                    if old in mapping:
-                        await connection.execute(
-                            """INSERT INTO hefesto_product.editorial_subject_claims
-                               (execution_run_id,round_number,subject_index,claim_id,role)
-                               VALUES (%s,%s,%s,%s,%s)""",
-                            (execution_run_id, round_number, mapping[old], claim_id, role),
-                        )
-
-    async def matrix_subject_claim_roles(
-        self, execution_run_id: UUID, round_number: int,
-    ) -> dict[int, list[tuple[str, str]]]:
-        async with self._pool.connection() as connection:
-            rows = await connection.execute(
-                """SELECT subject_index,claim_id,role
-                   FROM hefesto_product.editorial_subject_claims
-                   WHERE execution_run_id=%s AND round_number=%s
-                   ORDER BY subject_index,claim_id""",
-                (execution_run_id, round_number),
-            )
-            result: dict[int, list[tuple[str, str]]] = {}
-            for index, claim_id, role in await rows.fetchall():
-                result.setdefault(index, []).append((str(claim_id).strip(), role))
-            return result
-
-    async def matrix_work(
-        self, execution_run_id: UUID, round_number: int, task: str,
-        unit_id: str, input_digest: str,
-    ) -> dict[str, Any] | None:
-        async with self._pool.connection() as connection:
-            rows = await connection.execute(
-                """SELECT payload FROM hefesto_product.editorial_matrix_work
-                   WHERE execution_run_id=%s AND round_number=%s
-                     AND task=%s AND unit_id=%s AND input_digest=%s""",
-                (execution_run_id, round_number, task, unit_id, input_digest),
-            )
-            row = await rows.fetchone()
-            return dict(row[0]) if row else None
-
-    async def save_matrix_work(
-        self, execution_run_id: UUID, round_number: int, task: str,
-        unit_id: str, input_digest: str, payload: dict[str, Any],
-    ) -> None:
-        async with self._pool.connection() as connection:
-            await connection.execute(
-                """INSERT INTO hefesto_product.editorial_matrix_work
-                   (execution_run_id,round_number,task,unit_id,input_digest,payload)
-                   VALUES (%s,%s,%s,%s,%s,%s::jsonb)
-                   ON CONFLICT (execution_run_id,round_number,task,unit_id)
-                   DO UPDATE SET input_digest=excluded.input_digest,
-                                 payload=excluded.payload,
-                                 created_at=now()
-                   WHERE hefesto_product.editorial_matrix_work.input_digest
-                         <> excluded.input_digest""",
-                (execution_run_id, round_number, task, unit_id, input_digest,
-                 json.dumps(payload, ensure_ascii=False)),
-            )
-
-    async def replace_matrix_subject_links(
-        self, execution_run_id: UUID, round_number: int, subject_index: int,
-        assignments: Sequence[tuple[str, str]],
-    ) -> None:
-        async with self._pool.connection() as connection:
-            async with connection.transaction():
-                await connection.execute(
-                    """DELETE FROM hefesto_product.editorial_subject_claims
-                       WHERE execution_run_id=%s AND round_number=%s
-                         AND subject_index=%s""",
-                    (execution_run_id, round_number, subject_index),
-                )
-                for claim_id, role in assignments:
-                    await connection.execute(
-                        """INSERT INTO hefesto_product.editorial_subject_claims
-                           (execution_run_id,round_number,subject_index,claim_id,role)
-                           VALUES (%s,%s,%s,%s,%s)""",
-                        (execution_run_id, round_number, subject_index, claim_id, role),
-                    )
 
     async def save_condensation(
         self, execution_run_id: UUID, unit: EditorialCondensation

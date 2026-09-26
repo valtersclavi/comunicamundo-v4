@@ -37,7 +37,7 @@ O deploy ocorre em `main`. O workflow testa o contrato completo, constrói uma �
 
 ## Contrato do fluxo editorial
 
-As regras de zero fontes, remoque permanente, sugestões do primeiro Projeto Editorial, enriquecimento pontual com fontes e integração à matriz estão em [docs/hefesto-matriz-fluxo-editorial.md](docs/hefesto-matriz-fluxo-editorial.md). O documento distingue o contrato de produto das partes ainda não implementadas e mantém a ingestão congelada.
+As regras de zero fontes, remoque permanente, sugestões do primeiro Projeto Editorial e enriquecimento pontual com fontes estão em [docs/hefesto-fluxo-editorial.md](docs/hefesto-fluxo-editorial.md). A arquitetura experimental da matriz foi retirada; a ingestão continua congelada.
 
 ## Desenvolvimento
 

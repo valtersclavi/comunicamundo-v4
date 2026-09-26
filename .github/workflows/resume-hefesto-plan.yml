@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       execution_run_id:
-        description: Existing execution with persisted sources and matrix checkpoint
+        description: Existing execution with persisted sources and completed stages
         required: true
         type: string
 permissions:

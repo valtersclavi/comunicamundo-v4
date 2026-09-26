@@ -224,11 +224,8 @@ def _canonical_request(request: EditorialInputRequest) -> tuple[dict[str, Any], 
     return payload, data
 
 
-def _execution_id(
-    request: EditorialInputRequest, data: bytes, engine: str = "legacy"
-) -> UUID:
-    suffix = "" if engine == "legacy" else f":{engine}"
-    return uuid5(request.project_id, f"initial-plan:{sha256(data).hexdigest()}{suffix}")
+def _execution_id(request: EditorialInputRequest, data: bytes) -> UUID:
+    return uuid5(request.project_id, f"initial-plan:{sha256(data).hexdigest()}")
 
 
 class SubmissionService:
@@ -239,11 +236,9 @@ class SubmissionService:
         self._bucket_name = bucket_name
         self._dispatcher = dispatcher
 
-    def submit(self, request: EditorialInputRequest, engine: str = "legacy") -> dict[str, Any]:
-        if engine not in {"legacy", "matrix"}:
-            raise ValueError("unsupported editorial engine")
+    def submit(self, request: EditorialInputRequest) -> dict[str, Any]:
         payload, data = _canonical_request(request)
-        execution_id = _execution_id(request, data, engine)
+        execution_id = _execution_id(request, data)
         prefix = f"hefesto-product/executions/{execution_id}"
         request_uri = persist_json_immutable(
             self._client,
@@ -277,8 +272,6 @@ class SubmissionService:
                 f"--request={request_uri}",
                 f"--execution-run-id={execution_id}",
             ]
-            if engine != "legacy":
-                args.append(f"--engine={engine}")
             operation = self._dispatcher.run(args)
         except Exception as error:
             failed = {
@@ -653,17 +646,14 @@ def create_app(
                     status_code=403,
                     detail="a stored source does not belong to this user",
                 )
-        engine = request.headers.get("x-editorial-engine", "legacy")
-        if engine not in {"legacy", "matrix"}:
-            raise HTTPException(status_code=422, detail="unknown editorial engine")
         payload, data = _canonical_request(editorial_request)
-        execution_id = _execution_id(editorial_request, data, engine)
+        execution_id = _execution_id(editorial_request, data)
         await access.register_submission(
             execution_id, editorial_request.project_id, owner_id, payload
         )
         try:
             result = await asyncio.to_thread(
-                service().submit, editorial_request, engine
+                service().submit, editorial_request
             )
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error

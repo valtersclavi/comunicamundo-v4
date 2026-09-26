@@ -45,9 +45,6 @@ from .contracts import (
     SourceAsset,
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
-from .editorial_matrix import MatrixExtraction, extract_selected_matrix
-from .matrix_synthesis import MatrixSuggestions, propose_from_matrix
-from .matrix_writing import draft_from_matrix
 from .prompts import (
     SYSTEM,
     condensation_prompt,
@@ -96,35 +93,6 @@ class Repository(Protocol):
     async def condensations(
         self, execution_run_id: UUID
     ) -> list[EditorialCondensation]: ...
-    async def completed_matrix_batches(self, execution_run_id: UUID) -> list[str]: ...
-    async def save_matrix_batch(
-        self, execution_run_id: UUID, batch_id: str, version: str,
-        input_tokens: int, coverage: Sequence[dict[str, object]],
-        claims: Sequence[dict[str, object]],
-    ) -> None: ...
-    async def fail_matrix_batch(
-        self, execution_run_id: UUID, batch_id: str, version: str,
-        input_tokens: int, error_message: str,
-    ) -> None: ...
-    async def matrix_split_batches(self, execution_run_id: UUID) -> list[str]: ...
-    async def matrix_claims(self, execution_run_id: UUID) -> list[dict[str, object]]: ...
-    async def matrix_divergent_claim_ids(self, execution_run_id: UUID) -> set[str]: ...
-    async def save_matrix_relations(
-        self, execution_run_id: UUID,
-        relations: Sequence[tuple[str, str, str, str]],
-    ) -> None: ...
-    async def matrix_work(
-        self, execution_run_id: UUID, round_number: int, task: str,
-        unit_id: str, input_digest: str,
-    ) -> dict[str, object] | None: ...
-    async def save_matrix_work(
-        self, execution_run_id: UUID, round_number: int, task: str,
-        unit_id: str, input_digest: str, payload: dict[str, object],
-    ) -> None: ...
-    async def replace_matrix_subject_links(
-        self, execution_run_id: UUID, round_number: int, subject_index: int,
-        assignments: Sequence[tuple[str, str]],
-    ) -> None: ...
     async def work_report(self, execution_run_id: UUID) -> dict[str, object]: ...
     async def record_usage(
         self, execution_run_id: UUID, project_id: UUID, usage: CallUsage
@@ -142,6 +110,11 @@ class Repository(Protocol):
     async def product_receipt(
         self, execution_run_id: UUID
     ) -> dict[str, object] | None: ...
+
+
+class FirstProjectSuggestions(BaseModel):
+    model_knowledge_suggestions: list[str]
+    source_enrichment_opportunities: list[str]
 
 
 class Hefesto:
@@ -244,94 +217,6 @@ class Hefesto:
             await self._fail(run, error)
             raise
 
-    async def extract_matrix(self, execution_run_id: UUID) -> None:
-        """Opt-in matrix build from existing selections; legacy planning stays available."""
-        run = await self._required_run(execution_run_id)
-        if run.state not in {
-            RunState.COMPREHENDING, RunState.PROJECT_PROPOSED,
-            RunState.PROJECT_APPROVED, RunState.TEXT_READY,
-        }:
-            raise ValueError("matrix extraction requires completed source selection")
-        paragraphs = await self._paragraphs(run)
-        passages = passages_from_paragraphs(
-            paragraphs, passage_token_target=self._passage_target
-        )
-        selected = await self._selected_passages(run, passages)
-        if not selected:
-            raise ValueError("matrix extraction requires selected source passages")
-        titles = {
-            ordinal: source.title
-            for ordinal, source in enumerate(run.request.sources, start=1)
-        }
-
-        async def invoke(prompt: str) -> MatrixExtraction:
-            result = await self._call(
-                run, task_type="editorial_matrix_extract", prompt=prompt,
-                schema=MatrixExtraction, max_output_tokens=3_072,
-                thinking_tokens=0,
-            )
-            return result.value
-
-        await extract_selected_matrix(
-            run.execution_run_id, run.request.brief, selected, paragraphs,
-            titles, count_tokens=self._count_tokens, invoke=invoke,
-            repository=self._repository,
-        )
-
-    async def propose_matrix_project(
-        self, execution_run_id: UUID, *, revision_instruction: str | None = None,
-        model_choice: bool = False,
-    ) -> ProductRun:
-        """Build the opt-in editorial project from persisted claims."""
-        run = await self._required_run(execution_run_id)
-        if run.editorial_project is not None and revision_instruction is None:
-            return run
-        if run.state not in {
-            RunState.COMPREHENDING, RunState.PROJECT_PROPOSED,
-            RunState.PROJECT_APPROVED, RunState.TEXT_READY,
-        }:
-            raise ValueError("matrix project requires selected sources")
-        await self.extract_matrix(execution_run_id)
-        round_number = run.editorial_round + (1 if revision_instruction else 0)
-
-        async def call(task: str, prompt: str, schema: type[BaseModel],
-                       output_tokens: int) -> BaseModel:
-            if await self._count_tokens(prompt) > 4_000:
-                raise ValueError(f"{task} exceeds its atomic input budget")
-            result = await self._call(
-                run, task_type=task, prompt=prompt, schema=schema,
-                max_output_tokens=output_tokens, thinking_tokens=0,
-            )
-            return result.value
-
-        try:
-            proposal = await propose_from_matrix(
-                run, self._repository, call, round_number=round_number,
-                revision_instruction=revision_instruction,
-                model_choice=model_choice,
-            )
-            record = EditorialProjectRecord(
-                execution_run_id=run.execution_run_id,
-                project_id=run.project_id,
-                proposal=proposal,
-            )
-            proposed = run.model_copy(update={
-                "state": RunState.PROJECT_PROPOSED,
-                "editorial_project": record,
-                "editorial_round": round_number,
-                "editorial_engine": "matrix",
-                "content_draft": None, "content_review": None,
-                "corrected_content": None, "styled_text": None,
-                "preservation_review": None, "final_text": None,
-                "error_class": None, "error_message": None,
-                "updated_at": datetime.now(UTC),
-            })
-            await self._repository.save_run(proposed)
-            return proposed
-        except Exception as error:
-            await self._fail(run, error)
-            raise
-
     async def propose_project(self, execution_run_id: UUID) -> ProductRun:
         run = await self._required_run(execution_run_id)
         if run.editorial_project is not None:
@@ -401,9 +286,56 @@ class Hefesto:
             )
             await self._repository.save_run(run)
         await self.select(execution_run_id)
-        if run.editorial_engine == "matrix":
-            return await self.propose_matrix_project(execution_run_id)
         return await self.propose_project(execution_run_id)
+
+    async def revise_editorial_project(
+        self, execution_run_id: UUID, instruction: str,
+    ) -> ProductRun:
+        run = await self._required_run(execution_run_id)
+        if run.editorial_project is None or run.state not in {
+            RunState.PROJECT_PROPOSED, RunState.PROJECT_APPROVED, RunState.TEXT_READY,
+        }:
+            raise ValueError("Editorial Project is not available for revision")
+        previous = run.editorial_project.proposal
+        response = await self._call(
+            run, task_type="editorial_project_revision",
+            prompt=(
+                "Revise the editorial project according to the user's instruction. "
+                "Keep source claims grounded in the existing editorial corpus; do "
+                "not discard ideas, tensions, contradictions, or coverage without "
+                "an explicit user request. Preserve all source references and "
+                "distinguish model contributions from documentary evidence. "
+                "Return the complete revised EditorialProjectProposal.\n"
+                f"USER INSTRUCTION: {instruction}\n"
+                f"CURRENT PROJECT: {previous.model_dump_json()}"
+            ),
+            schema=EditorialProjectProposal,
+            max_output_tokens=8_192,
+            thinking_tokens=0,
+        )
+        revised = response.value.model_copy(update={
+            "model_knowledge_suggestions": [],
+            "source_enrichment_opportunities": [],
+        })
+        if not revised.source_supported_subjects:
+            raise ValueError("revision removed every editorial subject")
+        project = run.editorial_project.model_copy(
+            update={"proposal": revised, "approved": False}
+        )
+        active = run.model_copy(update={
+            "request": run.request.model_copy(
+                update={"existing_editorial_project": revised}
+            ),
+            "editorial_project": project,
+            "editorial_round": run.editorial_round + 1,
+            "state": RunState.PROJECT_PROPOSED,
+            "content_draft": None, "content_review": None,
+            "corrected_content": None, "styled_text": None,
+            "preservation_review": None, "final_text": None,
+            "updated_at": datetime.now(UTC),
+        })
+        await self._repository.save_run(active)
+        return active
 
     async def approve_project(self, execution_run_id: UUID) -> ProductRun:
         run = await self._required_run(execution_run_id)
@@ -421,45 +353,6 @@ class Hefesto:
         )
         await self._repository.save_run(run)
         return run
-
-    async def produce_matrix_text(self, execution_run_id: UUID) -> ProductRun:
-        run = await self._required_run(execution_run_id)
-        if run.final_text is not None:
-            return run
-        if run.editorial_project is None or not run.editorial_project.approved:
-            raise ValueError("matrix writing requires an approved Editorial Project")
-        if run.state is RunState.FAILED:
-            run = run.model_copy(update={
-                "state": RunState.PROJECT_APPROVED,
-                "error_class": None, "error_message": None,
-            })
-            await self._repository.save_run(run)
-        run = await self._activate(run, RunState.PRODUCING_TEXT)
-
-        async def call(task: str, prompt: str, schema: type[BaseModel],
-                       output_tokens: int) -> BaseModel:
-            if await self._count_tokens(prompt) > 4_000:
-                raise ValueError(f"{task} exceeds its atomic input budget")
-            result = await self._call(
-                run, task_type=task, prompt=prompt, schema=schema,
-                max_output_tokens=output_tokens, thinking_tokens=0,
-            )
-            return result.value
-
-        try:
-            final = await draft_from_matrix(run, self._repository, call)
-            run = await self._save_artifact(
-                run, content_draft=final, corrected_content=final,
-                styled_text=final,
-                preservation_review=PreservationReviewProposal(
-                    approved=True,
-                    summary="Each section passed local content and preservation checks.",
-                ),
-            )
-            return await self._complete_final_text(run)
-        except Exception as error:
-            await self._fail(await self._required_run(run.execution_run_id), error)
-            raise
 
     async def produce_text(self, execution_run_id: UUID) -> ProductRun:
         run = await self._required_run(execution_run_id)
@@ -586,7 +479,6 @@ class Hefesto:
             "status": run.state.value,
             "project_id": str(run.project_id),
             "execution_run_id": str(run.execution_run_id),
-            "editorial_engine": run.editorial_engine,
             "provisional_editorial_project": (
                 run.request.provisional_project.model_dump(mode="json")
                 if run.request.provisional_project else None
@@ -1296,7 +1188,7 @@ class Hefesto:
             )
             suggestions = (await self._call(
                 run, task_type="editorial_project_suggestions",
-                prompt=suggestion_prompt, schema=MatrixSuggestions,
+                prompt=suggestion_prompt, schema=FirstProjectSuggestions,
                 max_output_tokens=1_536, thinking_tokens=0,
             )).value
         value = EditorialProjectProposal(

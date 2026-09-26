@@ -67,7 +67,7 @@ async def plan(args: argparse.Namespace) -> None:
     if input_request.source_mode is SourceMode.FIND_FOR_ME:
         try:
             await _propose_provisional_project(
-                input_request, execution_id, client, bucket_name, getattr(args, "engine", "legacy"),
+                input_request, execution_id, client, bucket_name,
             )
         except Exception as error:
             await _record_pre_run_failure(
@@ -226,9 +226,7 @@ async def plan(args: argparse.Namespace) -> None:
         prepared = await hefesto.prepare(
             ingestion.request, execution_run_id=execution_id
         )
-        await repository.save_run(prepared.model_copy(
-            update={"editorial_engine": getattr(args, "engine", "legacy")}
-        ))
+        await repository.save_run(prepared)
         stages.append({
             "stage": "relational_structure",
             "duration_ms": int((perf_counter() - started) * 1000),
@@ -254,7 +252,6 @@ async def _propose_provisional_project(
     execution_id: UUID,
     client: storage.Client,
     bucket_name: str,
-    engine: str = "legacy",
 ) -> None:
     from .contracts import EditorialInputRequest
 
@@ -276,7 +273,6 @@ async def _propose_provisional_project(
         }
         receipt = {
             "status": "provisional_project_proposed",
-            "editorial_engine": engine,
             "project_id": str(request.project_id),
             "execution_run_id": str(execution_id),
             "provisional_editorial_project": result.value.model_dump(mode="json"),
@@ -398,9 +394,7 @@ async def source_search(execution_id: UUID) -> None:
         })
         hefesto = Hefesto(repository, gateway)
         prepared = await hefesto.prepare(ingestion.request, execution_run_id=execution_id)
-        await repository.save_run(prepared.model_copy(
-            update={"editorial_engine": receipt.get("editorial_engine", "legacy")}
-        ))
+        await repository.save_run(prepared)
         provisional_calls = list((receipt.get("usage") or {}).get("calls") or [])
         for provisional_usage in provisional_calls:
             await repository.record_usage(
@@ -534,9 +528,7 @@ async def revise_project(execution_id: UUID, instruction_uri: str) -> None:
             raise ValueError("Editorial Project is not awaiting revision")
         prior_receipt = await repository.product_receipt(execution_id)
         try:
-            await hefesto.propose_matrix_project(
-                execution_id, revision_instruction=message,
-            )
+            await hefesto.revise_editorial_project(execution_id, message)
             await _persist_product_receipt(hefesto, client, execution_id, [])
         except Exception:
             await repository.save_run(run)
@@ -558,24 +550,15 @@ async def accept_model_suggestion(execution_id: UUID, index: int) -> None:
             raise ValueError("unknown model suggestion")
         statement = suggestions[index]
         prior_receipt = await repository.product_receipt(execution_id)
-        claim_id = await repository.save_model_contribution(
-            execution_id, run.editorial_round + 1, index, statement,
-        )
         try:
-            await hefesto.propose_matrix_project(
+            await hefesto.revise_editorial_project(
                 execution_id,
-                revision_instruction=(
-                    "Integrate this small model-knowledge contribution into the "
-                    "relevant existing subject without presenting it as sourced "
-                    f"evidence: {statement}"
-                ),
-                model_choice=True,
+                "Integrate this small model-knowledge contribution into the "
+                "relevant existing subject without presenting it as sourced "
+                f"evidence: {statement}",
             )
             await _persist_product_receipt(hefesto, client, execution_id, [])
         except Exception:
-            await repository.rollback_model_contribution(
-                execution_id, run.editorial_round + 1, claim_id,
-            )
             await repository.save_run(run)
             await _restore_editable_receipt(repository, execution_id, prior_receipt)
             raise
@@ -631,7 +614,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             await repository.record_usage(execution_id, original.project_id, usage)
         isolated_project_id = uuid5(
             original.project_id,
-            "matrix-source:"
+            "editorial-source:"
             + str(original.editorial_project.editorial_project_id)
             + f":{index}:"
             + ":".join(sorted(result.selection.selected_candidate_ids)),
@@ -675,21 +658,22 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         active = original.model_copy(update={
             "request": request, "editorial_project": None,
             "editorial_round": original.editorial_round + 1,
-            "editorial_engine": "matrix",
             "state": RunState.SOURCE_STRUCTURE_READY,
             "error_class": None, "error_message": None,
         })
         await repository.save_run(active)
         await hefesto.select(execution_id)
-        await hefesto.extract_matrix(execution_id)
-        claims = await repository.matrix_claims(execution_id)
-        if not any(
-            item["origin"] == "source"
-            and any(e["source_ordinal"] > offset for e in item["evidence"])
-            for item in claims
-        ):
-            raise ValueError("new source did not contribute to the proposed enrichment")
-        await hefesto.propose_matrix_project(execution_id)
+        selected_new = [
+            batch for batch in await repository.selection_batches(execution_id)
+            if batch.source_id in added_ids and (
+                batch.flags.relevant or batch.flags.central
+                or batch.flags.uncertain or batch.flags.include_previous
+                or batch.flags.include_next
+            )
+        ]
+        if not selected_new:
+            raise ValueError("new source contains no selected material for this enrichment")
+        await hefesto.propose_project(execution_id)
         await _persist_product_receipt(hefesto, client, execution_id, [])
     except Exception:
         if added_ids:
@@ -698,139 +682,6 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             )
         await repository.save_run(original)
         await _restore_editable_receipt(repository, execution_id, prior_receipt)
-        raise
-    finally:
-        await repository.close()
-
-
-async def fresh_matrix_plan(reference_id: UUID, execution_id: UUID) -> None:
-    """Run the normal plan path anew from the original stored source request."""
-    if execution_id == reference_id:
-        raise ValueError("new execution ID must differ from reference")
-    client = storage_client()
-    request_uri = (
-        f"gs://{required('HEFESTO_GCS_BUCKET')}/hefesto-product/"
-        f"executions/{reference_id}/input-request.json"
-    )
-    input_request = load_input_request(client, uri=request_uri)
-    repository = ProductRepository(required("HEFESTO_POSTGRES_URL"))
-    await repository.open()
-    try:
-        owner = await repository.submission_owner(reference_id)
-        submission = await repository.submission_request(reference_id)
-        if owner is None or submission is None:
-            raise ValueError("reference submission is missing")
-        if input_request.model_dump(mode="json") != submission.model_dump(mode="json"):
-            raise ValueError("stored request does not match the reference submission")
-        if await repository.get_run(execution_id) is not None:
-            raise ValueError("new execution ID already exists")
-        await repository.register_submission(
-            execution_id, input_request.project_id, owner,
-            submission.model_dump(mode="json"),
-        )
-    finally:
-        await repository.close()
-    await plan(argparse.Namespace(
-        request=request_uri, execution_run_id=execution_id, engine="matrix",
-    ))
-
-
-async def compare_matrix_project(reference_id: UUID, comparison_id: UUID | None = None) -> UUID:
-    """Produce a separate project from persisted source paragraphs and selection."""
-    comparison_id = comparison_id or uuid5(reference_id, "matrix-comparison-v1")
-    if comparison_id == reference_id:
-        raise ValueError("comparison execution ID must differ from reference")
-    client = storage_client()
-    repository, hefesto = await services()
-    try:
-        reference = await repository.get_run(reference_id)
-        reference_receipt = await repository.product_receipt(reference_id)
-        owner = await repository.submission_owner(reference_id)
-        submission = await repository.submission_request(reference_id)
-        if (reference is None or reference.editorial_project is None
-                or reference_receipt is None or owner is None or submission is None):
-            raise ValueError("reference requires a persisted Editorial Project and submission")
-        existing = await repository.get_run(comparison_id)
-        if existing is not None:
-            existing_receipt = await repository.product_receipt(comparison_id)
-            if (existing_receipt or {}).get("comparison_reference_execution_run_id") != str(reference_id):
-                raise ValueError("comparison execution ID belongs to another run")
-        if existing is not None and existing.editorial_project is not None:
-            print(json.dumps({
-                "status": "project_proposed",
-                "reference_execution_run_id": str(reference_id),
-                "comparison_execution_run_id": str(comparison_id),
-            }), flush=True)
-            return comparison_id
-        if existing is None:
-            active = reference.model_copy(update={
-                "execution_run_id": comparison_id,
-                "state": RunState.COMPREHENDING,
-                "editorial_project": None,
-                "editorial_round": 1,
-                "editorial_engine": "matrix",
-                "content_draft": None, "content_review": None,
-                "corrected_content": None, "styled_text": None,
-                "preservation_review": None, "final_text": None,
-                "error_class": None, "error_message": None,
-                "created_at": datetime.now(UTC),
-                "updated_at": datetime.now(UTC),
-            })
-            await repository.save_run(active)
-            counts = await repository.clone_editorial_inputs(
-                reference_id, comparison_id,
-            )
-            await repository.register_submission(
-                comparison_id, reference.project_id, owner,
-                submission.model_dump(mode="json"),
-            )
-            initial = {
-                "status": "comprehending",
-                "execution_run_id": str(comparison_id),
-                "project_id": str(reference.project_id),
-                "editorial_engine": "matrix",
-                "comparison_reference_execution_run_id": str(reference_id),
-                "input": {
-                    **(reference_receipt.get("input") or {}),
-                    "status": "reused_persisted_structure",
-                    "reused_from_execution_run_id": str(reference_id),
-                },
-                "stages": [{
-                    "stage": "source_reuse", "status": "completed",
-                    "duration_ms": 0, **counts,
-                }],
-                "generated_at": datetime.now(UTC).isoformat(),
-            }
-            await repository.record_product_receipt(comparison_id, initial)
-        else:
-            await repository.clone_editorial_inputs(reference_id, comparison_id)
-            active = existing.model_copy(update={
-                "state": RunState.COMPREHENDING,
-                "editorial_project": None,
-                "error_class": None, "error_message": None,
-                "updated_at": datetime.now(UTC),
-            })
-            await repository.save_run(active)
-        await hefesto.propose_matrix_project(comparison_id)
-        await _persist_product_receipt(hefesto, client, comparison_id, [{
-            "stage": "source_reuse", "status": "completed", "duration_ms": 0,
-        }, {
-            "stage": "editorial_comprehension", "status": "completed",
-            "duration_ms": 0,
-        }])
-        return comparison_id
-    except Exception as error:
-        receipt = await repository.product_receipt(comparison_id)
-        if receipt is not None:
-            await repository.record_product_receipt(comparison_id, {
-                **receipt, "status": "failed",
-                "last_action_error": {
-                    "action": "compare-matrix", "error_class": type(error).__name__,
-                    "error_message": str(error)[:4000],
-                    "updated_at": datetime.now(UTC).isoformat(),
-                },
-                "generated_at": datetime.now(UTC).isoformat(),
-            })
         raise
     finally:
         await repository.close()
@@ -874,11 +725,7 @@ async def _continue_to_project(
         await hefesto.record_stages(execution_id, [{
             "stage": active_stage, "status": "running", "duration_ms": 0,
         }])
-        active = await hefesto._required_run(execution_id)
-        if active.editorial_engine == "matrix":
-            await hefesto.propose_matrix_project(execution_id)
-        else:
-            await hefesto.propose_project(execution_id)
+        await hefesto.propose_project(execution_id)
         stages.append({
             "stage": active_stage,
             "status": "completed",
@@ -942,11 +789,7 @@ async def _continue_to_text(
     execution_id: UUID,
 ) -> None:
     try:
-        run = await repository.get_run(execution_id)
-        if run is not None and run.editorial_engine == "matrix":
-            await hefesto.produce_matrix_text(execution_id)
-        else:
-            await hefesto.produce_text(execution_id)
+        await hefesto.produce_text(execution_id)
     except Exception:
         await _persist_product_receipt(hefesto, client, execution_id, [])
         raise
@@ -1039,10 +882,6 @@ async def _persist_product_receipt(
     stored_counts = await hefesto.structure_counts(execution_id) if ingestion is not None else {}
     receipt = {
         **(await hefesto.receipt(execution_id)),
-        "comparison_reference_execution_run_id": (
-            previous_receipt.get("comparison_reference_execution_run_id")
-            if isinstance(previous_receipt, dict) else None
-        ),
         "input": (
             {
                 "status": ingestion.receipt.status,
@@ -1315,21 +1154,6 @@ async def run(args: argparse.Namespace) -> None:
             dispatch_key=args.dispatch_key,
         )
         return
-    if args.command == "fresh-matrix-plan":
-        await fresh_matrix_plan(args.reference_execution_run_id, args.execution_run_id)
-        return
-    if args.command == "compare-matrix":
-        await compare_matrix_project(args.execution_run_id, args.comparison_execution_run_id)
-        return
-    if args.command == "extract-matrix":
-        repository, hefesto = await services()
-        try:
-            await hefesto.extract_matrix(args.execution_run_id)
-            report = await repository.matrix_report(args.execution_run_id)
-            print(json.dumps(report, ensure_ascii=False, sort_keys=True), flush=True)
-        finally:
-            await repository.close()
-        return
     if args.command == "enrich-project-source":
         try:
             await enrich_project_source(args.execution_run_id, args.index)
@@ -1438,15 +1262,6 @@ def parser() -> argparse.ArgumentParser:
     planning = commands.add_parser("plan")
     _input_transport(planning)
     planning.add_argument("--execution-run-id", type=UUID)
-    planning.add_argument("--engine", choices=["legacy", "matrix"], default="legacy")
-    fresh = commands.add_parser("fresh-matrix-plan")
-    fresh.add_argument("--reference-execution-run-id", type=UUID, required=True)
-    fresh.add_argument("--execution-run-id", type=UUID, required=True)
-    comparison = commands.add_parser("compare-matrix")
-    comparison.add_argument("--execution-run-id", type=UUID, required=True)
-    comparison.add_argument("--comparison-execution-run-id", type=UUID)
-    matrix = commands.add_parser("extract-matrix")
-    matrix.add_argument("--execution-run-id", type=UUID, required=True)
     revision = commands.add_parser("revise-project")
     revision.add_argument("--execution-run-id", type=UUID, required=True)
     revision.add_argument("--instruction", required=True)
