@@ -50,6 +50,12 @@ class Placements(BaseModel):
     items: list[ClaimPlacement] = Field(default_factory=list)
 
 
+class ClaimDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subject_indexes: list[int] = Field(default_factory=list)
+    role: str = Field(pattern="^(core|context|tension|qualification)$")
+
+
 class ClaimRelation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     left_claim_id: str
@@ -277,9 +283,60 @@ async def _route(
                 "matrix_claim_routing_repair", repair_prompt, Placements,
                 call, 2_048,
             )
-            placements = repaired.items
-            if not valid(placements):
-                raise ValueError("matrix route repair still contains invalid claim IDs or indexes")
+            # Keep valid assignments from both responses. The model may still
+            # miscopy a long ID in the repair response; decide missing claims
+            # individually without asking it to reproduce their IDs.
+            candidates = [*placements, *repaired.items]
+            retained: dict[str, ClaimPlacement] = {}
+            for item in candidates:
+                if item.claim_id not in known:
+                    continue
+                indexes = [
+                    index for index in item.subject_indexes
+                    if 0 <= index < len(subjects)
+                ]
+                if item.claim_id not in retained:
+                    retained[item.claim_id] = item.model_copy(
+                        update={"subject_indexes": indexes}
+                    )
+                else:
+                    prior = retained[item.claim_id]
+                    retained[item.claim_id] = prior.model_copy(update={
+                        "subject_indexes": sorted(
+                            set(prior.subject_indexes) | set(indexes)
+                        )
+                    })
+            for claim_id, claim in known.items():
+                if claim_id in retained:
+                    continue
+                prompt = (
+                    "Route this ONE source claim to relevant editorial subjects. "
+                    "Return only subject_indexes and role; the claim ID is managed "
+                    "by the program. An empty subject_indexes list is valid.\n"
+                    "SUBJECTS: " + json.dumps(
+                        [{"index": i, "title": subject.title}
+                         for i, subject in enumerate(subjects)],
+                        ensure_ascii=False,
+                    ) + "\nCLAIM: " + json.dumps(
+                        _claim_input(claim), ensure_ascii=False
+                    )
+                )
+                decision = await _cached(
+                    repository, execution_id, round_number,
+                    "matrix_claim_routing_single", prompt, ClaimDecision,
+                    call, 768,
+                )
+                if any(
+                    index < 0 or index >= len(subjects)
+                    for index in decision.subject_indexes
+                ):
+                    raise ValueError("individual matrix route contains an unknown subject")
+                retained[claim_id] = ClaimPlacement(
+                    claim_id=claim_id,
+                    subject_indexes=decision.subject_indexes,
+                    role=decision.role,
+                )
+            placements = list(retained.values())
         for placement in placements:
             for index in set(placement.subject_indexes):
                 routed[index].append(known[placement.claim_id])
