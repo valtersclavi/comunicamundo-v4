@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       execution_run_id:
-        description: Existing execution UUID; read-only usage report
+        description: Existing execution UUID; inspection without model calls
         required: true
         type: string
 permissions:
@@ -15,86 +15,49 @@ jobs:
     timeout-minutes: 10
     env:
       PROJECT_ID: comunicamundo-v4
+      REGION: us-central1
       EXECUTION_ID: ${{ inputs.execution_run_id }}
     steps:
+      - name: Validate execution ID
+        run: '[[ "${EXECUTION_ID}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]'
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ env.PROJECT_ID }}
           workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
           service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Read recorded calls and stages only
+      - name: Inspect using existing runtime identity
         shell: bash
         run: |
-          python -m pip install --quiet 'psycopg[binary]'
+          since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gcloud run jobs execute hefesto-v4-rebuild \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --args="inspect,--execution-run-id=${EXECUTION_ID}" --wait
+          query="resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"hefesto-v4-rebuild\" AND timestamp>=\"${since}\""
+          gcloud logging read "${query}" --project="${PROJECT_ID}" --limit=1000 --format=json > "${RUNNER_TEMP}/logs.json"
           python - <<'PY'
-          import json
-          import os
-          import subprocess
-          import uuid
-          from collections import defaultdict
-          from decimal import Decimal
-          import psycopg
-
-          execution_id = str(uuid.UUID(os.environ["EXECUTION_ID"]))
-          dsn = subprocess.check_output([
-              "gcloud", "secrets", "versions", "access", "latest",
-              "--secret=hefesto-postgres-pooler-url",
-              "--project=" + os.environ["PROJECT_ID"],
-          ], text=True).strip()
-          try:
-              with psycopg.connect(dsn, connect_timeout=15) as connection:
-                  connection.execute("SET default_transaction_read_only = on")
-                  with connection.cursor() as cursor:
-                      cursor.execute("""
-                          SELECT task_type, status, prompt_tokens, cached_tokens,
-                                 output_tokens, reasoning_tokens, total_tokens,
-                                 latency_ms, rated_cost_usd
-                          FROM hefesto_product.call_usage
-                          WHERE execution_run_id = %s
-                          ORDER BY id
-                      """, (execution_id,))
-                      calls = cursor.fetchall()
-                      cursor.execute("""
-                          SELECT stage, status, duration_ms
-                          FROM hefesto_product.stage_receipts
-                          WHERE execution_run_id = %s
-                          ORDER BY updated_at, stage
-                      """, (execution_id,))
-                      stages = cursor.fetchall()
-          finally:
-              del dsn
-
-          def empty():
-              return dict(calls=0, prompt_tokens=0, cached_tokens=0,
-                          output_tokens=0, reasoning_tokens=0, total_tokens=0,
-                          provider_latency_ms=0, rated_cost_usd=Decimal("0"))
-          total = empty()
-          tasks = defaultdict(empty)
-          for task, status, prompt, cached, output, reasoning, tokens, latency, cost in calls:
-              for group in (total, tasks[(task, status)]):
-                  group["calls"] += 1
-                  for key, value in (
-                      ("prompt_tokens", prompt), ("cached_tokens", cached),
-                      ("output_tokens", output), ("reasoning_tokens", reasoning),
-                      ("total_tokens", tokens), ("provider_latency_ms", latency)
-                  ):
-                      group[key] += value or 0
-                  group["rated_cost_usd"] += Decimal(cost or "0")
-          def serial(group):
-              return {key: str(value) if isinstance(value, Decimal) else value
-                      for key, value in group.items()}
-          report = {
-              "execution_run_id": execution_id,
-              "totals": serial(total),
-              "by_task": [
-                  dict(task=task, status=status, **serial(value))
-                  for (task, status), value in sorted(tasks.items())
-              ],
-              "stages": [
-                  dict(stage=stage, status=status, duration_ms=duration)
-                  for stage, status, duration in stages
-              ],
-          }
-          print(json.dumps(report, ensure_ascii=False, indent=2))
+          import json, os
+          from pathlib import Path
+          entries = json.loads((Path(os.environ["RUNNER_TEMP"]) / "logs.json").read_text())
+          execution_id = os.environ["EXECUTION_ID"]
+          found = False
+          for entry in entries:
+              payload = entry.get("textPayload") or ""
+              if execution_id not in payload or '"usage"' not in payload:
+                  continue
+              try:
+                  receipt = json.loads(payload)
+              except json.JSONDecodeError:
+                  continue
+              if receipt.get("execution_run_id") == execution_id:
+                  print(json.dumps({
+                      "execution_run_id": execution_id,
+                      "status": receipt.get("status"),
+                      "usage": receipt.get("usage"),
+                      "stages": receipt.get("stages"),
+                  }, ensure_ascii=False, indent=2))
+                  found = True
+                  break
+          if not found:
+              raise SystemExit("inspection receipt was not found in Cloud Run logs")
           PY
