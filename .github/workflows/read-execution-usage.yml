@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       execution_run_id:
-        description: Existing execution UUID; read stored receipt only
+        description: Existing execution UUID; read logged receipt only
         required: true
         type: string
 permissions:
@@ -15,7 +15,6 @@ jobs:
     timeout-minutes: 5
     env:
       PROJECT_ID: comunicamundo-v4
-      BUCKET: comunicamundo-v4-hefesto-30524898837
       EXECUTION_ID: ${{ inputs.execution_run_id }}
     steps:
       - name: Validate execution ID
@@ -26,19 +25,31 @@ jobs:
           workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
           service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Read persisted receipt
+      - name: Read inspection receipt from Cloud Logging
         shell: bash
         run: |
-          gcloud storage cat "gs://${BUCKET}/hefesto-product/executions/${EXECUTION_ID}/receipt.json" > "${RUNNER_TEMP}/receipt.json"
+          query='resource.type="cloud_run_job" AND resource.labels.job_name="hefesto-v4-rebuild" AND timestamp>="2026-09-26T20:46:15Z"'
+          gcloud logging read "${query}" --project="${PROJECT_ID}" --limit=5000 --format=json > "${RUNNER_TEMP}/logs.json"
           python - <<'PY'
           import json, os
           from pathlib import Path
-          receipt = json.loads((Path(os.environ["RUNNER_TEMP"]) / "receipt.json").read_text())
-          assert receipt["execution_run_id"] == os.environ["EXECUTION_ID"]
-          print(json.dumps({
-              "execution_run_id": receipt["execution_run_id"],
-              "status": receipt.get("status"),
-              "usage": receipt.get("usage"),
-              "stages": receipt.get("stages"),
-          }, ensure_ascii=False, indent=2))
+          entries = json.loads((Path(os.environ["RUNNER_TEMP"]) / "logs.json").read_text())
+          execution_id = os.environ["EXECUTION_ID"]
+          print("log_entries:", len(entries))
+          for entry in entries:
+              payload = entry.get("textPayload") or entry.get("jsonPayload") or ""
+              raw = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+              if execution_id not in raw:
+                  continue
+              try:
+                  receipt = json.loads(raw)
+              except json.JSONDecodeError:
+                  print("matching_log:", raw[:10000])
+                  continue
+              print(json.dumps({
+                  "execution_run_id": execution_id,
+                  "status": receipt.get("status"),
+                  "usage": receipt.get("usage"),
+                  "stages": receipt.get("stages"),
+              }, ensure_ascii=False, indent=2))
           PY
