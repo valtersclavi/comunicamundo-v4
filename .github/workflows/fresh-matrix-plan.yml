@@ -1,0 +1,39 @@
+name: Fresh matrix plan from stored sources
+on:
+  workflow_dispatch:
+    inputs:
+      reference_execution_run_id:
+        description: Published reference whose four original source files will be reused
+        required: true
+        type: string
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  fresh-matrix-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    env:
+      PROJECT_ID: comunicamundo-v4
+      REGION: us-central1
+      JOB_NAME: hefesto-v4-rebuild
+      REFERENCE: ${{ inputs.reference_execution_run_id }}
+    steps:
+      - name: Prepare new plan
+        run: |
+          [[ "${REFERENCE}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+          EXECUTION="$(python -c 'import uuid; print(uuid.uuid4())')"
+          echo "EXECUTION=${EXECUTION}" >> "${GITHUB_ENV}"
+          echo "New execution ID: ${EXECUTION}" >> "${GITHUB_STEP_SUMMARY}"
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+          service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Run full plan with original stored files and matrix
+        run: |
+          gcloud run jobs execute "${JOB_NAME}" \
+            --project="${PROJECT_ID}" --region="${REGION}" \
+            --args="fresh-matrix-plan,--reference-execution-run-id=${REFERENCE},--execution-run-id=${EXECUTION}" \
+            --wait

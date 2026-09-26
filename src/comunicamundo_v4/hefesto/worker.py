@@ -703,6 +703,38 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         await repository.close()
 
 
+async def fresh_matrix_plan(reference_id: UUID, execution_id: UUID) -> None:
+    """Run the normal plan path anew from the original stored source request."""
+    if execution_id == reference_id:
+        raise ValueError("new execution ID must differ from reference")
+    client = storage_client()
+    request_uri = (
+        f"gs://{required('HEFESTO_GCS_BUCKET')}/hefesto-product/"
+        f"executions/{reference_id}/input-request.json"
+    )
+    input_request = load_input_request(client, uri=request_uri)
+    repository = ProductRepository(required("HEFESTO_POSTGRES_URL"))
+    await repository.open()
+    try:
+        owner = await repository.submission_owner(reference_id)
+        submission = await repository.submission_request(reference_id)
+        if owner is None or submission is None:
+            raise ValueError("reference submission is missing")
+        if input_request.model_dump(mode="json") != submission.model_dump(mode="json"):
+            raise ValueError("stored request does not match the reference submission")
+        if await repository.get_run(execution_id) is not None:
+            raise ValueError("new execution ID already exists")
+        await repository.register_submission(
+            execution_id, input_request.project_id, owner,
+            submission.model_dump(mode="json"),
+        )
+    finally:
+        await repository.close()
+    await plan(argparse.Namespace(
+        request=request_uri, execution_run_id=execution_id, engine="matrix",
+    ))
+
+
 async def compare_matrix_project(reference_id: UUID, comparison_id: UUID | None = None) -> UUID:
     """Produce a separate project from persisted source paragraphs and selection."""
     comparison_id = comparison_id or uuid5(reference_id, "matrix-comparison-v1")
@@ -1283,6 +1315,9 @@ async def run(args: argparse.Namespace) -> None:
             dispatch_key=args.dispatch_key,
         )
         return
+    if args.command == "fresh-matrix-plan":
+        await fresh_matrix_plan(args.reference_execution_run_id, args.execution_run_id)
+        return
     if args.command == "compare-matrix":
         await compare_matrix_project(args.execution_run_id, args.comparison_execution_run_id)
         return
@@ -1404,6 +1439,9 @@ def parser() -> argparse.ArgumentParser:
     _input_transport(planning)
     planning.add_argument("--execution-run-id", type=UUID)
     planning.add_argument("--engine", choices=["legacy", "matrix"], default="legacy")
+    fresh = commands.add_parser("fresh-matrix-plan")
+    fresh.add_argument("--reference-execution-run-id", type=UUID, required=True)
+    fresh.add_argument("--execution-run-id", type=UUID, required=True)
     comparison = commands.add_parser("compare-matrix")
     comparison.add_argument("--execution-run-id", type=UUID, required=True)
     comparison.add_argument("--comparison-execution-run-id", type=UUID)
