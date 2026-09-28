@@ -157,8 +157,8 @@ def selection_prompt(
     allowed = [item.ordinal for item in passages]
     return f"""
 Scan these passages once against the ideas, questions and intended scope already
-defined by the complete brief. This is routing, not summarization or editorial
-analysis: select material because it can evidence, qualify, limit or contradict
+defined by the complete brief. This is routing, not
+summarization or editorial analysis: select material because it can evidence, qualify, limit or contradict
 that briefing-led direction, never because it merely supplies another topic.
 Return only compact integer flags.
 
