@@ -596,6 +596,7 @@ class Hefesto:
             by_source[passage.source_ordinal].append(passage)
         measured: list[tuple[str, str, int, list[Passage]]] = []
         for source_ordinal, source_passages in by_source.items():
+            source_passages.sort(key=lambda item: item.ordinal)
             candidates = candidate_packets(
                 source_passages,
                 token_budget=self._selection_budget * 3 // 4,
