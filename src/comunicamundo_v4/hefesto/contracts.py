@@ -459,6 +459,14 @@ class EditorialProjectProposal(StrictModel):
     source_enrichment_opportunities: list[str] = Field(default_factory=list)
 
 
+class EditorialProjectRevisionHeader(StrictModel):
+    """Project-level fields revised without reproducing the documentary corpus."""
+
+    working_title: str = Field(min_length=1)
+    editorial_promise: str = Field(min_length=1)
+    narrative_axis: NarrativeAxisProposal
+
+
 class EditorialProjectRecord(StrictModel):
     editorial_project_id: UUID = Field(default_factory=uuid4)
     execution_run_id: UUID
