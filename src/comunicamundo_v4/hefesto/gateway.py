@@ -25,6 +25,29 @@ class ModelResult(Generic[OutputT]):
 
 class ModelGateway(Protocol):
     async def count_tokens(self, text: str) -> int: ...
+    async def embed(self, *, texts: list[str], task_type: str) -> list[list[float]]: ...
+
+    async def embed(self, *, texts: list[str], task_type: str) -> list[list[float]]:
+        if not texts:
+            return []
+        config = types.EmbedContentConfig(
+            task_type=task_type,
+            output_dimensionality=768,
+        )
+        try:
+            async with asyncio.timeout(self._timeout_seconds):
+                response = await self._client.aio.models.embed_content(
+                    model="gemini-embedding-001", contents=texts, config=config,
+                )
+        except Exception as error:
+            raise ModelCallError(f"embedding provider call failed: {error}", retryable=True) from error
+        embeddings = [
+            [float(value) for value in item.values]
+            for item in getattr(response, "embeddings", [])
+        ]
+        if len(embeddings) != len(texts) or any(len(item) != 768 for item in embeddings):
+            raise ModelCallError("embedding provider returned an invalid vector batch", retryable=True)
+        return embeddings
 
     async def generate(
         self,
