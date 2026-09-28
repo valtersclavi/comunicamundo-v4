@@ -420,6 +420,32 @@ class ProductRepository:
                         (execution_run_id, source_id),
                     )
 
+    async def save_passage_embeddings(
+        self, execution_run_id: UUID,
+        embeddings: Sequence[tuple[str, int, int, Sequence[float]]],
+    ) -> None:
+        async with self._pool.connection() as connection:
+            await connection.executemany(
+                """INSERT INTO hefesto_product.passage_embeddings
+                   (execution_run_id,passage_id,source_ordinal,passage_ordinal,embedding)
+                   VALUES (%s,%s,%s,%s,%s::vector)
+                   ON CONFLICT(execution_run_id,passage_id) DO NOTHING""",
+                [(execution_run_id, passage_id, source, passage, "[" + ",".join(map(str, vector)) + "]")
+                 for passage_id, source, passage, vector in embeddings],
+            )
+
+    async def vector_ranked_passage_ids(
+        self, execution_run_id: UUID, query: Sequence[float],
+    ) -> list[str]:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                """SELECT passage_id FROM hefesto_product.passage_embeddings
+                   WHERE execution_run_id=%s
+                   ORDER BY embedding <=> %s::vector""",
+                (execution_run_id, "[" + ",".join(map(str, query)) + "]"),
+            )
+            return [str(row[0]).strip() for row in await rows.fetchall()]
+
     async def save_structure(
         self,
         execution_run_id: UUID,
