@@ -24,6 +24,7 @@ from .contracts import (
     EditorialKnowledgeUnit,
     EditorialProjectProposal,
     EditorialProjectRecord,
+    EditorialProjectRevisionHeader,
     EditorialProjectScaffold,
     EditorialSubject,
     FinalTextProposal,
@@ -297,23 +298,52 @@ class Hefesto:
         }:
             raise ValueError("Editorial Project is not available for revision")
         previous = run.editorial_project.proposal
-        response = await self._call(
-            run, task_type="editorial_project_revision",
+        current_header = EditorialProjectRevisionHeader(
+            working_title=previous.working_title,
+            editorial_promise=previous.editorial_promise,
+            narrative_axis=previous.narrative_axis,
+        )
+        header_task = self._call(
+            run, task_type="editorial_project_revision_header",
             prompt=(
-                "Revise the editorial project according to the user's instruction. "
-                "Keep source claims grounded in the existing editorial corpus; do "
-                "not discard ideas, tensions, contradictions, or coverage without "
-                "an explicit user request. Preserve all source references and "
-                "distinguish model contributions from documentary evidence. "
-                "Return the complete revised EditorialProjectProposal.\n"
+                "Apply the user's instruction only to this editorial project's "
+                "title, promise and narrative axis. Preserve its documentary "
+                "grounding; do not add claims or remove tensions, contradictions "
+                "or coverage unless the instruction explicitly requires it. "
+                "Return only the requested header fields.\n"
                 f"USER INSTRUCTION: {instruction}\n"
-                f"CURRENT PROJECT: {previous.model_dump_json()}"
+                f"CURRENT HEADER: {current_header.model_dump_json()}"
             ),
-            schema=EditorialProjectProposal,
-            max_output_tokens=8_192,
+            schema=EditorialProjectRevisionHeader,
+            max_output_tokens=2_048,
             thinking_tokens=0,
         )
-        revised = response.value.model_copy(update={
+
+        async def revise_subject(subject: EditorialSubject) -> EditorialSubject:
+            return (await self._call(
+                run, task_type="editorial_project_revision_subject",
+                prompt=(
+                    "Apply the user's instruction to this one Editorial Project "
+                    "subject. Keep it source-grounded. Do not discard ideas, "
+                    "tensions, contradictions or coverage unless explicitly asked. "
+                    "Return this complete subject only.\n"
+                    f"USER INSTRUCTION: {instruction}\n"
+                    f"CURRENT SUBJECT: {subject.model_dump_json()}"
+                ),
+                schema=EditorialSubject,
+                max_output_tokens=2_048,
+                thinking_tokens=0,
+            )).value
+
+        header_response, *subject_responses = await asyncio.gather(
+            header_task,
+            *(revise_subject(subject) for subject in previous.source_supported_subjects),
+        )
+        revised = previous.model_copy(update={
+            "working_title": header_response.value.working_title,
+            "editorial_promise": header_response.value.editorial_promise,
+            "narrative_axis": header_response.value.narrative_axis,
+            "source_supported_subjects": subject_responses,
             "model_knowledge_suggestions": [],
             "source_enrichment_opportunities": [],
         })
