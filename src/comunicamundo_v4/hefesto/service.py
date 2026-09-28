@@ -186,6 +186,7 @@ class Hefesto:
         passages = passages_from_paragraphs(
             paragraphs, passage_token_target=self._passage_target
         )
+        passages = await self._vector_rank_passages(run, passages)
         titles = {
             ordinal: source.title
             for ordinal, source in enumerate(run.request.sources, start=1)
@@ -570,6 +571,19 @@ class Hefesto:
 
     async def usage_report(self, execution_run_id: UUID) -> dict[str, object]:
         return await self._repository.usage_report(execution_run_id)
+
+    async def _vector_rank_passages(self, run: ProductRun, passages: Sequence[Passage]) -> list[Passage]:
+        embed = getattr(self._gateway, "embed", None)
+        save = getattr(self._repository, "save_passage_embeddings", None)
+        rank = getattr(self._repository, "vector_ranked_passage_ids", None)
+        if not callable(embed) or not callable(save) or not callable(rank):
+            return list(passages)
+        vectors = await embed(texts=[item.text for item in passages], task_type="RETRIEVAL_DOCUMENT")
+        await save(run.execution_run_id, [(item.passage_id, item.source_ordinal, item.ordinal, vector)
+            for item, vector in zip(passages, vectors, strict=True)])
+        query = await embed(texts=[run.request.brief.model_dump_json()], task_type="RETRIEVAL_QUERY")
+        order = {value: index for index, value in enumerate(await rank(run.execution_run_id, query[0]))}
+        return sorted(passages, key=lambda item: order.get(item.passage_id, len(order)))
 
     async def _selection_specs(
         self,
