@@ -17,7 +17,7 @@ from .contracts import (
 )
 
 
-SYSTEM = """You are Hefesto, an attentive and disciplined editor. Understand the supplied material faithfully. The brief guides editorial attention but never changes what a source says. Return only the requested JSON object."""
+SYSTEM = """You are Hefesto, an attentive and disciplined editor. The user's brief defines the editorial ideas, questions, intended scope and intellectual direction before any source is read. Understand every supplied source faithfully: a source may evidence, qualify, limit or contradict those briefing-led ideas, but must not silently replace them or introduce a new editorial agenda. Never turn the corpus into an additive source summary. Return only the requested JSON object."""
 
 
 def provisional_project_prompt(brief: EditorialBrief) -> str:
@@ -156,8 +156,11 @@ def selection_prompt(
     body = "\n\n".join(_passage_line(item) for item in passages)
     allowed = [item.ordinal for item in passages]
     return f"""
-Scan these passages once in light of the complete brief. This is routing, not
-summarization or editorial analysis. Return only compact integer flags.
+Scan these passages once against the ideas, questions and intended scope already
+defined by the complete brief. This is routing, not summarization or editorial
+analysis: select material because it can evidence, qualify, limit or contradict
+that briefing-led direction, never because it merely supplies another topic.
+Return only compact integer flags.
 
 - relevant: passages that can materially serve the requested piece.
 - central: especially important passages. Do not repeat them in relevant.
@@ -194,11 +197,13 @@ def condensation_prompt(
     level: int,
 ) -> str:
     return f"""
-Perform one bounded part of the editorial comprehension. Condense what this
-material genuinely contributes to the user's intention. Preserve substantive
-ideas, relationships, tensions, qualifications, limits, and unexpected useful
-directions. Synthesize; do not enumerate every passage and do not make an
-outline or draft the final product.
+Perform one bounded part of the editorial comprehension. The brief already
+defines the ideas, questions and intended scope; read this material only to
+determine how it bears on them. Identify whether it provides evidence,
+qualification, limitation, context or contradiction, preserving only what
+materially changes the treatment of those ideas. Synthesize that relationship;
+do not enumerate passages, add a source-derived topic, make an outline, or
+produce an additive summary or final draft.
 
 Keep the source labels only where they are intellectually necessary to
 distinguish agreement, disagreement, evidence, context, or limitation. This
@@ -222,9 +227,13 @@ def project_prompt(
     material_kind: str,
 ) -> str:
     return f"""
-Create one coherent Editorial Project directly from the selected source
-material and the user's brief. The Narrative Axis and the rest of the project
-must be conceived together in this same editorial act.
+Create one coherent Editorial Project guided first by the user's brief. Decide
+the Narrative Axis, the editorial ideas and the necessary subjects from that
+brief before weighing the selected source material. Then use sources only to
+establish how each briefing-led idea is evidenced, qualified, limited, placed
+in context or contradicted. The Narrative Axis and the rest of the project must
+be conceived together in this same editorial act; sources must not silently
+replace the user's direction or add a source-derived agenda.
 
 The Narrative Axis is the one- or two-sentence intention of message that must
 govern the complete future piece. It is not merely the topic, an outline, a
@@ -240,17 +249,21 @@ the original duration. Do not pre-write the final piece. Return empty arrays for
 model_knowledge_suggestions and source_enrichment_opportunities: this Editorial
 Project is closed for approval and must not initiate another enrichment spiral.
 
-Synthesize relationships among all sources, including convergence,
-complementarity, contradiction, context, qualification, and limitation when
-they matter. Do not reproduce internal passage coordinates in the result.
+Synthesize the relationship between the briefing-led ideas and the sources,
+including evidence, convergence, complementarity, contradiction, context,
+qualification and limitation when they matter. A contradiction remains a
+contradiction of the relevant briefing-led idea; do not turn it into a different
+idea merely because it appears in a source. Do not reproduce internal passage
+coordinates in the result.
 
 Create a compact editorial_corpus in the same act as the Narrative Axis and
 Editorial Project. It is the integrated body of knowledge that the future
 content writer will use instead of rereading the source material, but it must
-be deliberately concise. Organize it into only the few meaningful editorial
-units needed for the approved subjects. Preserve essential points, tensions,
-qualifications, forbidden inferences, and concise source support. Do not
-include comprehensive notes, long summaries, or exhaustive evidence lists.
+be deliberately concise. Organize it around only the briefing-led ideas needed
+for the approved subjects. For each unit, preserve the essential idea, then
+the evidence, tensions, qualifications, contradictions and forbidden
+inferences that govern its treatment. Do not include comprehensive notes, long
+source summaries, exhaustive evidence lists or a source-by-source accumulation.
 Source ordinals are internal grounding metadata for the content editor; they
 must never be written into the final product.
 For evidence that may be quoted or whose exact wording materially matters,
@@ -305,9 +318,12 @@ must add time; never compress or remove existing subjects.
     else:
         anchor = "There is no earlier Editorial Project anchor."
     return f"""
-Create the Editorial Project scaffold directly from the selected source
-material and the user's brief. Do not create the editorial_corpus units in this
-step; they will be generated subject by subject.
+Create the Editorial Project scaffold guided first by the user's brief. Decide
+its Axis and subjects from the briefing-led ideas before weighing the selected
+source material. Sources may evidence, qualify, limit or contradict those
+ideas; they must not replace them, create a source-led scope, or yield additive
+summaries. Do not create the editorial_corpus units in this step; they will be
+generated subject by subject.
 
 The Narrative Axis is the one- or two-sentence intention of message that must
 govern the complete future piece. The subjects must operationalize that Axis
@@ -361,9 +377,10 @@ def subject_passage_routing_prompt(
         if indexes
     }
     return f"""
-Route each passage only to the Editorial Project subjects it materially
-supports or enriches. This is classification, not summarization. Return no
-explanation.
+Route each passage only to the already briefing-led Editorial Project subjects
+it materially evidences, qualifies, limits, contradicts or enriches. This is
+classification, not summarization: a passage never creates a subject or a
+source-derived line of argument. Return no explanation.
 
 A passage may serve several subjects. Omit passages that serve none. Use only
 the exact source_ordinal, passage_ordinal and subject indexes shown below.
@@ -393,12 +410,14 @@ def subject_material_digest_prompt(
     material_kind: str,
 ) -> str:
     return f"""
-Condense only what this bounded material contributes to the named subject.
-Preserve substantive points, relationships, tensions, qualifications, limits,
-and the source ordinals needed for grounding. Preserve at most four short exact
-source excerpts only when their wording may be quoted or materially matters.
-Do not outline the complete piece, discuss other subjects, or add model
-knowledge. Return one compact reading of at most 4,000 characters.
+Condense only how this bounded material bears on the named, briefing-led
+subject: evidence, qualification, limitation, context or contradiction.
+Preserve the resulting substantive points, relationships, tensions,
+qualifications, limits, and source ordinals needed for grounding. Preserve at
+most four short exact source excerpts only when their wording may be quoted or
+materially matters. Do not outline the complete piece, discuss other subjects,
+add model knowledge, create a new idea, or write an additive source summary.
+Return one compact reading of at most 4,000 characters.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
@@ -419,8 +438,10 @@ def subject_corpus_core_prompt(
     digest: str,
 ) -> str:
     return f"""
-Create only the core of one editorial knowledge unit for the named subject.
-Return a short title, a concise synthesis and at most six essential points.
+Create only the core of one editorial knowledge unit for the named,
+briefing-led subject. Return a short title, a concise synthesis of that
+subject's governing idea and at most six essential points. Do not turn the
+source material into an additive summary.
 Do not return tensions, qualifications or evidence in this call. Do not add
 model knowledge or discuss other subjects.
 
@@ -441,8 +462,8 @@ def subject_corpus_nuance_prompt(
     digest: str,
 ) -> str:
     return f"""
-Extract only the tensions and qualifications that the future writer must
-preserve for this subject. Return at most four of each. Use empty arrays when
+Extract only the tensions, qualifications and contradictions that the future
+writer must preserve when developing this briefing-led subject. Return at most four of each. Use empty arrays when
 the bounded reading contains none. Do not return synthesis, essential points or
 evidence. Do not add model knowledge.
 
@@ -463,9 +484,10 @@ def subject_corpus_evidence_prompt(
     digest: str,
 ) -> str:
     return f"""
-Create only the concise source evidence for this subject. Return at most four
-evidence items. Every item must identify its source ordinals and state its
-contribution briefly. Preserve a short verbatim excerpt only when the bounded
+Create only the concise source relationship for this briefing-led subject.
+Return at most four evidence items. Every item must identify its source
+ordinals and state whether it supplies evidence, qualification, limitation,
+context or contradiction, then state its contribution briefly. Preserve a short verbatim excerpt only when the bounded
 reading contains exact wording that may be quoted or materially matters;
 otherwise use null. Do not invent or reconstruct quotations. Do not return
 synthesis, essential points, tensions or qualifications.
