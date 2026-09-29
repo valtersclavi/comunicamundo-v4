@@ -50,6 +50,7 @@ from .prompts import (
     SYSTEM,
     condensation_prompt,
     content_draft_prompt,
+    narrative_architecture_prompt,
     content_review_prompt,
     content_revision_prompt,
     preservation_review_prompt,
@@ -412,6 +413,16 @@ class Hefesto:
                 )
             target_words = _target_words(run.request.brief)
             section_targets = _section_targets(project, target_words)
+            if run.narrative_architecture is None:
+                architecture = await self._generate_step(
+                    run, stage="narrative_architecture",
+                    task_type="narrative_architecture",
+                    prompt=narrative_architecture_prompt(run.request.brief, project),
+                    schema=NarrativeArchitecture,
+                    max_output_tokens=4_096, thinking_tokens=3_000,
+                )
+                run = await self._save_artifact(run, narrative_architecture=architecture)
+            architecture = run.narrative_architecture
 
             if run.content_draft is None:
                 draft = await self._generate_step(
@@ -421,6 +432,7 @@ class Hefesto:
                     prompt=content_draft_prompt(
                         run.request.brief,
                         project,
+                        architecture,
                         target_words=target_words,
                         section_targets=section_targets,
                     ),
