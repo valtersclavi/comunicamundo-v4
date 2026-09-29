@@ -648,6 +648,7 @@ def product_style_prompt(
     language: str,
     audience: str,
     target_words: int,
+    architecture: NarrativeArchitecture | None = None,
     correction_request: str | None = None,
     reference_text: FinalTextProposal | None = None,
 ) -> str:
@@ -684,12 +685,17 @@ opening, ending, and degree of verbosity for a {product} in {language} for
 {audience}. You have complete freedom of form.
 
 You have no freedom of content. Preserve every fact, number, relationship,
-qualification, limitation, and conclusion. Add no examples, explanations,
-claims, or knowledge. Remove no substantive information. Use approximately
+qualification, limitation, conclusion, and the binding narrative movement.
+Do not turn its interwoven development back into consecutive topic blocks.
+Add no examples, explanations, claims, or knowledge. Remove no substantive information. Use approximately
 {target_words} words as guidance for the requested duration, not as a hard
 acceptance boundary.
 
 {task}
+BINDING NARRATIVE ARCHITECTURE:
+{architecture.model_dump_json(indent=2) if architecture else "none"}
+
+EDITORIALLY CLOSED TEXT:
 {text.model_dump_json(indent=2)}
 """.strip()
 
@@ -699,15 +705,17 @@ def preservation_review_prompt(
     styled_text: FinalTextProposal,
     *,
     product: str,
+    architecture: NarrativeArchitecture | None = None,
 ) -> str:
     return f"""
 Read the editorially closed text and the styled {product}. Decide only whether
 the styled text is substantively compatible with the closed text.
 
 Approve when both texts carry the same facts, argument, relationships,
-qualifications, limitations, and conclusions. Changes of wording, order,
-headings, rhythm, transitions, compression, expansion, or length are normal
-styling decisions and are not reasons to reject.
+qualifications, limitations, conclusions and binding narrative movement.
+Wording, rhythm and local transitions are normal styling decisions. Reject
+a change of order or structure when it breaks the architecture's progression,
+interweavings, turning point, opening or closing.
 
 Reject only when the styled text materially contradicts the closed text, adds
 an unsupported substantive claim, or omits something necessary in a way that
@@ -717,6 +725,9 @@ not perform mechanical pattern checks.
 If approval is denied, every differences item must identify one material,
 local difference and say exactly what must be restored, removed, or corrected.
 Do not request a general rewrite.
+
+BINDING NARRATIVE ARCHITECTURE:
+{architecture.model_dump_json(indent=2) if architecture else "none"}
 
 EDITORIALLY CLOSED TEXT:
 {closed_text.model_dump_json(indent=2)}
