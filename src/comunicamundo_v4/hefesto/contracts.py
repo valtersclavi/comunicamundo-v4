@@ -475,6 +475,18 @@ class EditorialProjectRecord(StrictModel):
     approved: bool = False
 
 
+class NarrativeArchitecture(StrictModel):
+    """The binding narrative movement of a single finished piece."""
+
+    opening: str = Field(min_length=1)
+    governing_question: str = Field(min_length=1)
+    progression: list[str] = Field(min_length=2)
+    interweavings: list[str] = Field(default_factory=list)
+    turning_point: str = Field(min_length=1)
+    closing: str = Field(min_length=1)
+    non_negotiables: list[str] = Field(min_length=1)
+
+
 class FinalTextProposal(StrictModel):
     title: str = Field(min_length=1)
     body: str = Field(min_length=1)
