@@ -11,6 +11,7 @@ from .contracts import (
     EditorialProjectScaffold,
     EditorialSubject,
     FinalTextProposal,
+    NarrativeArchitecture,
     Passage,
     ProvisionalEditorialProject,
     SourceCandidate,
@@ -503,9 +504,35 @@ BOUNDED SUBJECT READING:
 """.strip()
 
 
+def narrative_architecture_prompt(
+    brief: EditorialBrief,
+    project: EditorialProjectProposal,
+) -> str:
+    return f"""\
+Act as the narrative editor. Turn the approved Editorial Project into the
+intellectual movement of one coherent piece, not a sequence of its subjects.
+Decide the opening tension, the question carrying the reader, a progression in
+which ideas depend on and illuminate one another, deliberate interweavings,
+one turning point, and a closing that resolves or productively reframes the
+opening. Preserve every approved subject, qualification, tension and forbidden
+inference, but never turn them into a visible checklist.
+
+This architecture is binding for the content writer, style writer and final
+review. It is not an outline with headings and it must not contain sources,
+citations or new factual claims.
+
+BRIEF:
+{brief.model_dump_json(indent=2)}
+
+APPROVED EDITORIAL PROJECT:
+{project.model_dump_json(indent=2)}
+""".strip()
+
+
 def content_draft_prompt(
     brief: EditorialBrief,
     project: EditorialProjectProposal,
+    architecture: NarrativeArchitecture,
     *,
     target_words: int,
     section_targets: list[dict[str, object]],
@@ -536,6 +563,9 @@ BRIEF:
 
 TARGET WORDS BY SECTION:
 {json.dumps(section_targets, ensure_ascii=False, indent=2)}
+
+BINDING NARRATIVE ARCHITECTURE:
+{architecture.model_dump_json(indent=2)}
 
 APPROVED EDITORIAL STATE:
 {project.model_dump_json(indent=2)}
