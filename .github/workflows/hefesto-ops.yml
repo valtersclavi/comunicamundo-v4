@@ -61,6 +61,36 @@ jobs:
           print("Executions:", len(json.loads((root / "hefesto-executions.json").read_text())))
           print("Log entries:", len(json.loads((root / "hefesto-logs.json").read_text())))
           PY
+      - name: Read recent immutable acquisition receipts
+        shell: bash
+        run: |
+          python - <<'PYREAD'
+          import json, os, subprocess
+          from datetime import datetime, UTC
+          from pathlib import Path
+          since = datetime.fromisoformat(json.loads(os.environ["ISSUE_BODY"])["since"].replace("Z", "+00:00"))
+          prefix = "gs://comunicamundo-v4-hefesto-30524898837/hefesto-product/projects/"
+          listing = subprocess.run(["gcloud", "storage", "ls", "--long", prefix + "*/ingestion-receipt.json"], check=True, capture_output=True, text=True).stdout
+          receipts = []
+          for line in listing.splitlines():
+              parts = line.split()
+              if len(parts) != 3 or not parts[2].startswith(prefix):
+                  continue
+              try:
+                  created = datetime.fromisoformat(parts[1].replace("Z", "+00:00"))
+              except ValueError:
+                  continue
+              if created < since:
+                  continue
+              if len(receipts) >= 100:
+                  raise ValueError("Narrow the diagnostic time window: over 100 receipts")
+              uri = parts[2]
+              raw = subprocess.run(["gcloud", "storage", "cat", uri], check=True, capture_output=True, text=True).stdout
+              receipt = json.loads(raw)
+              receipts.append({"uri": uri, "created": parts[1], "receipt": receipt})
+          Path(os.environ["RUNNER_TEMP"], "hefesto-acquisitions.json").write_text(json.dumps(receipts, ensure_ascii=False, indent=2))
+          print("Recent acquisition receipts:", len(receipts))
+          PYREAD
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -69,4 +99,6 @@ jobs:
             ${{ runner.temp }}/hefesto-query.txt
             ${{ runner.temp }}/hefesto-executions.json
             ${{ runner.temp }}/hefesto-logs.json
+            ${{ runner.temp }}/hefesto-acquisitions.json
           retention-days: 30
+
