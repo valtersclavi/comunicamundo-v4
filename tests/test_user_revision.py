@@ -58,7 +58,7 @@ async def test_user_revision_can_change_structure_and_optionally_revisit_sources
     assert not result.editorial_project.approved
     assert result.final_text is None
     assert any(c['task_type'] == 'editorial_subject_routing' for c in gateway.calls) == revisit
-    assert any(c['task_type'] == 'editorial_subject_digest' for c in gateway.calls) == revisit
+    assert any(c['task_type'] == 'editorial_subject_reading' for c in gateway.calls) == revisit
     if not revisit:
         assert revised.editorial_corpus.units == previous.editorial_corpus.units
     else:

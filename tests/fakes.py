@@ -24,11 +24,8 @@ from comunicamundo_v4.hefesto.contracts import (
     SelectionBatch,
     SelectionFlags,
     SourceAsset,
-    SubjectMaterialDigest,
+    ReferencedSubjectProposal,
     SubjectPassageRouting,
-    SubjectCorpusCore,
-    SubjectCorpusEvidence,
-    SubjectCorpusNuance,
 )
 from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
 from comunicamundo_v4.hefesto.service import FirstProjectSuggestions
@@ -41,6 +38,7 @@ class MemoryRepository:
         self.assets: dict[UUID, list[SourceAsset]] = {}
         self.asset_links: dict[UUID, list[ParagraphAssetLink]] = {}
         self.saved_selections: dict[UUID, dict[str, SelectionBatch]] = {}
+        self.readings = {}
         self.saved_condensations: dict[UUID, dict[str, EditorialCondensation]] = {}
         self.usage: dict[UUID, list[CallUsage]] = {}
         self.stages: dict[UUID, list[dict[str, object]]] = {}
@@ -80,6 +78,12 @@ class MemoryRepository:
             self.saved_selections.get(execution_run_id, {}).values(),
             key=lambda item: (item.source_ordinal, item.first_passage_ordinal),
         )
+
+    async def subject_reading(self, execution_run_id, key):
+        return self.readings.get((execution_run_id, key))
+
+    async def save_subject_reading(self, execution_run_id, key, unit):
+        self.readings[(execution_run_id, key)] = unit
 
     async def save_condensation(
         self, execution_run_id: UUID, unit: EditorialCondensation
@@ -231,12 +235,6 @@ class FakeGateway:
                     for source, passage in pairs
                 ]
             })
-        elif task_type in {
-            "editorial_subject_digest", "editorial_subject_digest_merge"
-        }:
-            value = SubjectMaterialDigest(
-                reading="A compact subject-specific reading with its source grounding."
-            )
         elif task_type == "editorial_project_suggestions":
             value = FirstProjectSuggestions(
                 model_knowledge_suggestions=["Optional model suggestion"],
@@ -273,32 +271,16 @@ class FakeGateway:
                     ],
                 }
             )
-        elif task_type == "editorial_subject_core":
-            value = SubjectCorpusCore(
-                title="Core subject",
+        elif task_type == "editorial_subject_reading":
+            import json
+            originals = json.loads(prompt.split("ORIGINAL PASSAGES (local indexes, not source numbers):\n")[1])
+            value = ReferencedSubjectProposal(
                 synthesis="The complete source-grounded synthesis.",
-                essential_points=[
-                    "The central supported point",
-                    "The relevant qualification",
-                ],
-            )
-        elif task_type == "editorial_subject_nuance":
-            value = SubjectCorpusNuance(
+                essential_points=["The central supported point", "The relevant qualification"],
                 tensions=["A meaningful source tension"],
                 qualifications=["Do not overstate causality"],
-            )
-        elif task_type == "editorial_subject_evidence":
-            value = SubjectCorpusEvidence.model_validate(
-                {
-                    "evidence": [
-                        {
-                            "source_ordinals": [1, 2],
-                            "contribution": (
-                                "Both sources support and qualify the point."
-                            ),
-                        }
-                    ]
-                }
+                evidence=[{"passage_indexes": [item["passage_index"] for item in originals],
+                           "contribution": "The originals support and qualify the point."}],
             )
         elif task_type == "narrative_architecture":
             value = NarrativeArchitecture(

@@ -583,6 +583,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
     started = perf_counter()
     usage_offset = len((await hefesto.usage_report(execution_id))["calls"])
     added_ids: list[UUID] = []
+    acquired_records: list[dict[str, object]] = []
     try:
         gateway = VertexGateway(
             project=required("GOOGLE_CLOUD_PROJECT"),
@@ -612,6 +613,13 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             ),
         )
         result = await research.run(original.request.brief, provisional)
+        acquired_records = [item.record.model_dump(mode="json") for item in result.acquisitions]
+        await hefesto.record_stages(execution_id, [{
+            "stage": "source_enrichment", "status": "running",
+            "duration_ms": int((perf_counter() - started) * 1000),
+            "opportunity": opportunity, "sources": acquired_records,
+            "incorporated": False,
+        }])
         for usage in result.usages:
             await repository.record_usage(execution_id, original.project_id, usage)
         isolated_project_id = uuid5(
@@ -671,15 +679,26 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             **_task_metrics(report, {call["task_type"] for call in report["calls"]}),
             "opportunity": opportunity, "summary": reason,
             "incorporated": updated.editorial_round != original.editorial_round,
-            "sources": [item.record.model_dump(mode="json") for item in result.acquisitions],
+            "sources": acquired_records,
         }])
-    except Exception:
+    except Exception as error:
         if added_ids:
             await repository.rollback_enrichment_sources(
                 execution_id, added_ids, original.editorial_round,
             )
         await repository.save_run(original)
         await _restore_editable_receipt(repository, execution_id, prior_receipt)
+        report = await hefesto.usage_report(execution_id)
+        report["calls"] = report["calls"][usage_offset:]
+        await _persist_product_receipt(hefesto, client, execution_id, [{
+            "stage": "source_enrichment", "status": "failed",
+            "completed_at": datetime.now(UTC).isoformat(),
+            "duration_ms": int((perf_counter() - started) * 1000),
+            **_task_metrics(report, {call["task_type"] for call in report["calls"]}),
+            "opportunity": opportunity, "sources": acquired_records,
+            "incorporated": False,
+            "error_class": type(error).__name__, "error_message": str(error)[:2000],
+        }])
         raise
     finally:
         await repository.close()
@@ -735,6 +754,7 @@ async def _continue_to_project(
                     "editorial_comprehension_merge",
                     "editorial_project_scaffold",
                     "editorial_subject_routing",
+                    "editorial_subject_reading",
                     "editorial_subject_digest",
                     "editorial_subject_digest_merge",
                     "editorial_subject_core",

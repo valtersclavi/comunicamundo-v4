@@ -18,6 +18,7 @@ _EXECUTION_TABLES = (
     "source_assets",
     "selection_batches",
     "editorial_condensations",
+    "subject_readings",
     "paragraphs",
     "call_usage",
     "stage_receipts",
@@ -233,3 +234,4 @@ def clean_operational_history(
             report["database_rows_deleted"] = deleted_rows
             report["storage"]["objects_deleted"] = deleted_objects
             return report
+

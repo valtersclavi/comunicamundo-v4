@@ -13,6 +13,7 @@ from psycopg_pool import AsyncConnectionPool
 from .contracts import (
     CallUsage,
     EditorialCondensation,
+    EditorialKnowledgeUnit,
     Paragraph,
     ParagraphAssetLink,
     ProductRun,
@@ -565,6 +566,23 @@ class ProductRepository:
             values = await rows.fetchall()
         return [SelectionBatch.model_validate(item[0]) for item in values]
 
+    async def subject_reading(self, execution_run_id: UUID, key: str) -> EditorialKnowledgeUnit | None:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                "SELECT payload FROM hefesto_product.subject_readings WHERE execution_run_id=%s AND reading_key=%s",
+                (execution_run_id, key),
+            )
+            row = await rows.fetchone()
+        return EditorialKnowledgeUnit.model_validate(row[0]) if row else None
+
+    async def save_subject_reading(self, execution_run_id: UUID, key: str, unit: EditorialKnowledgeUnit) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """INSERT INTO hefesto_product.subject_readings (execution_run_id,reading_key,payload)
+                   VALUES (%s,%s,%s::jsonb) ON CONFLICT DO NOTHING""",
+                (execution_run_id, key, unit.model_dump_json()),
+            )
+
     async def save_condensation(
         self, execution_run_id: UUID, unit: EditorialCondensation
     ) -> None:
@@ -646,3 +664,4 @@ class ProductRepository:
             "rated_cost_usd": str(sum((Decimal(item.rated_cost_usd or "0") for item in calls), start=Decimal("0"))),
             "calls": [item.model_dump(mode="json") for item in calls],
         }
+

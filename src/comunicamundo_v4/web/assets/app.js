@@ -194,7 +194,7 @@ function renderSourceManifest(known, provisionalProject) {
     const indexes = Array.isArray(coverage[candidate.candidate_id]) ? coverage[candidate.candidate_id] : [];
     const isEnrichment = (enrichment?.sources || []).includes(record);
     const covered = indexes.map((index) => subjects[index]?.title || `Assunto ${index + 1}`);
-    if (isEnrichment) covered.push(`${enrichment.opportunity} — ${enrichment.incorporated ? "incorporada" : "sem acréscimo ao PE"}`);
+    if (isEnrichment) covered.push(`${enrichment.opportunity} — ${enrichment.status === "failed" ? "incorporação falhou; PE preservado" : enrichment.status === "running" ? "em análise" : enrichment.incorporated ? "incorporada" : "sem acréscimo ao PE"}`);
     const status = record.status === "acquired" ? "Adquirida" : record.status === "partial" ? "Parcial" : "Falhou";
     const route = record.selected_route ? ` · ${record.selected_route}` : "";
     const url = record.final_url || candidate.url;

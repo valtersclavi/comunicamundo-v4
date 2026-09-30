@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from .contracts import (
     ContentReviewProposal,
     EditorialBrief,
-    EditorialCondensation,
     EditorialProjectProposal,
     EditorialProjectScaffold,
     EditorialSubject,
@@ -198,98 +197,6 @@ NEXT CONTEXT (not selectable):
 """.strip()
 
 
-def condensation_prompt(
-    brief: EditorialBrief,
-    material: str,
-    *,
-    level: int,
-) -> str:
-    return f"""
-Perform one bounded part of the editorial comprehension. The brief already
-defines the ideas, questions and intended scope; read this material only to
-determine how it bears on them. Identify whether it provides evidence,
-qualification, limitation, context or contradiction, preserving only what
-materially changes the treatment of those ideas. Synthesize that relationship;
-do not enumerate passages, add a source-derived topic, make an outline, or
-produce an additive summary or final draft.
-
-Keep the source labels only where they are intellectually necessary to
-distinguish agreement, disagreement, evidence, context, or limitation. This
-reading will be combined with other bounded readings before the Editorial
-Project is created.
-
-BRIEF:
-{brief.model_dump_json(indent=2)}
-
-COMPREHENSION LEVEL: {level}
-
-MATERIAL:
-{material}
-""".strip()
-
-
-def project_prompt(
-    brief: EditorialBrief,
-    material: str,
-    *,
-    material_kind: str,
-) -> str:
-    return f"""
-Create one coherent Editorial Project guided first by the user's brief. Decide
-the Narrative Axis, the editorial ideas and the necessary subjects from that
-brief before weighing the selected source material. Then use sources only to
-establish how each briefing-led idea is evidenced, qualified, limited, placed
-in context or contradicted. The Narrative Axis and the rest of the project must
-be conceived together in this same editorial act; sources must not silently
-replace the user's direction or add a source-derived agenda.
-
-The Narrative Axis is the one- or two-sentence intention of message that must
-govern the complete future piece. It is not merely the topic, an outline, a
-generic source summary, or an invented opinion. Its rationale must explain why
-this direction carries the user's intention through the material.
-
-The subjects must operationalize that Axis with real depth and avoid superficial
-coverage of everything. Start from the requested {brief.duration_minutes}
-minutes. If incorporating an additional subject discovered through source or
-model enrichment, preserve every existing subject and increase the total
-duration enough to develop the new subject; never cut a subject merely to keep
-the original duration. Do not pre-write the final piece. Return empty arrays for
-model_knowledge_suggestions and source_enrichment_opportunities: this Editorial
-Project is closed for approval and must not initiate another enrichment spiral.
-
-Synthesize the relationship between the briefing-led ideas and the sources,
-including evidence, convergence, complementarity, contradiction, context,
-qualification and limitation when they matter. A contradiction remains a
-contradiction of the relevant briefing-led idea; do not turn it into a different
-idea merely because it appears in a source. Do not reproduce internal passage
-coordinates in the result.
-
-Create a compact editorial_corpus in the same act as the Narrative Axis and
-Editorial Project. It is the integrated body of knowledge that the future
-content writer will use instead of rereading the source material, but it must
-be deliberately concise. Organize it around only the briefing-led ideas needed
-for the approved subjects. For each unit, preserve the essential idea, then
-the evidence, tensions, qualifications, contradictions and forbidden
-inferences that govern its treatment. Do not include comprehensive notes, long
-source summaries, exhaustive evidence lists or a source-by-source accumulation.
-Source ordinals are internal grounding metadata for the content editor; they
-must never be written into the final product.
-For evidence that may be quoted or whose exact wording materially matters,
-preserve one short exact source excerpt in verbatim_excerpt. Otherwise use
-null; do not copy source prose merely for completeness. Keep every string short
-enough to fit the schema; if a nuance needs more room, synthesize it instead of
-expanding the output.
-
-BRIEF:
-{brief.model_dump_json(indent=2)}
-
-INPUT KIND: {material_kind}
-
-SELECTED EDITORIAL MATERIAL:
-{material}
-""".strip()
-
-
 def project_scaffold_prompt(
     brief: EditorialBrief,
     material: str,
@@ -327,8 +234,10 @@ must add time; never compress or remove existing subjects.
         anchor = "There is no earlier Editorial Project anchor."
     return f"""
 Create the Editorial Project scaffold guided first by the user's brief. Decide
-its Axis and subjects from the briefing-led ideas before weighing the selected
-source material. Sources may evidence, qualify, limit or contradict those
+its Axis and subjects from the briefing-led ideas. At this step no source
+material is supplied: propose questions and intended development, not factual
+conclusions or claims of source support. Support will be checked against
+original passages after this scaffold. Sources may evidence, qualify, limit or contradict those
 ideas; they must not replace them, create a source-led scope, or yield additive
 summaries. Do not create the editorial_corpus units in this step; they will be
 generated subject by subject.
@@ -340,10 +249,9 @@ answer a need derived from the brief. Source length and the number of passages
 never authorize a new subject. Extract what serves those needs; omit unrelated
 source themes even when they are well developed.
 
-Start from the requested {brief.duration_minutes} minutes. If incorporating an
-additional subject discovered through source or model enrichment, preserve every
-existing subject and increase the total duration enough to develop the new
-subject; never cut a subject merely to keep the original duration.
+Start from the requested {brief.duration_minutes} minutes and honor the approved
+provisional project's duration when present. This scaffold is not an enrichment
+operation and must not add a source-led subject outside the authorized scope.
 
 Return empty arrays for model_knowledge_suggestions and
 source_enrichment_opportunities: this Editorial Project is closed for approval
@@ -413,108 +321,36 @@ PASSAGES:
 """.strip()
 
 
-def subject_material_digest_prompt(
+def referenced_subject_prompt(
     brief: EditorialBrief,
     subject: EditorialSubject,
-    material: str,
-    *,
-    material_kind: str,
+    passages: Sequence[Passage],
+    titles: dict[int, str | None],
 ) -> str:
-    return f"""
-Condense only how this bounded material bears on the named, briefing-led
-subject: evidence, qualification, limitation, context or contradiction.
-Preserve the resulting substantive points, relationships, tensions,
-qualifications, limits, and source ordinals needed for grounding. Preserve at
-most four short exact source excerpts only when their wording may be quoted or
-materially matters. Do not outline the complete piece, discuss other subjects,
-add unsupported model knowledge or write an additive source summary. A selected
-enrichment opportunity authorizes new pertinent perspectives, examples and
-dimensions even when not anticipated in the original brief; preserve those
-contributions without replacing the project's focus. A user revision may change
-the brief's scope; follow that explicit instruction.
-Return one compact reading of at most 4,000 characters.
+    material = [
+        {"passage_index": index, "source_title": titles.get(item.source_ordinal),
+         "text": item.text}
+        for index, item in enumerate(passages)
+    ]
+    return f"""Read the ORIGINAL passages for this briefing-led subject.
+Produce the editorial understanding directly from them, not a source summary
+or a condensation for another extraction. Preserve substantive relationships,
+tensions, qualifications and contradictions pertinent to the authorized scope.
+Every factual point must be grounded in evidence identifying passage_indexes
+from this packet. Use these local indexes exactly; source identities are
+resolved by the program. Do not invent identifiers, facts or quotations.
+Quote at most 280 characters of exact original wording when necessary; otherwise use null.
+The originals remain the documentary authority and will be recovered through
+these references. Do not impose a fixed number of ideas or evidence items.
+A selected enrichment may add pertinent new perspectives without replacing
+the frozen project. An explicit user revision may change its scope.
 
 BRIEF:
 {brief.model_dump_json(indent=2)}
-
 SUBJECT:
 {subject.model_dump_json(indent=2)}
-
-INPUT KIND: {material_kind}
-
-MATERIAL:
-{material}
-""".strip()
-
-
-def subject_corpus_core_prompt(
-    brief: EditorialBrief,
-    subject: EditorialSubject,
-    digest: str,
-) -> str:
-    return f"""
-Create only the core of one editorial knowledge unit for the named,
-briefing-led subject. Return a short title, a concise synthesis of that
-subject's governing idea and at most six essential points. Do not turn the
-source material into an additive summary.
-Do not return tensions, qualifications or evidence in this call. Do not add
-model knowledge or discuss other subjects.
-
-BRIEF:
-{brief.model_dump_json(indent=2)}
-
-SUBJECT:
-{subject.model_dump_json(indent=2)}
-
-BOUNDED SUBJECT READING:
-{digest}
-""".strip()
-
-
-def subject_corpus_nuance_prompt(
-    brief: EditorialBrief,
-    subject: EditorialSubject,
-    digest: str,
-) -> str:
-    return f"""
-Extract only the tensions, qualifications and contradictions that the future
-writer must preserve when developing this briefing-led subject. Return at most four of each. Use empty arrays when
-the bounded reading contains none. Do not return synthesis, essential points or
-evidence. Do not add model knowledge.
-
-BRIEF:
-{brief.model_dump_json(indent=2)}
-
-SUBJECT:
-{subject.model_dump_json(indent=2)}
-
-BOUNDED SUBJECT READING:
-{digest}
-""".strip()
-
-
-def subject_corpus_evidence_prompt(
-    brief: EditorialBrief,
-    subject: EditorialSubject,
-    digest: str,
-) -> str:
-    return f"""
-Create only the concise source relationship for this briefing-led subject.
-Return at most four evidence items. Every item must identify its source
-ordinals and state whether it supplies evidence, qualification, limitation,
-context or contradiction, then state its contribution briefly. Preserve a short verbatim excerpt only when the bounded
-reading contains exact wording that may be quoted or materially matters;
-otherwise use null. Do not invent or reconstruct quotations. Do not return
-synthesis, essential points, tensions or qualifications.
-
-BRIEF:
-{brief.model_dump_json(indent=2)}
-
-SUBJECT:
-{subject.model_dump_json(indent=2)}
-
-BOUNDED SUBJECT READING:
-{digest}
+ORIGINAL PASSAGES (local indexes, not source numbers):
+{json.dumps(material, ensure_ascii=False)}
 """.strip()
 
 
@@ -590,6 +426,7 @@ def content_draft_prompt(
     *,
     target_words: int,
     section_targets: list[dict[str, object]],
+    original_material: str = "",
 ) -> str:
     return f"""
 Act as the content writer. Write a complete content draft in
@@ -623,6 +460,12 @@ BINDING NARRATIVE ARCHITECTURE:
 
 APPROVED EDITORIAL STATE:
 {project.model_dump_json(indent=2)}
+
+REFERENCED ORIGINAL DOCUMENTARY MATERIAL:
+Use these originals to verify and develop the approved ideas, qualifications
+and quotations. They do not authorize changing the approved scope. Editorial
+notes are interpretation; the original passages are the documentary authority.
+{original_material}
 """.strip()
 
 
@@ -632,6 +475,7 @@ def content_review_prompt(
     draft: FinalTextProposal,
     *,
     architecture: NarrativeArchitecture | None = None,
+    original_material: str = "",
 ) -> str:
     return f"""
 Act as the content editor. Audit the content draft against the complete approved
@@ -661,6 +505,12 @@ BRIEF:
 APPROVED EDITORIAL STATE:
 {project.model_dump_json(indent=2)}
 
+REFERENCED ORIGINAL DOCUMENTARY MATERIAL:
+Use these originals to verify and develop the approved ideas, qualifications
+and quotations. They do not authorize changing the approved scope. Editorial
+notes are interpretation; the original passages are the documentary authority.
+{original_material}
+
 CONTENT DRAFT:
 {draft.model_dump_json(indent=2)}
 """.strip()
@@ -675,6 +525,7 @@ def content_revision_prompt(
     target_words: int,
     section_targets: list[dict[str, object]],
     architecture: NarrativeArchitecture | None = None,
+    original_material: str = "",
 ) -> str:
     return f"""
 Act as the same content writer who produced the draft. Apply the editor's
@@ -701,6 +552,12 @@ TARGET WORDS BY SECTION:
 
 APPROVED EDITORIAL STATE:
 {project.model_dump_json(indent=2)}
+
+REFERENCED ORIGINAL DOCUMENTARY MATERIAL:
+Use these originals to verify and develop the approved ideas, qualifications
+and quotations. They do not authorize changing the approved scope. Editorial
+notes are interpretation; the original passages are the documentary authority.
+{original_material}
 
 ORIGINAL CONTENT DRAFT:
 {draft.model_dump_json(indent=2)}
@@ -823,14 +680,6 @@ def render_passages(passages: Sequence[Passage], titles: dict[int, str | None]) 
         sections.append(_passage_line(item))
         previous_ordinal = item.ordinal
     return "\n\n".join(sections).strip()
-
-
-def render_condensations(items: Sequence[EditorialCondensation]) -> str:
-    payload = [
-        {"sources": item.source_ordinals, "reading": item.reading}
-        for item in items
-    ]
-    return json.dumps(payload, ensure_ascii=False)
 
 
 def _passage_line(passage: Passage) -> str:

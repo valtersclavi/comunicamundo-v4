@@ -320,6 +320,8 @@ class SelectionFlags(StrictModel):
 
 
 class SelectionBatch(StrictModel):
+    passage_ids: list[Sha256] = Field(default_factory=list)
+    brief_sha256: Sha256 | None = None
     batch_id: Sha256
     source_id: UUID
     source_ordinal: int = Field(ge=1)
@@ -341,35 +343,6 @@ class SubjectPassageAssignment(StrictModel):
 
 class SubjectPassageRouting(StrictModel):
     assignments: list[SubjectPassageAssignment] = Field(default_factory=list)
-
-
-class SubjectMaterialDigest(StrictModel):
-    reading: str = Field(min_length=1, max_length=4_000)
-
-    @field_validator("reading", mode="before")
-    @classmethod
-    def trim_long_reading(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        return _truncate_text(value, 4_000)
-
-
-class SubjectCorpusCore(StrictModel):
-    title: str = Field(min_length=1, max_length=140)
-    synthesis: str = Field(min_length=1, max_length=2_000)
-    essential_points: list[str] = Field(min_length=1, max_length=6)
-
-    @field_validator("synthesis", mode="before")
-    @classmethod
-    def trim_long_synthesis(cls, value: object) -> object:
-        if not isinstance(value, str):
-            return value
-        return _truncate_text(value, 2_000)
-
-
-class SubjectCorpusNuance(StrictModel):
-    tensions: list[str] = Field(default_factory=list, max_length=4)
-    qualifications: list[str] = Field(default_factory=list, max_length=4)
 
 
 class EditorialCondensation(StrictModel):
@@ -402,14 +375,31 @@ class ProvisionalEditorialProject(StrictModel):
     disclaimer: str = Field(min_length=1)
 
 
+class OriginalPassageReference(StrictModel):
+    source_id: UUID
+    paragraph_id: Sha256
+    passage_id: Sha256
+
+
+class ReferencedEvidenceProposal(StrictModel):
+    passage_indexes: list[int] = Field(min_length=1)
+    contribution: str = Field(min_length=1)
+    verbatim_excerpt: str | None = Field(default=None, max_length=280)
+
+
+class ReferencedSubjectProposal(StrictModel):
+    synthesis: str = Field(min_length=1)
+    essential_points: list[str] = Field(min_length=1)
+    tensions: list[str] = Field(default_factory=list)
+    qualifications: list[str] = Field(default_factory=list)
+    evidence: list[ReferencedEvidenceProposal] = Field(min_length=1)
+
+
 class EditorialEvidence(StrictModel):
     source_ordinals: list[int] = Field(min_length=1)
     contribution: str = Field(min_length=1)
+    passage_references: list[OriginalPassageReference] = Field(default_factory=list)
     verbatim_excerpt: str | None = Field(default=None)
-
-
-class SubjectCorpusEvidence(StrictModel):
-    evidence: list[EditorialEvidence] = Field(min_length=1, max_length=4)
 
 
 class EditorialKnowledgeUnit(StrictModel):

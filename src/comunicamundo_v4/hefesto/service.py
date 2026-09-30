@@ -19,7 +19,6 @@ from .contracts import (
     ContentReviewProposal,
     EditorialBrief,
     EditorialCondensation,
-    EditorialCondensationProposal,
     EditorialCorpus,
     EditorialKnowledgeUnit,
     EditorialProjectProposal,
@@ -40,10 +39,9 @@ from .contracts import (
     RunState,
     SelectionBatch,
     SelectionFlags,
-    SubjectCorpusCore,
-    SubjectCorpusEvidence,
-    SubjectCorpusNuance,
-    SubjectMaterialDigest,
+    EditorialEvidence,
+    OriginalPassageReference,
+    ReferencedSubjectProposal,
     SubjectPassageRouting,
     SourceAsset,
     SourceEnrichmentAssessment,
@@ -51,7 +49,6 @@ from .contracts import (
 from .gateway import ModelCallError, ModelGateway, ModelResult
 from .prompts import (
     SYSTEM,
-    condensation_prompt,
     content_draft_prompt,
     narrative_architecture_prompt,
     final_narrative_prompt,
@@ -60,14 +57,9 @@ from .prompts import (
     preservation_review_prompt,
     product_style_prompt,
     project_scaffold_prompt,
-    project_prompt,
-    render_condensations,
     render_passages,
     selection_prompt,
-    subject_corpus_core_prompt,
-    subject_corpus_evidence_prompt,
-    subject_corpus_nuance_prompt,
-    subject_material_digest_prompt,
+    referenced_subject_prompt,
     subject_passage_routing_prompt,
 )
 from .segmentation import segment_sources
@@ -93,6 +85,8 @@ class Repository(Protocol):
     async def selection_batches(
         self, execution_run_id: UUID
     ) -> list[SelectionBatch]: ...
+    async def subject_reading(self, execution_run_id: UUID, key: str) -> EditorialKnowledgeUnit | None: ...
+    async def save_subject_reading(self, execution_run_id: UUID, key: str, unit: EditorialKnowledgeUnit) -> None: ...
     async def save_condensation(
         self, execution_run_id: UUID, unit: EditorialCondensation
     ) -> None: ...
@@ -151,7 +145,7 @@ class Hefesto:
         self._comprehension_budget = comprehension_input_tokens
         self._condensation_budget = condensation_input_tokens
         self._subject_budget = subject_input_tokens
-        self._passage_target = min(8_000, selection_input_tokens // 3)
+        self._passage_target = min(8_000, selection_input_tokens // 3, subject_input_tokens // 3)
 
     async def prepare(
         self,
@@ -242,40 +236,12 @@ class Hefesto:
         }
         try:
             selected = await self._selected_passages(run, passages)
-            material = render_passages(selected, titles)
-            direct_prompt = project_prompt(
-                run.request.brief,
-                material,
-                material_kind="original selected source passages",
+            # Decide the questions from the brief before consulting sources.
+            # Original passages are routed/read below; never compressed for planning.
+            return await self._create_project(
+                run, "", "briefing only; source support is checked afterward",
+                selected, titles,
             )
-            if await self._count_tokens(direct_prompt) <= self._comprehension_budget:
-                return await self._create_project(
-                    run,
-                    material,
-                    "original selected source passages",
-                    selected,
-                    titles,
-                )
-
-            readings = await self._condense_passages(run, selected, titles)
-            level = 2
-            while True:
-                combined = render_condensations(readings)
-                final_prompt = project_prompt(
-                    run.request.brief,
-                    combined,
-                    material_kind="bounded editorial comprehensions of selected passages",
-                )
-                if await self._count_tokens(final_prompt) <= self._comprehension_budget:
-                    return await self._create_project(
-                        run,
-                        combined,
-                        "bounded editorial comprehensions of selected passages",
-                        selected,
-                        titles,
-                    )
-                readings = await self._condense_readings(run, readings, level)
-                level += 1
         except Exception as error:
             await self._fail(run, error)
             raise
@@ -446,6 +412,7 @@ class Hefesto:
                 raise ValueError(
                     "Editorial Project has no canonical editorial corpus"
                 )
+            originals = await self._referenced_originals(run)
             writing_brief = run.request.brief.model_copy(update={"duration_minutes": project.duration_minutes})
             target_words = _target_words(writing_brief, run.editorial_project.proposal if run.editorial_project else None)
             section_targets = _section_targets(project, target_words)
@@ -471,6 +438,7 @@ class Hefesto:
                         architecture,
                         target_words=target_words,
                         section_targets=section_targets,
+                        original_material=originals,
                     ),
                     schema=FinalTextProposal,
                     max_output_tokens=16_384,
@@ -488,6 +456,7 @@ class Hefesto:
                         project,
                         run.content_draft,
                         architecture=architecture,
+                        original_material=originals,
                     ),
                     schema=ContentReviewProposal,
                     max_output_tokens=8_192,
@@ -508,6 +477,7 @@ class Hefesto:
                         architecture=architecture,
                         target_words=target_words,
                         section_targets=section_targets,
+                        original_material=originals,
                     ),
                     schema=FinalTextProposal,
                     max_output_tokens=16_384,
@@ -812,7 +782,7 @@ class Hefesto:
         )
         input_tokens = await self._count_tokens(prompt)
         if input_tokens <= self._selection_budget:
-            identity = "selection-v1:" + ":".join(item.passage_id for item in core)
+            identity = "selection-v2:" + prompt + ":".join(item.passage_id for item in core)
             batch_id = sha256(identity.encode()).hexdigest()
             return [(batch_id, prompt, input_tokens, core)]
         left, right = split_packet(core)
@@ -846,6 +816,8 @@ class Hefesto:
                 allowed = {item.ordinal for item in passages}
                 flags = _validated_flags(result.value, allowed)
                 batch = SelectionBatch(
+                    passage_ids=[item.passage_id for item in passages],
+                    brief_sha256=sha256(run.request.brief.model_dump_json().encode()).hexdigest(),
                     batch_id=batch_id,
                     source_id=passages[0].source_id,
                     source_ordinal=passages[0].source_ordinal,
@@ -872,7 +844,12 @@ class Hefesto:
         by_source: dict[int, dict[int, Passage]] = defaultdict(dict)
         for passage in passages:
             by_source[passage.source_ordinal][passage.ordinal] = passage
+        current_ids = {p.passage_id for p in passages}
+        brief_key = sha256(run.request.brief.model_dump_json().encode()).hexdigest()
         for batch in await self._repository.selection_batches(run.execution_run_id):
+            # Old ordinal flags cannot silently address a different segmentation/scope.
+            if batch.brief_sha256 != brief_key or not batch.passage_ids or not set(batch.passage_ids) <= current_ids:
+                continue
             flags = batch.flags
             direct = {
                 *flags.relevant,
@@ -894,131 +871,6 @@ class Hefesto:
             if passage.ordinal in selected[passage.source_ordinal]
             and passage.ordinal in by_source[passage.source_ordinal]
         ]
-
-    async def _condense_passages(
-        self,
-        run: ProductRun,
-        passages: Sequence[Passage],
-        titles: dict[int, str | None],
-    ) -> list[EditorialCondensation]:
-        def prompt(items: Sequence[Passage]) -> str:
-            return condensation_prompt(
-                run.request.brief, render_passages(items, titles), level=1
-            )
-
-        candidates = candidate_packets(
-            passages,
-            token_budget=self._condensation_budget * 3 // 4,
-            render=prompt,
-        )
-        packets: list[tuple[list[Passage], str, int]] = []
-        for candidate in candidates:
-            packets.extend(
-                await self._measure_packet(candidate, prompt, self._condensation_budget)
-            )
-        existing = {
-            item.unit_id: item
-            for item in await self._repository.condensations(run.execution_run_id)
-        }
-        semaphore = asyncio.Semaphore(self._concurrency)
-
-        async def execute(
-            ordinal: int, items: list[Passage], text: str, tokens: int
-        ) -> EditorialCondensation:
-            identity = "condensation-v1:1:" + ":".join(
-                item.passage_id for item in items
-            )
-            unit_id = sha256(identity.encode()).hexdigest()
-            if unit_id in existing:
-                return existing[unit_id]
-            async with semaphore:
-                result = await self._call(
-                    run,
-                    task_type="editorial_comprehension_part",
-                    prompt=text,
-                    schema=EditorialCondensationProposal,
-                    max_output_tokens=4_096,
-                    thinking_tokens=1_000,
-                )
-                unit = EditorialCondensation(
-                    unit_id=unit_id,
-                    level=1,
-                    ordinal=ordinal,
-                    source_ordinals=sorted({item.source_ordinal for item in items}),
-                    input_tokens=tokens,
-                    reading=result.value.reading,
-                )
-                await self._repository.save_condensation(
-                    run.execution_run_id, unit
-                )
-                return unit
-
-        return list(
-            await asyncio.gather(
-                *(
-                    execute(ordinal, items, text, tokens)
-                    for ordinal, (items, text, tokens) in enumerate(packets, start=1)
-                )
-            )
-        )
-
-    async def _condense_readings(
-        self,
-        run: ProductRun,
-        readings: Sequence[EditorialCondensation],
-        level: int,
-    ) -> list[EditorialCondensation]:
-        def prompt(items: Sequence[EditorialCondensation]) -> str:
-            return condensation_prompt(
-                run.request.brief, render_condensations(items), level=level
-            )
-
-        candidates = candidate_packets(
-            readings,
-            token_budget=self._condensation_budget * 3 // 4,
-            render=prompt,
-        )
-        packets: list[tuple[list[EditorialCondensation], str, int]] = []
-        for candidate in candidates:
-            packets.extend(
-                await self._measure_packet(candidate, prompt, self._condensation_budget)
-            )
-        if len(packets) >= len(readings):
-            raise ValueError("editorial comprehension cannot be reduced within the token budget")
-        existing = {
-            item.unit_id: item
-            for item in await self._repository.condensations(run.execution_run_id)
-        }
-        result: list[EditorialCondensation] = []
-        for ordinal, (items, text, tokens) in enumerate(packets, start=1):
-            identity = f"condensation-v1:{level}:" + ":".join(
-                item.unit_id for item in items
-            )
-            unit_id = sha256(identity.encode()).hexdigest()
-            if unit_id in existing:
-                result.append(existing[unit_id])
-                continue
-            response = await self._call(
-                run,
-                task_type="editorial_comprehension_merge",
-                prompt=text,
-                schema=EditorialCondensationProposal,
-                max_output_tokens=4_096,
-                thinking_tokens=1_000,
-            )
-            unit = EditorialCondensation(
-                unit_id=unit_id,
-                level=level,
-                ordinal=ordinal,
-                source_ordinals=sorted(
-                    {source for item in items for source in item.source_ordinals}
-                ),
-                input_tokens=tokens,
-                reading=response.value.reading,
-            )
-            await self._repository.save_condensation(run.execution_run_id, unit)
-            result.append(unit)
-        return result
 
     async def _measure_packet(
         self,
@@ -1160,153 +1012,109 @@ class Hefesto:
         passages: Sequence[Passage],
         titles: dict[int, str | None],
     ) -> EditorialKnowledgeUnit:
-        def render_raw(items: Sequence[Passage]) -> str:
-            return subject_material_digest_prompt(
-                run.request.brief,
-                subject,
-                render_passages(items, titles),
-                material_kind="passages routed only to this subject",
-            )
+        def render(items: Sequence[Passage]) -> str:
+            return referenced_subject_prompt(run.request.brief, subject, items, titles)
 
-        candidates = candidate_packets(
-            passages,
-            token_budget=self._subject_budget * 3 // 4,
-            render=render_raw,
-        )
         packets: list[tuple[list[Passage], str, int]] = []
-        for candidate in candidates:
-            packets.extend(
-                await self._measure_packet(candidate, render_raw, self._subject_budget)
-            )
-
+        for candidate in candidate_packets(
+            passages, token_budget=self._subject_budget * 3 // 4, render=render
+        ):
+            packets.extend(await self._measure_packet(candidate, render, self._subject_budget))
+        if not packets:
+            raise ValueError("Subject comprehension requires original passages")
+        paragraphs = {
+            (p.source_id, p.ordinal): p for p in await self._paragraphs(run)
+        }
         semaphore = asyncio.Semaphore(self._concurrency)
 
-        async def digest_raw(
-            ordinal: int, items: list[Passage], prompt: str, tokens: int
-        ) -> EditorialCondensation:
+        async def read_packet(items: list[Passage], prompt: str) -> EditorialKnowledgeUnit:
+            identity = "referenced-reading-v1:" + SYSTEM + prompt + ":".join(p.passage_id for p in items)
+            key = sha256(identity.encode()).hexdigest()
+            cached = await self._repository.subject_reading(run.execution_run_id, key)
+            if cached is not None:
+                return cached
             async with semaphore:
                 result = await self._call(
-                    run,
-                    task_type="editorial_subject_digest",
-                    prompt=prompt,
-                    schema=SubjectMaterialDigest,
-                    max_output_tokens=8_192,
+                    run, task_type="editorial_subject_reading", prompt=prompt,
+                    schema=ReferencedSubjectProposal, max_output_tokens=8_192,
                     thinking_tokens=1_000,
                 )
-            identity = "subject-digest-v1:" + _subject_key(subject.title) + ":" + ":".join(
-                item.passage_id for item in items
-            )
-            return EditorialCondensation(
-                unit_id=sha256(identity.encode()).hexdigest(),
-                level=1,
-                ordinal=ordinal,
-                source_ordinals=sorted({item.source_ordinal for item in items}),
-                input_tokens=tokens,
-                reading=result.value.reading,
-            )
-
-        readings = list(await asyncio.gather(*(
-            digest_raw(ordinal, items, prompt, tokens)
-            for ordinal, (items, prompt, tokens) in enumerate(packets, start=1)
-        )))
-        level = 2
-        merge_input_budget = max(self._subject_budget, 8_000)
-        while len(readings) > 1:
-            def render_readings(items: Sequence[EditorialCondensation]) -> str:
-                return subject_material_digest_prompt(
-                    run.request.brief,
-                    subject,
-                    render_condensations(items),
-                    material_kind="bounded readings for this subject",
-                )
-
-            candidates = candidate_packets(
-                readings,
-                token_budget=merge_input_budget * 3 // 4,
-                render=render_readings,
-            )
-            merge_packets: list[
-                tuple[list[EditorialCondensation], str, int]
-            ] = []
-            for candidate in candidates:
-                merge_packets.extend(
-                    await self._measure_packet(
-                        candidate, render_readings, merge_input_budget
-                    )
-                )
-            if len(merge_packets) >= len(readings):
-                raise ValueError(
-                    "subject material cannot be reduced within the token budget"
-                )
-            merged: list[EditorialCondensation] = []
-            for ordinal, (items, prompt, tokens) in enumerate(
-                merge_packets, start=1
-            ):
-                result = await self._call(
-                    run,
-                    task_type="editorial_subject_digest_merge",
-                    prompt=prompt,
-                    schema=SubjectMaterialDigest,
-                    max_output_tokens=8_192,
-                    thinking_tokens=1_000,
-                )
-                identity = (
-                    f"subject-digest-v1:{_subject_key(subject.title)}:{level}:"
-                    + ":".join(item.unit_id for item in items)
-                )
-                merged.append(EditorialCondensation(
-                    unit_id=sha256(identity.encode()).hexdigest(),
-                    level=level,
-                    ordinal=ordinal,
-                    source_ordinals=sorted({
-                        source for item in items for source in item.source_ordinals
-                    }),
-                    input_tokens=tokens,
-                    reading=result.value.reading,
+            evidence = []
+            for item in result.value.evidence:
+                indexes = list(dict.fromkeys(item.passage_indexes))
+                if any(index < 0 or index >= len(items) for index in indexes):
+                    raise ValueError("Evidence references a passage outside its original packet")
+                originals = [items[index] for index in indexes]
+                if item.verbatim_excerpt is not None and not any(
+                    item.verbatim_excerpt in passage.text for passage in originals
+                ):
+                    raise ValueError("Evidence quotation does not occur in its referenced original")
+                references = []
+                for passage in originals:
+                    paragraph = paragraphs.get((passage.source_id, passage.paragraph_ordinal))
+                    if paragraph is None:
+                        raise ValueError("Referenced original paragraph is unavailable")
+                    references.append(OriginalPassageReference(
+                        source_id=passage.source_id, paragraph_id=paragraph.paragraph_id,
+                        passage_id=passage.passage_id,
+                    ))
+                evidence.append(EditorialEvidence(
+                    source_ordinals=sorted({p.source_ordinal for p in originals}),
+                    passage_references=references, contribution=item.contribution,
+                    verbatim_excerpt=item.verbatim_excerpt,
                 ))
-            readings = merged
-            level += 1
+            unit = EditorialKnowledgeUnit(
+                title=subject.title, synthesis=result.value.synthesis,
+                essential_points=result.value.essential_points,
+                tensions=result.value.tensions, qualifications=result.value.qualifications,
+                evidence=evidence,
+            )
+            await self._repository.save_subject_reading(run.execution_run_id, key, unit)
+            return unit
 
-        digest = readings[0].reading
-        core_result, nuance_result, evidence_result = await asyncio.gather(
-            self._call(
-                run,
-                task_type="editorial_subject_core",
-                prompt=subject_corpus_core_prompt(
-                    run.request.brief, subject, digest
-                ),
-                schema=SubjectCorpusCore,
-                max_output_tokens=2_048,
-                thinking_tokens=0,
-            ),
-            self._call(
-                run,
-                task_type="editorial_subject_nuance",
-                prompt=subject_corpus_nuance_prompt(
-                    run.request.brief, subject, digest
-                ),
-                schema=SubjectCorpusNuance,
-                max_output_tokens=2_048,
-                thinking_tokens=0,
-            ),
-            self._call(
-                run,
-                task_type="editorial_subject_evidence",
-                prompt=subject_corpus_evidence_prompt(
-                    run.request.brief, subject, digest
-                ),
-                schema=SubjectCorpusEvidence,
-                max_output_tokens=3_072,
-                thinking_tokens=0,
-            ),
+        results = await asyncio.gather(
+            *(read_packet(items, prompt) for items, prompt, _ in packets),
+            return_exceptions=True,
         )
+        errors = [item for item in results if isinstance(item, BaseException)]
+        if errors:
+            raise errors[0]
+        units = results
+        # Preserve every packet's understanding and references without LLM recompression.
         return EditorialKnowledgeUnit(
-            title=core_result.value.title,
-            synthesis=core_result.value.synthesis,
-            essential_points=core_result.value.essential_points,
-            tensions=nuance_result.value.tensions,
-            qualifications=nuance_result.value.qualifications,
-            evidence=evidence_result.value.evidence,
+            title=subject.title,
+            synthesis="\n\n".join(dict.fromkeys(unit.synthesis for unit in units)),
+            essential_points=list(dict.fromkeys(point for unit in units for point in unit.essential_points)),
+            tensions=list(dict.fromkeys(point for unit in units for point in unit.tensions)),
+            qualifications=list(dict.fromkeys(point for unit in units for point in unit.qualifications)),
+            evidence=[item for unit in units for item in unit.evidence],
+        )
+
+    async def _referenced_originals(self, run: ProductRun) -> str:
+        project = run.editorial_project.proposal
+        paragraphs = await self._paragraphs(run)
+        by_id = {p.paragraph_id: p for p in paragraphs}
+        selected: dict[str, Paragraph] = {}
+        for unit in project.editorial_corpus.units:
+            for evidence in unit.evidence:
+                if evidence.passage_references:
+                    for reference in evidence.passage_references:
+                        paragraph = by_id.get(reference.paragraph_id)
+                        if paragraph is None or paragraph.source_id != reference.source_id:
+                            raise ValueError("Editorial evidence original is missing or belongs to another source")
+                        selected[paragraph.paragraph_id] = paragraph
+                else:
+                    # Compatibility with already approved legacy PEs: read originals,
+                    # never invent fine-grained references for their old evidence.
+                    for ordinal in evidence.source_ordinals:
+                        matches = [p for p in paragraphs if p.source_ordinal == ordinal]
+                        if not matches:
+                            raise ValueError("Legacy editorial evidence references an unavailable source")
+                        selected.update((p.paragraph_id, p) for p in matches)
+        titles = {s.source_id: s.title for s in run.request.sources}
+        return "\n\n".join(
+            f"SOURCE: {titles.get(p.source_id)}; PARAGRAPH_ID: {p.paragraph_id}\n{p.text}"
+            for p in selected.values()
         )
 
     async def _create_project(

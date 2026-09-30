@@ -15,3 +15,19 @@ O experimento da matriz não concluiu o Projeto Editorial do Teste B após cerca
 | Enriquecimento por fonte | Busca pontual para o assunto escolhido, aquisição e ingestão apenas da fonte nova, seleção de seus trechos e revisão do projeto com a compreensão já existente. Pode aumentar a duração; preserva os demais assuntos. |
 
 O pré-projeto aprovado orienta a busca e o projeto definitivo. Assuntos sem suporte nas fontes adquiridas não devem ser apresentados como sustentados documentalmente. A ingestão original, seus formatos, extração, normalização e estrutura persistida não fazem parte das revisões editoriais.
+
+
+## Contrato vigente das referências — 30/09/2026
+
+O briefing ou pré-PE aprovado define as perguntas antes da compreensão das fontes.
+A triagem devolve flags e referências; a compreensão lê diretamente os trechos
+originais pertinentes, em lotes, e mantém suas referências no entendimento
+editorial. Não há etapa de condensação ou resumo intermediário substituindo o
+material original. Na redação e revisão de conteúdo, os originais referenciados
+são recuperados do PostgreSQL para sustentar o desenvolvimento autorizado.
+
+Enriquecimento congela o PE anterior e acrescenta apenas a contribuição pertinente
+da nova fonte, inclusive perspectivas novas autorizadas pela oportunidade.
+Remoque pode modificar o PE conforme a vontade do usuário e revisitar fontes
+quando necessário. Uma incorporação que falhe preserva o PE e mantém visível o
+registro da aquisição. Nenhum erro autoriza mudar esses contratos.

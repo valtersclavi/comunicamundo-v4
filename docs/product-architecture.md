@@ -14,11 +14,11 @@ A aplicação web e a API são entregues pelo mesmo Cloud Run Service. O navegad
 2. Parágrafos e frases são gravados no PostgreSQL antes da primeira chamada de modelo.
 3. Uma varredura em lotes orientada pelo briefing devolve somente flags compactas: relevante, central, incerto e contexto adjacente necessário.
 4. Os parágrafos selecionados seguem como texto original para a compreensão editorial.
-5. Se o material selecionado couber no orçamento medido de tokens, uma única chamada produz o Projeto Editorial completo.
-6. Se não couber, partes limitadas por tokens são compreendidas e persistidas; consolidações adicionais só existem quando outro limite real exigir.
+5. A estrutura de ideias, perguntas e assuntos parte apenas do briefing ou do pré-PE aprovado. O material selecionado é encaminhado a esses assuntos, sem determinar uma nova agenda.
+6. Cada lote medido de trechos originais recebe uma leitura editorial direta. Essa chamada registra entendimento, nuances e evidências por referências. Não há condensação preliminar, resumo intermediário nem chamada para resumir resumos; os resultados dos lotes são preservados sem recompressão pelo modelo.
 7. Eixo Narrativo e Projeto Editorial são concebidos juntos e apresentados em uma única aprovação humana.
-8. A mesma compreensão também produz um corpus editorial canônico: a síntese integrada, evidências, tensões, qualificações e inferências proibidas que sustentam o projeto.
-9. Depois da aprovação, o redator de conteúdo recebe esse estado editorial completo, sem reler nem reinterpretar as fontes originais.
+8. A compreensão produz notas editoriais e referências estáveis aos originais: source_id, paragraph_id e passage_id. O modelo indica posições locais no lote; o programa resolve a identidade real da fonte. Citações devem existir literalmente no trecho referenciado. Notas editoriais não substituem documentos.
+9. Depois da aprovação, redação, revisão de conteúdo e correção recebem o estado editorial e os parágrafos originais recuperados pelas referências, sem reabrir o escopo aprovado. Referência ausente causa erro explícito; não há fallback silencioso para resumos. PEs antigos sem referências finas recuperam os originais das fontes já indicadas, sem inventar endereços retrospectivos.
 10. Um editor compara a redação com corpus, Eixo e projeto e devolve correções localizadas. O mesmo redator altera somente os pontos pedidos; se não houver defeito, a redação segue intacta.
 11. Um redator de estilo recebe somente o texto editorialmente fechado e a especificação do produto. Ele tem liberdade total de forma e nenhuma liberdade de conteúdo.
 12. Antes da edição narrativa final, uma verificação compara conteúdo fechado e versão estilizada. Divergências voltam como correções pontuais sobre a versão estilizada.
@@ -55,7 +55,7 @@ another agenda. No topic-specific exceptions or rules designed to fit a test.
 
 Source enrichment is an additive operation on a frozen proposed Editorial
 Project. The chosen opportunity scopes research and extraction. Only the newly
-acquired sources are selected and digested; the general scaffold/routing builder
+acquired sources are selected and read directly; the general scaffold/routing builder
 is not called. The contribution is assessed against the brief, opportunity and
 frozen PE. Pertinence does not require prior mention in the original brief: the
 selected opportunity authorizes new perspectives, examples, contrasts and
@@ -66,6 +66,8 @@ previous title, promise, axis, subject content, knowledge units, qualifications
 and forbidden inferences. Do not reread old sources to discover additional topics.
 Acquisition identity, contribution outcome and enrichment-specific usage are
 recorded in the source_enrichment stage and the source is displayed in the UI.
+Acquisition records survive failed incorporation; the UI distinguishes failure
+from a completed assessment that found no addition, while preserving the old PE.
 
 Writing and narrative editing use the approved PE's current duration, including
 additions, rather than the original briefing duration. Duration remains guidance,
@@ -80,8 +82,18 @@ User remoque is distinct from additive source enrichment. The user's instruction
 may revise the PE's axis, scope, subjects, ordering, depth and duration. Preserve
 what the instruction does not change. Plan the requested revision from the
 current PE and corpus; revisit stored sources only where the user asks for it
-or the requested change needs evidence absent from the corpus. Route and digest
-only material relevant to those revised subjects. No automatic full rebuild,
+or the requested change needs evidence absent from the corpus. Route and read original passages directly
+only for those revised subjects. No automatic full rebuild,
 no compulsory source rereading and no new external search from remoque. Prior
 source-coverage restrictions must not block an explicitly authorized revisit.
 The revised PE returns for user approval and invalidates previous text artifacts.
+
+## Referências e retomada — restauração de 30/09/2026
+
+- A seleção persiste flags e identidades dos trechos, vinculadas ao briefing vigente. Flags de outra segmentação ou escopo não são reutilizadas por coincidência de número.
+- Os lotes respeitam o orçamento medido. Parágrafos grandes são divididos entre frases completas; não são substituídos por resumos nem truncados para caber.
+- Leituras diretas concluídas são persistidas em `subject_readings`, com chave do prompt, escopo e identidades dos originais. A retomada reaproveita resultados idênticos; remoque com outro escopo não reutiliza uma leitura inadequada.
+- A tabela antiga de condensações permanece apenas por compatibilidade de armazenamento. Nenhum caminho editorial ativo lê essas condensações como material documental.
+- Enriquecimento usa somente novas fontes; remoque só revisita originais conforme a revisão autorizada; contribuições pequenas do LLM permanecem explicitamente não documentais.
+- Ingestão, aquisição, formatos e o editor de narrativa não foram reformulados nesta restauração.
+- A migração 1006 cria apenas a tabela de leituras referenciadas, sem reescrever PEs ou fontes existentes.

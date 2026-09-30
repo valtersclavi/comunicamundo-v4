@@ -122,10 +122,8 @@ async def test_short_corpus_goes_from_flags_directly_to_one_complete_project() -
     assert task_types.count("source_selection") == 2
     assert task_types.count("editorial_project_scaffold") == 1
     assert task_types.count("editorial_subject_routing") == 1
-    assert task_types.count("editorial_subject_digest") == 1
-    assert task_types.count("editorial_subject_core") == 1
-    assert task_types.count("editorial_subject_nuance") == 1
-    assert task_types.count("editorial_subject_evidence") == 1
+    assert task_types.count("editorial_subject_reading") == 1
+    assert not any("digest" in value for value in task_types)
     assert not any(value.startswith("editorial_comprehension") for value in task_types)
     assert run.state is RunState.PROJECT_PROPOSED
     assert run.editorial_project is not None
@@ -156,31 +154,15 @@ async def test_long_corpus_uses_measured_bounded_comprehension_packets() -> None
             segment_sources(source.sources), passage_token_target=666
         )
     )
-    assert "editorial_comprehension_part" in task_types
-    assert task_types.index("editorial_project_scaffold") < task_types.index(
-        "editorial_subject_routing"
-    )
-    assert task_types.index("editorial_subject_routing") < task_types.index(
-        "editorial_subject_digest"
-    )
-    assert task_types.index("editorial_subject_digest") < task_types.index(
-        "editorial_subject_core"
-    )
+    assert not any("comprehension_part" in task or "digest" in task for task in task_types)
+    assert task_types.index("editorial_project_scaffold") < task_types.index("editorial_subject_routing")
+    assert task_types.index("editorial_subject_routing") < task_types.index("editorial_subject_reading")
     assert completed.state is RunState.PROJECT_PROPOSED
-    assert all(
-        item.prompt_tokens <= (2_000 if item.task_type == "source_selection" else 1_000)
-        for item in repository.usage[run.execution_run_id]
-        if item.task_type not in {
-            "editorial_project_scaffold",
-            "editorial_subject_routing",
-            "editorial_subject_digest",
-            "editorial_subject_digest_merge",
-            "editorial_subject_core",
-            "editorial_subject_nuance",
-            "editorial_subject_evidence",
-        }
-    )
-    assert await repository.condensations(run.execution_run_id)
+    assert not await repository.condensations(run.execution_run_id)
+    assert repository.readings
+    assert all(item.prompt_tokens <= 5_000 for item in repository.usage[run.execution_run_id]
+               if item.task_type == "editorial_subject_reading")
+
 
 
 @pytest.mark.asyncio
@@ -195,8 +177,11 @@ async def test_multiple_sources_reach_the_same_final_comprehension() -> None:
     final_prompt = next(
         item["prompt"] for item in gateway.calls if item["task_type"] == "editorial_project_scaffold"
     )
-    assert "SOURCE 1: One" in final_prompt
-    assert "SOURCE 2: Two" in final_prompt
+    assert "First claim." not in final_prompt
+    assert "Another source contributes" not in final_prompt
+    reading = next(item["prompt"] for item in gateway.calls if item["task_type"] == "editorial_subject_reading")
+    assert '"source_title": "One"' in reading
+    assert '"source_title": "Two"' in reading
 
 
 @pytest.mark.asyncio
@@ -279,6 +264,8 @@ async def test_approved_project_produces_persisted_editorial_pipeline() -> None:
     assert '"editorial_corpus"' in draft_prompt
     assert "SOURCE 1: One" not in draft_prompt
     assert "SOURCE 2: Two" not in draft_prompt
+    assert "First claim. Its qualification." in draft_prompt
+    assert "Another source contributes a different view." in draft_prompt
     style_prompt = str(text_calls[2]["prompt"])
     assert "EDITORIALLY CLOSED TEXT" in style_prompt
     assert "editorial_corpus" not in style_prompt

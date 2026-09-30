@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 
 from comunicamundo_v4.hefesto.contracts import (
-    CallUsage, NormalizedSource, SourceEnrichmentAssessment, SubjectCorpusEvidence,
+    CallUsage, NormalizedSource, SourceEnrichmentAssessment,
 )
 from comunicamundo_v4.hefesto.gateway import ModelResult
 from comunicamundo_v4.hefesto.segmentation import segment_sources
@@ -24,12 +24,7 @@ class EnrichmentGateway(FakeGateway):
                 target_subject_index=self.target, additional_minutes=3,
             ), usage=CallUsage(task_type=kwargs["task_type"], prompt_tokens=10, output_tokens=5,
                                total_tokens=15, reasoning_tokens=0, latency_ms=1, status="succeeded"))
-        result = await super().generate(**kwargs)
-        if kwargs['task_type'] == 'editorial_subject_evidence' and 'EXTRACTION SCOPE' in kwargs['prompt']:
-            return ModelResult(value=SubjectCorpusEvidence(evidence=[{
-                'source_ordinals': [3], 'contribution': 'New evidence for the selected opportunity.',
-            }]), usage=result.usage)
-        return result
+        return await super().generate(**kwargs)
 
 
 async def prepared():
@@ -70,7 +65,7 @@ async def test_enrichment_preserves_frozen_content_and_reads_only_new_source(tar
     assert _target_words(run.request.brief, proposal) == proposal.duration_minutes * 140
     assert not any(c['task_type'] in {'editorial_project_scaffold', 'editorial_subject_routing'} for c in gateway.calls)
     for c in gateway.calls:
-        if c['task_type'] in {'source_selection', 'editorial_subject_digest'}:
+        if c['task_type'] in {'source_selection', 'editorial_subject_reading'}:
             assert 'NEW_ONLY' in c['prompt']
             assert 'First claim.' not in c['prompt']
             assert 'EXTRACTION SCOPE' in c['prompt']
