@@ -802,33 +802,48 @@ class Hefesto:
     ) -> None:
         semaphore = asyncio.Semaphore(self._concurrency)
 
-        async def execute(spec: tuple[str, str, int, list[Passage]]) -> None:
+        existing = {batch.batch_id: batch for batch in await self._repository.selection_batches(run.execution_run_id)}
+
+        async def execute(spec: tuple[str, str, int, list[Passage]]) -> SelectionFlags:
             batch_id, prompt, input_tokens, passages = spec
-            async with semaphore:
-                result = await self._call(
-                    run,
-                    task_type="source_selection",
-                    prompt=prompt,
-                    schema=SelectionFlags,
-                    max_output_tokens=2_048,
-                    thinking_tokens=0,
-                )
-                allowed = {item.ordinal for item in passages}
-                flags = _validated_flags(result.value, allowed)
-                batch = SelectionBatch(
-                    passage_ids=[item.passage_id for item in passages],
-                    brief_sha256=sha256(run.request.brief.model_dump_json().encode()).hexdigest(),
-                    batch_id=batch_id,
-                    source_id=passages[0].source_id,
-                    source_ordinal=passages[0].source_ordinal,
-                    first_passage_ordinal=passages[0].ordinal,
-                    last_passage_ordinal=passages[-1].ordinal,
-                    input_tokens=input_tokens,
-                    flags=flags,
-                )
-                await self._repository.save_selection_batch(
-                    run.execution_run_id, batch
-                )
+            if batch_id in existing:
+                return existing[batch_id].flags
+            try:
+                async with semaphore:
+                    result = await self._call(
+                        run, task_type="source_selection", prompt=prompt,
+                        schema=SelectionFlags, max_output_tokens=2_048, thinking_tokens=0,
+                    )
+                flags = _validated_flags(result.value, {item.ordinal for item in passages})
+            except ModelCallError as error:
+                if "MAX_TOKENS" not in str(error).upper():
+                    raise
+                children = []
+                for part in _split_original_work(passages):
+                    child_prompt = selection_prompt(
+                        run.request.brief, part,
+                        source_title=run.request.sources[part[0].source_ordinal - 1].title,
+                    )
+                    identity = "selection-v2:" + child_prompt + ":".join(p.passage_id for p in part)
+                    child = (sha256(identity.encode()).hexdigest(), child_prompt,
+                             await self._count_tokens(child_prompt), part)
+                    children.append(await execute(child))
+                flags = SelectionFlags(**{
+                    name: sorted({ordinal for child in children for ordinal in getattr(child, name)})
+                    for name in SelectionFlags.model_fields
+                })
+            batch = SelectionBatch(
+                passage_ids=[item.passage_id for item in passages],
+                brief_sha256=sha256(run.request.brief.model_dump_json().encode()).hexdigest(),
+                batch_id=batch_id, source_id=passages[0].source_id,
+                source_ordinal=passages[0].source_ordinal,
+                first_passage_ordinal=passages[0].ordinal,
+                last_passage_ordinal=passages[-1].ordinal,
+                input_tokens=input_tokens, flags=flags,
+            )
+            await self._repository.save_selection_batch(run.execution_run_id, batch)
+            existing[batch_id] = batch
+            return flags
 
         results = await asyncio.gather(
             *(execute(spec) for spec in specs), return_exceptions=True
@@ -882,7 +897,7 @@ class Hefesto:
         tokens = await self._count_tokens(prompt)
         if tokens <= budget:
             return [(items, prompt, tokens)]
-        left, right = split_packet(items)
+        left, right = (_split_original_work(items) if isinstance(items[0], Passage) else split_packet(items))
         return [
             *await self._measure_packet(left, render, budget),
             *await self._measure_packet(right, render, budget),
@@ -963,21 +978,29 @@ class Hefesto:
 
         async def execute(
             items: list[Passage], prompt: str
-        ) -> tuple[list[Passage], SubjectPassageRouting]:
-            async with semaphore:
-                result = await self._call(
-                    run,
-                    task_type="editorial_subject_routing",
-                    prompt=prompt,
-                    schema=SubjectPassageRouting,
-                    max_output_tokens=4_096,
-                    thinking_tokens=0,
-                )
-            return items, result.value
+        ) -> list[tuple[list[Passage], SubjectPassageRouting]]:
+            try:
+                async with semaphore:
+                    result = await self._call(
+                        run, task_type="editorial_subject_routing", prompt=prompt,
+                        schema=SubjectPassageRouting, max_output_tokens=4_096,
+                        thinking_tokens=0,
+                    )
+                return [(items, result.value)]
+            except ModelCallError as error:
+                if "MAX_TOKENS" not in str(error).upper():
+                    raise
+                left, right = _split_original_work(items)
+                return [*await execute(left, render(left)), *await execute(right, render(right))]
 
-        results = await asyncio.gather(
-            *(execute(items, prompt) for items, prompt, _ in packets)
+        batches = await asyncio.gather(
+            *(execute(items, prompt) for items, prompt, _ in packets),
+            return_exceptions=True,
         )
+        errors = [item for item in batches if isinstance(item, BaseException)]
+        if errors:
+            raise errors[0]
+        results = [pair for batch in batches for pair in batch]
         routed: dict[int, list[Passage]] = defaultdict(list)
         seen: dict[int, set[str]] = defaultdict(set)
         subject_count = len(scaffold.source_supported_subjects)
@@ -1003,7 +1026,12 @@ class Hefesto:
                         continue
                     seen[subject_index].add(passage.passage_id)
                     routed[subject_index].append(passage)
-        return dict(routed)
+        original_by_coordinate = {(p.source_id, p.ordinal): p for p in routable}
+        return {
+            index: list({(p.source_id, p.ordinal): original_by_coordinate[(p.source_id, p.ordinal)]
+                         for p in items}.values())
+            for index, items in routed.items()
+        }
 
     async def _create_subject_corpus(
         self,
@@ -1031,14 +1059,36 @@ class Hefesto:
             identity = "referenced-reading-v1:" + SYSTEM + prompt + ":".join(p.passage_id for p in items)
             key = sha256(identity.encode()).hexdigest()
             cached = await self._repository.subject_reading(run.execution_run_id, key)
+            if cached is None:
+                old_prompt = prompt.replace(
+                    "Quote exact original wording when necessary; otherwise use null. Preserve the\ncomplete quotation without truncation or a character-count limit.",
+                    "Quote at most 280 characters of exact original wording when necessary; otherwise use null.",
+                )
+                old_identity = "referenced-reading-v1:" + SYSTEM + old_prompt + ":".join(p.passage_id for p in items)
+                cached = await self._repository.subject_reading(
+                    run.execution_run_id, sha256(old_identity.encode()).hexdigest()
+                )
             if cached is not None:
                 return cached
-            async with semaphore:
-                result = await self._call(
-                    run, task_type="editorial_subject_reading", prompt=prompt,
-                    schema=ReferencedSubjectProposal, max_output_tokens=8_192,
-                    thinking_tokens=1_000,
-                )
+            try:
+                async with semaphore:
+                    result = await self._call(
+                        run, task_type="editorial_subject_reading", prompt=prompt,
+                        schema=ReferencedSubjectProposal, max_output_tokens=8_192,
+                        thinking_tokens=1_000,
+                    )
+            except ModelCallError as error:
+                if "MAX_TOKENS" not in str(error).upper():
+                    raise
+                left, right = _split_original_work(items)
+                # The failed large response is never treated as valid partial data.
+                # Complete smaller tasks and persist each before assembling in code.
+                children = []
+                for part in (left, right):
+                    children.append(await read_packet(part, render(part)))
+                unit = _join_subject_readings(subject.title, children)
+                await self._repository.save_subject_reading(run.execution_run_id, key, unit)
+                return unit
             evidence = []
             for item in result.value.evidence:
                 indexes = list(dict.fromkeys(item.passage_indexes))
@@ -1080,15 +1130,7 @@ class Hefesto:
         if errors:
             raise errors[0]
         units = results
-        # Preserve every packet's understanding and references without LLM recompression.
-        return EditorialKnowledgeUnit(
-            title=subject.title,
-            synthesis="\n\n".join(dict.fromkeys(unit.synthesis for unit in units)),
-            essential_points=list(dict.fromkeys(point for unit in units for point in unit.essential_points)),
-            tensions=list(dict.fromkeys(point for unit in units for point in unit.tensions)),
-            qualifications=list(dict.fromkeys(point for unit in units for point in unit.qualifications)),
-            evidence=[item for unit in units for item in unit.evidence],
-        )
+        return _join_subject_readings(subject.title, units)
 
     async def _referenced_originals(self, run: ProductRun) -> str:
         project = run.editorial_project.proposal
@@ -1453,7 +1495,7 @@ class Hefesto:
                     await self._repository.record_usage(
                         run.execution_run_id, run.project_id, failed
                     )
-                if error.retryable and attempt < 2:
+                if error.retryable and "MAX_TOKENS" not in str(error).upper() and attempt < 2:
                     await asyncio.sleep(2 ** (attempt + 1))
                     continue
                 raise
@@ -1715,3 +1757,38 @@ def _section_targets(
         }
         for subject, words in zip(subjects, targets, strict=True)
     ]
+
+
+def _split_original_work(items: Sequence[Passage]) -> tuple[list[Passage], list[Passage]]:
+    """Split processing units without rewriting or shortening the stored original."""
+    if len(items) > 1:
+        return split_packet(list(items))
+    passage = items[0]
+    text = passage.text
+    if len(text) < 2:
+        raise ValueError("The model cannot process even one character in this task")
+    middle = len(text) // 2
+    boundaries = [m.end() for m in re.finditer(r"[.!?][ \n]+|\n\n", text)
+                  if 0 < m.end() < len(text)]
+    if not boundaries:
+        boundaries = [m.end() for m in re.finditer(r"\s+", text) if 0 < m.end() < len(text)]
+    cut = min(boundaries, key=lambda pos: abs(pos - middle)) if boundaries else middle
+    halves = []
+    for start, end in ((0, cut), (cut, len(text))):
+        halves.append(passage.model_copy(update={
+            "passage_id": sha256(f"{passage.passage_id}:{start}:{end}".encode()).hexdigest(),
+            "text": text[start:end],
+        }))
+    return [halves[0]], [halves[1]]
+
+
+def _join_subject_readings(title: str, units: Sequence[EditorialKnowledgeUnit]) -> EditorialKnowledgeUnit:
+    """Assembly is local; no LLM call recompresses or regenerates the combined work."""
+    return EditorialKnowledgeUnit(
+        title=title,
+        synthesis="\n\n".join(dict.fromkeys(unit.synthesis for unit in units)),
+        essential_points=list(dict.fromkeys(p for unit in units for p in unit.essential_points)),
+        tensions=list(dict.fromkeys(p for unit in units for p in unit.tensions)),
+        qualifications=list(dict.fromkeys(p for unit in units for p in unit.qualifications)),
+        evidence=[e for unit in units for e in unit.evidence],
+    )

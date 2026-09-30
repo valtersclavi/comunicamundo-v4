@@ -6,7 +6,7 @@ from hashlib import sha256
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -308,7 +308,7 @@ class Passage(StrictModel):
     source_ordinal: int = Field(ge=1)
     ordinal: int = Field(ge=1)
     paragraph_ordinal: int = Field(ge=1)
-    text: str = Field(min_length=1)
+    text: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=1)
 
 
 class SelectionFlags(StrictModel):
@@ -384,7 +384,7 @@ class OriginalPassageReference(StrictModel):
 class ReferencedEvidenceProposal(StrictModel):
     passage_indexes: list[int] = Field(min_length=1)
     contribution: str = Field(min_length=1)
-    verbatim_excerpt: str | None = Field(default=None, max_length=280)
+    verbatim_excerpt: Annotated[str, StringConstraints(strip_whitespace=False)] | None = None
 
 
 class ReferencedSubjectProposal(StrictModel):
@@ -399,7 +399,7 @@ class EditorialEvidence(StrictModel):
     source_ordinals: list[int] = Field(min_length=1)
     contribution: str = Field(min_length=1)
     passage_references: list[OriginalPassageReference] = Field(default_factory=list)
-    verbatim_excerpt: str | None = Field(default=None)
+    verbatim_excerpt: Annotated[str, StringConstraints(strip_whitespace=False)] | None = None
 
 
 class EditorialKnowledgeUnit(StrictModel):
@@ -610,10 +610,3 @@ PlanningRequest.model_rebuild()
 
 def content_hash(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
-
-
-def _truncate_text(value: str, limit: int) -> str:
-    text = value.strip()
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit - 1].rstrip()}…"

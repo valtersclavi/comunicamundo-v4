@@ -24,7 +24,7 @@ A aplicação web e a API são entregues pelo mesmo Cloud Run Service. O navegad
 12. Antes da edição narrativa final, uma verificação compara conteúdo fechado e versão estilizada. Divergências voltam como correções pontuais sobre a versão estilizada.
 13. O editor de narrativa lê o texto completo validado e entrega a versão final. Pode fundir e reordenar passagens, condensar argumentos repetidos e reescrever abertura, transições e fechamento. Preserva ideias distintas, fatos, nuances e contradições; a arquitetura inicial serve à redação, sem engessar essa edição. Nenhuma revisão posterior recompõe blocos ou repetições. O artefato é persistido e a retomada não repete etapas concluídas.
 
-Não existem fichas editoriais por parágrafo. O parágrafo é unidade de estrutura e endereço, não uma chamada de inteligência. Nenhum agrupamento usa somente contagem de parágrafos: cada prompt final é medido pelo tokenizer do modelo, com orçamento separado para seleção, compreensão e saída. Um parágrafo excepcionalmente grande só pode ser dividido entre frases completas.
+Não existem fichas editoriais por parágrafo. O parágrafo é unidade de estrutura e endereço, não uma chamada de inteligência. Nenhum agrupamento usa somente contagem de parágrafos: cada prompt final é medido pelo tokenizer do modelo, com orçamento separado para seleção, compreensão e saída. Parágrafos grandes são divididos preferencialmente entre frases completas; se uma frase exceder o orçamento, ela é subdividida sem perda de caracteres, mantendo a referência ao original.
 
 ## Contrato editorial
 
@@ -91,9 +91,31 @@ The revised PE returns for user approval and invalidates previous text artifacts
 ## Referências e retomada — restauração de 30/09/2026
 
 - A seleção persiste flags e identidades dos trechos, vinculadas ao briefing vigente. Flags de outra segmentação ou escopo não são reutilizadas por coincidência de número.
-- Os lotes respeitam o orçamento medido. Parágrafos grandes são divididos entre frases completas; não são substituídos por resumos nem truncados para caber.
+- Os lotes respeitam o orçamento medido. Parágrafos grandes são divididos preferencialmente entre frases completas, com subdivisão sem perda quando uma frase sozinha exceder o orçamento; não são substituídos por resumos nem truncados para caber.
 - Leituras diretas concluídas são persistidas em `subject_readings`, com chave do prompt, escopo e identidades dos originais. A retomada reaproveita resultados idênticos; remoque com outro escopo não reutiliza uma leitura inadequada.
 - A tabela antiga de condensações permanece apenas por compatibilidade de armazenamento. Nenhum caminho editorial ativo lê essas condensações como material documental.
 - Enriquecimento usa somente novas fontes; remoque só revisita originais conforme a revisão autorizada; contribuições pequenas do LLM permanecem explicitamente não documentais.
 - Ingestão, aquisição, formatos e o editor de narrativa não foram reformulados nesta restauração.
 - A migração 1006 cria apenas a tabela de leituras referenciadas, sem reescrever PEs ou fontes existentes.
+
+## Regra obrigatória de tamanho e tarefas atômicas
+
+Comprimento de conteúdo não autoriza truncamento, resumo substitutivo ou rejeição
+por quantidade de caracteres. Citações não têm teto de 280 caracteres: preservam
+o texto literal e sua referência ao original, inclusive espaços significativos.
+
+Triagem, encaminhamento por assunto e compreensão operam em lotes. Além de medir
+a entrada, tratam `MAX_TOKENS` de saída dividindo o trabalho, nunca repetindo o
+mesmo pedido grande. Se o lote tem um único trecho, subdividem sua unidade de
+processamento, preferindo fronteiras de frases, depois palavras, sem alterar o
+parágrafo persistido. Os resultados mantêm a referência ao parágrafo original.
+Uma resposta cortada pelo provedor não é aceita como resultado parcial válido.
+
+A montagem do corpus/PE concatena os resultados validados no código; não existe
+chamada de LLM para condensar ou regenerar o conjunto. Leituras concluídas e suas
+referências são persistidas e reutilizadas. A remoção do antigo limite de citação
+não invalida leituras completas já salvas sob o mesmo briefing e material.
+
+Essa regra deve orientar também qualquer alteração futura da produção textual:
+dividir tarefas com preservação do contexto e do contrato narrativo, sem
+reintroduzir limites editoriais arbitrários para contornar limites do provedor.

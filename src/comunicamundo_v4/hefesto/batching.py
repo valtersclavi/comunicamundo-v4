@@ -85,9 +85,11 @@ def _sentence_groups(paragraph: Paragraph, token_target: int) -> list[str]:
     current: list[str] = []
     for sentence in paragraph.sentences:
         if conservative_tokens(sentence.text) > token_target:
-            raise ValueError(
-                "one sentence exceeds the safe token budget; the source may contain malformed text"
-            )
+            if current:
+                groups.append(" ".join(current))
+                current = []
+            groups.extend(_split_long_sentence(sentence.text, token_target))
+            continue
         candidate = " ".join([*current, sentence.text])
         if current and conservative_tokens(candidate) > token_target:
             groups.append(" ".join(current))
@@ -97,3 +99,26 @@ def _sentence_groups(paragraph: Paragraph, token_target: int) -> list[str]:
     if current:
         groups.append(" ".join(current))
     return groups
+
+
+
+def _split_long_sentence(text: str, token_target: int) -> list[str]:
+    """Preserve all characters when even one sentence exceeds a processing packet."""
+    pieces = []
+    while conservative_tokens(text) > token_target:
+        low, high = 1, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if conservative_tokens(text[:middle]) <= token_target:
+                low = middle
+            else:
+                high = middle - 1
+        cut = low
+        boundaries = [index + 1 for index, char in enumerate(text[:cut]) if char.isspace()]
+        if boundaries:
+            cut = boundaries[-1]
+        pieces.append(text[:cut])
+        text = text[cut:]
+    if text:
+        pieces.append(text)
+    return pieces
