@@ -25,6 +25,7 @@ from .contracts import (
     EditorialProjectProposal,
     EditorialProjectRecord,
     EditorialProjectRevisionHeader,
+    EditorialRevisionPlan,
     EditorialProjectScaffold,
     EditorialSubject,
     FinalTextProposal,
@@ -305,57 +306,84 @@ class Hefesto:
         }:
             raise ValueError("Editorial Project is not available for revision")
         previous = run.editorial_project.proposal
-        current_header = EditorialProjectRevisionHeader(
-            working_title=previous.working_title,
-            editorial_promise=previous.editorial_promise,
-            narrative_axis=previous.narrative_axis,
-        )
-        header_task = self._call(
-            run, task_type="editorial_project_revision_header",
+        if previous.editorial_corpus is None:
+            raise ValueError("Revision requires the current editorial corpus")
+        plan = (await self._call(
+            run, task_type="editorial_project_revision_plan",
             prompt=(
-                "Apply the user's instruction only to this editorial project's "
-                "title, promise and narrative axis. Preserve its documentary "
-                "grounding; do not add claims or remove tensions, contradictions "
-                "or coverage unless the instruction explicitly requires it. "
-                "Return only the requested header fields.\n"
+                "Apply the user's remoque to the CURRENT Editorial Project. This is an "
+                "explicit user revision, NOT frozen source enrichment. The user may change "
+                "the title, axis, scope, depth, duration, add/remove/merge/reorder subjects. "
+                "Make only the changes requested or necessary to fulfill that instruction; "
+                "preserve everything else. The instruction takes precedence over the original "
+                "brief where they differ. Return the resulting header, full ordered subject "
+                "list and duration, plus the corpus governing understanding adjusted only to "
+                "the requested direction (no new unsupported facts). Subject times must sum to that duration. "
+                "For each resulting subject set revisit_sources=true only when the request "
+                "calls for source re-examination or the existing corpus is insufficient to "
+                "support the requested change. A wording, organization or emphasis change "
+                "does not require rereading sources. New source-based claims require rereading; "
+                "a small explicitly requested model contribution must not be presented as "
+                "documentary evidence and does not itself require rereading. "
+                "retained_corpus_indexes are zero-based indexes of existing knowledge units "
+                "to preserve verbatim. Keep all unless the user's requested removal or change "
+                "makes a unit irrelevant or it will be replaced by a requested source revisit. "
+                "Do not invent source findings. Do not return rewritten corpus units.\n"
+                f"ORIGINAL BRIEF: {run.request.brief.model_dump_json()}\n"
                 f"USER INSTRUCTION: {instruction}\n"
-                f"CURRENT HEADER: {current_header.model_dump_json()}"
+                f"CURRENT PROJECT: {previous.model_dump_json()}"
             ),
-            schema=EditorialProjectRevisionHeader,
-            max_output_tokens=2_048,
-            thinking_tokens=0,
-        )
-
-        async def revise_subject(subject: EditorialSubject) -> EditorialSubject:
-            return (await self._call(
-                run, task_type="editorial_project_revision_subject",
-                prompt=(
-                    "Apply the user's instruction to this one Editorial Project "
-                    "subject. Keep it source-grounded. Do not discard ideas, "
-                    "tensions, contradictions or coverage unless explicitly asked. "
-                    "Return this complete subject only.\n"
-                    f"USER INSTRUCTION: {instruction}\n"
-                    f"CURRENT SUBJECT: {subject.model_dump_json()}"
-                ),
-                schema=EditorialSubject,
-                max_output_tokens=2_048,
-                thinking_tokens=0,
-            )).value
-
-        header_response, *subject_responses = await asyncio.gather(
-            header_task,
-            *(revise_subject(subject) for subject in previous.source_supported_subjects),
-        )
+            schema=EditorialRevisionPlan, max_output_tokens=8_192, thinking_tokens=1_000,
+        )).value
+        old_units = previous.editorial_corpus.units
+        indexes = plan.retained_corpus_indexes
+        if len(set(indexes)) != len(indexes) or any(i < 0 or i >= len(old_units) for i in indexes):
+            raise ValueError("Revision referenced an unknown or duplicate corpus unit")
+        units = [old_units[i] for i in indexes]
+        subjects = _normalize_subject_minutes([item.subject for item in plan.subjects], plan.duration_minutes)
+        revisit = [subject for item, subject in zip(plan.subjects, subjects, strict=True) if item.revisit_sources]
+        if revisit:
+            revision_brief = run.request.brief.model_copy(update={
+                "approach": run.request.brief.approach + "\nUSER-AUTHORIZED REVISION: " + instruction
+                + "\nThis instruction overrides the original brief where they differ. "
+                "Extract only what supports, qualifies or contradicts this revision.",
+                "duration_minutes": plan.duration_minutes,
+            })
+            scoped = run.model_copy(update={"request": run.request.model_copy(update={
+                "brief": revision_brief,
+                "sources": [source.model_copy(update={"metadata": {
+                    k: v for k, v in source.metadata.items() if k != "covered_subject_indexes"
+                }}) for source in run.request.sources],
+            })})
+            scaffold = EditorialProjectScaffold(
+                **plan.header.model_dump(), duration_minutes=plan.duration_minutes,
+                source_supported_subjects=revisit,
+                corpus_governing_understanding=previous.editorial_corpus.governing_understanding,
+                forbidden_inferences=previous.editorial_corpus.forbidden_inferences,
+            )
+            passages = passages_from_paragraphs(await self._paragraphs(run), passage_token_target=self._passage_target)
+            titles = {i: source.title for i, source in enumerate(run.request.sources, start=1)}
+            routed = await self._route_passages_by_subject(scoped, scaffold, passages, titles)
+            for i, subject in enumerate(revisit):
+                material = routed.get(i, [])
+                if not material:
+                    raise ValueError(f"Existing sources do not support the requested revision: {subject.title}")
+                unit = await self._create_subject_corpus(scoped, subject, material, titles)
+                if any(not set(e.source_ordinals) <= {p.source_ordinal for p in material} for e in unit.evidence):
+                    raise ValueError("Revision evidence references an unavailable source")
+                units.append(unit)
+        if not units:
+            raise ValueError("Revision left no documentary corpus")
         revised = previous.model_copy(update={
-            "working_title": header_response.value.working_title,
-            "editorial_promise": header_response.value.editorial_promise,
-            "narrative_axis": header_response.value.narrative_axis,
-            "source_supported_subjects": subject_responses,
-            "model_knowledge_suggestions": [],
-            "source_enrichment_opportunities": [],
+            **plan.header.model_dump(),
+            "narrative_axis": plan.header.narrative_axis,
+            "duration_minutes": plan.duration_minutes,
+            "source_supported_subjects": subjects,
+            "editorial_corpus": previous.editorial_corpus.model_copy(update={
+                "units": units, "governing_understanding": plan.corpus_governing_understanding,
+            }),
+            "model_knowledge_suggestions": [], "source_enrichment_opportunities": [],
         })
-        if not revised.source_supported_subjects:
-            raise ValueError("revision removed every editorial subject")
         project = run.editorial_project.model_copy(
             update={"proposal": revised, "approved": False}
         )
@@ -633,10 +661,16 @@ class Hefesto:
         scoped_brief = run.request.brief.model_copy(update={
             "approach": (
                 run.request.brief.approach
+                + "\nCURRENT PE PURPOSE (including user revisions): "
+                + frozen.editorial_promise + "\nCURRENT AXIS: " + frozen.narrative_axis.statement
+                + "\nExplicit user revisions in this PE take precedence over the original brief. "
                 + "\nEXTRACTION SCOPE: Only extract evidence, qualifications or contradictions "
-                "for this user-selected contribution: " + opportunity
+                "for this user-selected contribution, including new pertinent perspectives, "
+                "examples and dimensions not anticipated by the original brief: " + opportunity
                 + "\nThe previous Editorial Project is frozen. Do not extract other topics "
-                "or expand its agenda. Select nothing if this source adds nothing relevant."
+                "unrelated to that opportunity. The selected opportunity authorizes a pertinent "
+                "extension of the brief, not a replacement of its focus. Novelty is welcome; "
+                "prior mention in the brief is not required. Select nothing if nothing relevant is added."
             ),
         })
         scoped = run.model_copy(update={
@@ -662,9 +696,12 @@ class Hefesto:
             run, task_type="source_enrichment_assessment",
             prompt=(
                 "Assess only whether the extracted contribution adds substantive value to the "
-                "frozen Editorial Project within BOTH the brief and the selected opportunity. "
+                "frozen Editorial Project through the selected opportunity, relevant to the brief's "
+                "purpose without requiring prior mention in it. New perspectives, examples, "
+                "contrasts and dimensions may add color and diversity. "
                 "Evidence may support, qualify or contradict; repeated or unrelated information "
-                "does not contribute. Do not propose a new project or other topics. "
+                "does not contribute. Novelty alone is never a reason to reject. Preserve the "
+                "existing project and its focus; do not propose an unrelated agenda. "
                 "Return contributes=false if nothing pertinent is added. If it contributes, "
                 "choose the zero-based existing subject index it enriches, or null only if the "
                 "selected opportunity needs its own subject. Estimate additional_minutes needed "

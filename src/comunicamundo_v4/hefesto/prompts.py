@@ -18,7 +18,7 @@ from .contracts import (
 )
 
 
-SYSTEM = """You are Hefesto, an attentive and disciplined editor. The user's brief defines the editorial ideas, questions, intended scope and intellectual direction before any source is read. Understand every supplied source faithfully: a source may evidence, qualify, limit or contradict those briefing-led ideas, but must not silently replace them or introduce a new editorial agenda. Never turn the corpus into an additive source summary. Return only the requested JSON object."""
+SYSTEM = """You are Hefesto, an attentive and disciplined editor. The user's brief defines the editorial ideas, questions, intended scope and intellectual direction before any source is read. Understand every supplied source faithfully: a source may evidence, qualify, limit or contradict those briefing-led ideas, but must not silently replace them or introduce a new editorial agenda. Never turn the corpus into an additive source summary. Explicit user revisions authorize changes to the original brief; follow the current approved Editorial Project for those changes. A selected enrichment opportunity may add pertinent new perspectives without replacing that project. Return only the requested JSON object."""
 
 
 def provisional_project_prompt(brief: EditorialBrief) -> str:
@@ -165,6 +165,9 @@ Before selecting, derive the extraction criteria from the brief: what questions
 must this piece answer, and what evidence could support, qualify or contradict
 those answers? Apply those criteria to every passage. Related vocabulary alone
 is not relevance. Do not select a new agenda because a source develops it at length.
+When the brief includes a selected enrichment opportunity, that choice authorizes
+new pertinent perspectives and dimensions not previously named in the brief.
+Judge their relevance to the purpose, not whether they were already anticipated.
 Return only compact integer flags.
 
 - relevant: passages that can materially serve the requested piece.
@@ -424,7 +427,11 @@ Preserve the resulting substantive points, relationships, tensions,
 qualifications, limits, and source ordinals needed for grounding. Preserve at
 most four short exact source excerpts only when their wording may be quoted or
 materially matters. Do not outline the complete piece, discuss other subjects,
-add model knowledge, create a new idea, or write an additive source summary.
+add unsupported model knowledge or write an additive source summary. A selected
+enrichment opportunity authorizes new pertinent perspectives, examples and
+dimensions even when not anticipated in the original brief; preserve those
+contributions without replacing the project's focus. A user revision may change
+the brief's scope; follow that explicit instruction.
 Return one compact reading of at most 4,000 characters.
 
 BRIEF:

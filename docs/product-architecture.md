@@ -57,7 +57,9 @@ Source enrichment is an additive operation on a frozen proposed Editorial
 Project. The chosen opportunity scopes research and extraction. Only the newly
 acquired sources are selected and digested; the general scaffold/routing builder
 is not called. The contribution is assessed against the brief, opportunity and
-frozen PE. No pertinent addition means the same PE remains unchanged. Otherwise
+frozen PE. Pertinence does not require prior mention in the original brief: the
+selected opportunity authorizes new perspectives, examples, contrasts and
+dimensions that add color and diversity without replacing the focus. No pertinent addition means the same PE remains unchanged. Otherwise
 append the new knowledge unit, attach it to an existing subject or append only
 the selected opportunity as a subject, and add the time it needs. Preserve the
 previous title, promise, axis, subject content, knowledge units, qualifications
@@ -72,3 +74,14 @@ and reorder passages while preserving distinct approved content and focus.
 
 These are product invariants. Changes to these editorial rules require explicit
 user authorization; audits and test failures do not authorize redesigns.
+
+
+User remoque is distinct from additive source enrichment. The user's instruction
+may revise the PE's axis, scope, subjects, ordering, depth and duration. Preserve
+what the instruction does not change. Plan the requested revision from the
+current PE and corpus; revisit stored sources only where the user asks for it
+or the requested change needs evidence absent from the corpus. Route and digest
+only material relevant to those revised subjects. No automatic full rebuild,
+no compulsory source rereading and no new external search from remoque. Prior
+source-coverage restrictions must not block an explicitly authorized revisit.
+The revised PE returns for user approval and invalidates previous text artifacts.

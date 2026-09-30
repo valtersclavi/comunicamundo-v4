@@ -474,6 +474,19 @@ class SourceEnrichmentAssessment(StrictModel):
     additional_minutes: float = Field(ge=0)
 
 
+class EditorialRevisionSubject(StrictModel):
+    subject: EditorialSubject
+    revisit_sources: bool = False
+
+
+class EditorialRevisionPlan(StrictModel):
+    header: EditorialProjectRevisionHeader
+    corpus_governing_understanding: str = Field(min_length=1)
+    duration_minutes: int = Field(ge=1)
+    subjects: list[EditorialRevisionSubject] = Field(min_length=1)
+    retained_corpus_indexes: list[int] = Field(default_factory=list)
+
+
 class EditorialProjectRecord(StrictModel):
     editorial_project_id: UUID = Field(default_factory=uuid4)
     execution_run_id: UUID
