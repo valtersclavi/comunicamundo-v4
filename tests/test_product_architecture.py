@@ -255,6 +255,11 @@ async def test_approved_project_produces_persisted_editorial_pipeline() -> None:
     assert completed.final_text.proposal.title == "Finished title"
     assert completed.final_text.word_count == 1_120
     assert repeated.final_text == completed.final_text
+    assert completed.narrative_architecture is not None
+    restored = type(completed).model_validate_json(completed.model_dump_json())
+    assert restored.narrative_architecture == completed.narrative_architecture
+    narrative_calls = [call for call in gateway.calls if call["task_type"] == "narrative_architecture"]
+    assert len(narrative_calls) == 1
     text_calls = [
         item for item in gateway.calls
         if item["task_type"] in {
@@ -276,6 +281,8 @@ async def test_approved_project_produces_persisted_editorial_pipeline() -> None:
     assert "editorial_corpus" not in style_prompt
     assert "A concise intention of message" not in style_prompt
     assert "SOURCE 1" not in style_prompt
+    for call in text_calls:
+        assert completed.narrative_architecture.governing_question in str(call["prompt"])
     assert len(gateway.calls) == call_count
 
 
@@ -300,6 +307,7 @@ async def test_final_text_requires_approval_and_resumes_after_model_failure() ->
     assert completed.state is RunState.TEXT_READY
     assert completed.editorial_project is not None
     assert completed.editorial_project.approved
+    assert len([call for call in gateway.calls if call["task_type"] == "narrative_architecture"]) == 1
     assert len([
         item for item in gateway.calls if item["task_type"] == "content_draft"
     ]) == 1
@@ -350,6 +358,9 @@ async def test_rejected_style_is_corrected_and_reverified() -> None:
     assert "EDITORIALLY CLOSED REFERENCE" in correction
     assert "CURRENT STYLED TEXT" in correction
     assert "APPROVED EDITORIAL STATE" not in correction
+    assert completed.narrative_architecture.governing_question in correction
+    reverification = next(call for call in gateway.calls if call["task_type"] == "final_reverification")
+    assert completed.narrative_architecture.governing_question in str(reverification["prompt"])
 
 
 @pytest.mark.asyncio

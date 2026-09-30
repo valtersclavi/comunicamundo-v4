@@ -29,6 +29,7 @@ from .contracts import (
     EditorialSubject,
     FinalTextProposal,
     FinalTextRecord,
+    NarrativeArchitecture,
     Paragraph,
     ParagraphAssetLink,
     Passage,
@@ -361,6 +362,7 @@ class Hefesto:
             "editorial_project": project,
             "editorial_round": run.editorial_round + 1,
             "state": RunState.PROJECT_PROPOSED,
+            "narrative_architecture": None,
             "content_draft": None, "content_review": None,
             "corrected_content": None, "styled_text": None,
             "preservation_review": None, "final_text": None,
@@ -451,6 +453,7 @@ class Hefesto:
                         run.request.brief,
                         project,
                         run.content_draft,
+                        architecture=architecture,
                     ),
                     schema=ContentReviewProposal,
                     max_output_tokens=8_192,
@@ -468,6 +471,7 @@ class Hefesto:
                         project,
                         run.content_draft,
                         run.content_review,
+                        architecture=architecture,
                         target_words=target_words,
                         section_targets=section_targets,
                     ),
@@ -539,6 +543,10 @@ class Hefesto:
             ),
             "content_pipeline": {
                 "target_words": _target_words(run.request.brief),
+                "narrative_architecture": (
+                    run.narrative_architecture.model_dump(mode="json")
+                    if run.narrative_architecture else None
+                ),
                 "content_draft": (
                     run.content_draft.model_dump(mode="json")
                     if run.content_draft else None
@@ -1353,6 +1361,7 @@ class Hefesto:
                 target_words=_target_words(run.request.brief),
                 correction_request=correction,
                 reference_text=run.corrected_content,
+                architecture=run.narrative_architecture,
             ),
             schema=FinalTextProposal,
             max_output_tokens=16_384,
@@ -1369,6 +1378,7 @@ class Hefesto:
                 run.corrected_content,
                 repaired,
                 product=run.request.brief.product,
+                architecture=run.narrative_architecture,
             ),
             schema=PreservationReviewProposal,
             max_output_tokens=8_192,

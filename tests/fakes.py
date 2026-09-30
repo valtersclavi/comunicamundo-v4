@@ -16,6 +16,7 @@ from comunicamundo_v4.hefesto.contracts import (
     EditorialProjectProposal,
     EditorialProjectScaffold,
     FinalTextProposal,
+    NarrativeArchitecture,
     Paragraph,
     ParagraphAssetLink,
     ProductRun,
@@ -298,6 +299,16 @@ class FakeGateway:
                         }
                     ]
                 }
+            )
+        elif task_type == "narrative_architecture":
+            value = NarrativeArchitecture(
+                opening="Open with the shared tension.",
+                governing_question="How does the qualification change the central point?",
+                progression=["Establish the central point", "Revisit it through the qualification"],
+                interweavings=["Carry the source tension across the argument"],
+                turning_point="The qualification reframes the opening.",
+                closing="Resolve the opening with its limits intact.",
+                non_negotiables=["Preserve the qualification and avoid causal overstatement"],
             )
         elif task_type in {
             "content_draft",

@@ -576,10 +576,18 @@ def content_review_prompt(
     brief: EditorialBrief,
     project: EditorialProjectProposal,
     draft: FinalTextProposal,
+    *,
+    architecture: NarrativeArchitecture | None = None,
 ) -> str:
     return f"""
 Act as the content editor. Audit the content draft against the complete approved
 editorial state. Do not rewrite it.
+
+Preserve the binding narrative progression, interweavings, turning point and
+resolution when requesting corrections.
+
+BINDING NARRATIVE ARCHITECTURE:
+{architecture.model_dump_json(indent=2) if architecture else "none"}
 
 Check whether the Narrative Axis genuinely governs the entire draft; the
 editorial promise is fulfilled; every essential corpus contribution, tension,
@@ -612,12 +620,19 @@ def content_revision_prompt(
     *,
     target_words: int,
     section_targets: list[dict[str, object]],
+    architecture: NarrativeArchitecture | None = None,
 ) -> str:
     return f"""
 Act as the same content writer who produced the draft. Apply the editor's
 review completely and return the corrected, editorially closed text. Preserve
 everything that is already correct. Resolve problems coherently across the
 whole piece rather than applying disconnected patches.
+
+Preserve the binding narrative progression, interweavings, turning point and
+resolution while applying the content corrections.
+
+BINDING NARRATIVE ARCHITECTURE:
+{architecture.model_dump_json(indent=2) if architecture else "none"}
 
 The result must continue the approved editorial state, use approximately
 {target_words} words as editorial guidance, and respect the section targets
