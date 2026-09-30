@@ -44,3 +44,31 @@ A duração orienta a extensão e a proporção editorial conforme o produto. O 
 - A interface oferece uma única aprovação para o Projeto Editorial completo.
 - Cada artefato intermediário da produção é persistido. A retomada continua da etapa incompleta sem repetir redação, revisão ou estilização já concluída.
 - A mesma entrada atende qualquer tema, fonte, briefing, produto, idioma e duração, sem variante de teste.
+
+
+## Frozen editorial contract — 2026-09-30
+
+The brief governs both source selection and editorial comprehension. Extract
+only evidence, qualifications, context and contradictions needed by its ideas
+and questions. Source length or a well-developed source theme does not authorize
+another agenda. No topic-specific exceptions or rules designed to fit a test.
+
+Source enrichment is an additive operation on a frozen proposed Editorial
+Project. The chosen opportunity scopes research and extraction. Only the newly
+acquired sources are selected and digested; the general scaffold/routing builder
+is not called. The contribution is assessed against the brief, opportunity and
+frozen PE. No pertinent addition means the same PE remains unchanged. Otherwise
+append the new knowledge unit, attach it to an existing subject or append only
+the selected opportunity as a subject, and add the time it needs. Preserve the
+previous title, promise, axis, subject content, knowledge units, qualifications
+and forbidden inferences. Do not reread old sources to discover additional topics.
+Acquisition identity, contribution outcome and enrichment-specific usage are
+recorded in the source_enrichment stage and the source is displayed in the UI.
+
+Writing and narrative editing use the approved PE's current duration, including
+additions, rather than the original briefing duration. Duration remains guidance,
+not a hard word-count rejection gate. Narrative editing may merge repetitions
+and reorder passages while preserving distinct approved content and focus.
+
+These are product invariants. Changes to these editorial rules require explicit
+user authorization; audits and test failures do not authorize redesigns.

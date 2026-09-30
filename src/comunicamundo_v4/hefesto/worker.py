@@ -580,6 +580,8 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         raise ValueError("unknown source enrichment opportunity")
     opportunity = options[index]
     prior_receipt = await repository.product_receipt(execution_id)
+    started = perf_counter()
+    usage_offset = len((await hefesto.usage_report(execution_id))["calls"])
     added_ids: list[UUID] = []
     try:
         gateway = VertexGateway(
@@ -655,26 +657,22 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             "sources": [*original.request.sources, *clean_additions],
             "existing_editorial_project": proposal,
         })
-        active = original.model_copy(update={
-            "request": request, "editorial_project": None,
-            "editorial_round": original.editorial_round + 1,
-            "state": RunState.SOURCE_STRUCTURE_READY,
-            "error_class": None, "error_message": None,
-        })
+        active = original.model_copy(update={"request": request})
         await repository.save_run(active)
-        await hefesto.select(execution_id)
-        selected_new = [
-            batch for batch in await repository.selection_batches(execution_id)
-            if batch.source_id in added_ids and (
-                batch.flags.relevant or batch.flags.central
-                or batch.flags.uncertain or batch.flags.include_previous
-                or batch.flags.include_next
-            )
-        ]
-        if not selected_new:
-            raise ValueError("new source contains no selected material for this enrichment")
-        await hefesto.propose_project(execution_id)
-        await _persist_product_receipt(hefesto, client, execution_id, [])
+        updated, reason = await hefesto.enrich_project(
+            execution_id, opportunity=opportunity, new_source_ids=added_ids,
+        )
+        report = await hefesto.usage_report(execution_id)
+        report["calls"] = report["calls"][usage_offset:]
+        await _persist_product_receipt(hefesto, client, execution_id, [{
+            "stage": "source_enrichment", "status": "completed",
+            "completed_at": datetime.now(UTC).isoformat(),
+            "duration_ms": int((perf_counter() - started) * 1000),
+            **_task_metrics(report, {call["task_type"] for call in report["calls"]}),
+            "opportunity": opportunity, "summary": reason,
+            "incorporated": updated.editorial_round != original.editorial_round,
+            "sources": [item.record.model_dump(mode="json") for item in result.acquisitions],
+        }])
     except Exception:
         if added_ids:
             await repository.rollback_enrichment_sources(
@@ -1301,3 +1299,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

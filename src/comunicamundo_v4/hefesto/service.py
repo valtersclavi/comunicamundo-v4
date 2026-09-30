@@ -45,6 +45,7 @@ from .contracts import (
     SubjectMaterialDigest,
     SubjectPassageRouting,
     SourceAsset,
+    SourceEnrichmentAssessment,
 )
 from .gateway import ModelCallError, ModelGateway, ModelResult
 from .prompts import (
@@ -226,6 +227,8 @@ class Hefesto:
         run = await self._required_run(execution_run_id)
         if run.editorial_project is not None:
             return run
+        if run.request.existing_editorial_project is not None:
+            raise ValueError("A frozen Editorial Project requires scoped enrichment, not replanning")
         if run.state is not RunState.COMPREHENDING:
             raise ValueError("Editorial Project requires completed source selection")
         paragraphs = await self._paragraphs(run)
@@ -415,13 +418,14 @@ class Hefesto:
                 raise ValueError(
                     "Editorial Project has no canonical editorial corpus"
                 )
-            target_words = _target_words(run.request.brief)
+            writing_brief = run.request.brief.model_copy(update={"duration_minutes": project.duration_minutes})
+            target_words = _target_words(writing_brief, run.editorial_project.proposal if run.editorial_project else None)
             section_targets = _section_targets(project, target_words)
             if run.narrative_architecture is None:
                 architecture = await self._generate_step(
                     run, stage="narrative_architecture",
                     task_type="narrative_architecture",
-                    prompt=narrative_architecture_prompt(run.request.brief, project),
+                    prompt=narrative_architecture_prompt(writing_brief, project),
                     schema=NarrativeArchitecture,
                     max_output_tokens=4_096, thinking_tokens=3_000,
                 )
@@ -434,7 +438,7 @@ class Hefesto:
                     stage="content_draft",
                     task_type="content_draft",
                     prompt=content_draft_prompt(
-                        run.request.brief,
+                        writing_brief,
                         project,
                         architecture,
                         target_words=target_words,
@@ -452,7 +456,7 @@ class Hefesto:
                     stage="content_review",
                     task_type="content_review",
                     prompt=content_review_prompt(
-                        run.request.brief,
+                        writing_brief,
                         project,
                         run.content_draft,
                         architecture=architecture,
@@ -469,7 +473,7 @@ class Hefesto:
                     stage="content_revision",
                     task_type="content_revision",
                     prompt=content_revision_prompt(
-                        run.request.brief,
+                        writing_brief,
                         project,
                         run.content_draft,
                         run.content_review,
@@ -504,9 +508,9 @@ class Hefesto:
                     task_type="product_styling",
                     prompt=product_style_prompt(
                         run.corrected_content,
-                        product=run.request.brief.product,
-                        language=run.request.brief.output_language,
-                        audience=run.request.brief.audience,
+                        product=writing_brief.product,
+                        language=writing_brief.output_language,
+                        audience=writing_brief.audience,
                         target_words=target_words,
                         architecture=run.narrative_architecture,
                     ),
@@ -524,7 +528,7 @@ class Hefesto:
                     task_type="final_narrative_edit",
                     prompt=final_narrative_prompt(
                         run.styled_text,
-                        brief=run.request.brief,
+                        brief=writing_brief,
                     ),
                     schema=FinalTextProposal,
                     max_output_tokens=16_384,
@@ -558,7 +562,7 @@ class Hefesto:
                 run.final_text.model_dump(mode="json") if run.final_text else None
             ),
             "content_pipeline": {
-                "target_words": _target_words(run.request.brief),
+                "target_words": _target_words(run.request.brief, run.editorial_project.proposal if run.editorial_project else None),
                 "narrative_architecture": (
                     run.narrative_architecture.model_dump(mode="json")
                     if run.narrative_architecture else None
@@ -612,6 +616,99 @@ class Hefesto:
 
     async def usage_report(self, execution_run_id: UUID) -> dict[str, object]:
         return await self._repository.usage_report(execution_run_id)
+
+    async def enrich_project(
+        self, execution_run_id: UUID, *, opportunity: str,
+        new_source_ids: Sequence[UUID],
+    ) -> tuple[ProductRun, str]:
+        """Extract only the requested contribution; never regenerate the frozen PE."""
+        run = await self._required_run(execution_run_id)
+        if run.state is not RunState.PROJECT_PROPOSED or run.editorial_project is None:
+            raise ValueError("Source enrichment requires a frozen proposed project")
+        frozen = run.editorial_project.proposal
+        if frozen.editorial_corpus is None:
+            raise ValueError("Source enrichment requires the existing editorial corpus")
+        if opportunity not in frozen.source_enrichment_opportunities:
+            raise ValueError("Source enrichment must match the selected opportunity")
+        scoped_brief = run.request.brief.model_copy(update={
+            "approach": (
+                run.request.brief.approach
+                + "\nEXTRACTION SCOPE: Only extract evidence, qualifications or contradictions "
+                "for this user-selected contribution: " + opportunity
+                + "\nThe previous Editorial Project is frozen. Do not extract other topics "
+                "or expand its agenda. Select nothing if this source adds nothing relevant."
+            ),
+        })
+        scoped = run.model_copy(update={
+            "request": run.request.model_copy(update={"brief": scoped_brief}),
+        })
+        paragraphs = [p for p in await self._paragraphs(run) if p.source_id in new_source_ids]
+        passages = passages_from_paragraphs(paragraphs, passage_token_target=self._passage_target)
+        titles = {i: s.title for i, s in enumerate(run.request.sources, start=1)}
+        specs = await self._selection_specs(scoped, passages, titles)
+        await self._run_selection_batches(scoped, specs)
+        selected = await self._selected_passages(scoped, passages)
+        if not selected:
+            return run, "A nova fonte não acrescentou material pertinente à oportunidade escolhida."
+        subject = EditorialSubject(
+            title=opportunity, editorial_role=opportunity, depth=opportunity,
+            allocated_minutes=1,
+        )
+        unit = await self._create_subject_corpus(scoped, subject, selected, titles)
+        allowed = {p.source_ordinal for p in selected}
+        if any(not set(e.source_ordinals) <= allowed for e in unit.evidence):
+            raise ValueError("Enrichment evidence references a source outside the new material")
+        assessment = (await self._call(
+            run, task_type="source_enrichment_assessment",
+            prompt=(
+                "Assess only whether the extracted contribution adds substantive value to the "
+                "frozen Editorial Project within BOTH the brief and the selected opportunity. "
+                "Evidence may support, qualify or contradict; repeated or unrelated information "
+                "does not contribute. Do not propose a new project or other topics. "
+                "Return contributes=false if nothing pertinent is added. If it contributes, "
+                "choose the zero-based existing subject index it enriches, or null only if the "
+                "selected opportunity needs its own subject. Estimate additional_minutes needed "
+                "to develop only this contribution; do not reallocate existing time.\n"
+                f"BRIEF: {run.request.brief.model_dump_json()}\n"
+                f"SELECTED OPPORTUNITY: {opportunity}\n"
+                f"FROZEN PROJECT: {frozen.model_dump_json()}\n"
+                f"NEW CONTRIBUTION: {unit.model_dump_json()}"
+            ),
+            schema=SourceEnrichmentAssessment, max_output_tokens=2_048, thinking_tokens=0,
+        )).value
+        if not assessment.contributes:
+            return run, assessment.reason
+        subjects = list(frozen.source_supported_subjects)
+        index = assessment.target_subject_index
+        if index is not None and index >= len(subjects):
+            raise ValueError("Enrichment targeted an unknown frozen subject")
+        if index is None:
+            if assessment.additional_minutes <= 0:
+                raise ValueError("A new contribution subject requires additional duration")
+            subjects.append(subject.model_copy(update={"allocated_minutes": assessment.additional_minutes}))
+        else:
+            subjects[index] = subjects[index].model_copy(update={
+                "allocated_minutes": subjects[index].allocated_minutes + assessment.additional_minutes,
+            })
+        proposal = frozen.model_copy(update={
+            "source_supported_subjects": subjects,
+            "duration_minutes": ceil(frozen.duration_minutes + assessment.additional_minutes),
+            "editorial_corpus": frozen.editorial_corpus.model_copy(update={
+                "units": [*frozen.editorial_corpus.units, unit],
+            }),
+            "model_knowledge_suggestions": [], "source_enrichment_opportunities": [],
+        })
+        updated = run.model_copy(update={
+            "editorial_project": EditorialProjectRecord(
+                execution_run_id=run.execution_run_id, project_id=run.project_id, proposal=proposal,
+            ),
+            "editorial_round": run.editorial_round + 1,
+            "narrative_architecture": None, "content_draft": None, "content_review": None,
+            "corrected_content": None, "styled_text": None, "preservation_review": None,
+            "narrative_text": None, "final_text": None, "updated_at": datetime.now(UTC),
+        })
+        await self._repository.save_run(updated)
+        return updated, assessment.reason
 
     async def _vector_rank_passages(self, run: ProductRun, passages: Sequence[Passage]) -> list[Passage]:
         embed = getattr(self._gateway, "embed", None)
@@ -1378,7 +1475,7 @@ class Hefesto:
                 product=run.request.brief.product,
                 language=run.request.brief.output_language,
                 audience=run.request.brief.audience,
-                target_words=_target_words(run.request.brief),
+                target_words=_target_words(run.request.brief, run.editorial_project.proposal if run.editorial_project else None),
                 correction_request=correction,
                 reference_text=run.corrected_content,
                 architecture=run.narrative_architecture,
@@ -1733,7 +1830,7 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"\b[\wÀ-ÖØ-öø-ÿ]+(?:['’\-][\wÀ-ÖØ-öø-ÿ]+)*\b", text))
 
 
-def _target_words(brief: EditorialBrief) -> int:
+def _target_words(brief: EditorialBrief, project: EditorialProjectProposal | None = None) -> int:
     product = brief.product.strip().lower()
     rates = {
         "article": 140,
@@ -1747,7 +1844,7 @@ def _target_words(brief: EditorialBrief) -> int:
         "presentation": 120,
     }
     words_per_minute = rates.get(product, 140)
-    return brief.duration_minutes * words_per_minute
+    return (project.duration_minutes if project else brief.duration_minutes) * words_per_minute
 
 
 def _section_targets(

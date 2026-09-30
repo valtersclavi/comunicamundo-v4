@@ -161,6 +161,10 @@ Scan these passages once against the ideas, questions and intended scope already
 defined by the complete brief. This is routing, not
 summarization or editorial analysis: select material because it can evidence, qualify, limit or contradict
 that briefing-led direction, never because it merely supplies another topic.
+Before selecting, derive the extraction criteria from the brief: what questions
+must this piece answer, and what evidence could support, qualify or contradict
+those answers? Apply those criteria to every passage. Related vocabulary alone
+is not relevance. Do not select a new agenda because a source develops it at length.
 Return only compact integer flags.
 
 - relevant: passages that can materially serve the requested piece.
@@ -172,7 +176,7 @@ Return only compact integer flags.
 
 Omitted core passages will not receive deep reading. Preserve meaningful
 contradictions, limitations, qualifications, and surprising but useful
-directions. Use only these core passage numbers: {allowed}.
+contributions within the brief. Use only these core passage numbers: {allowed}.
 The context passages help interpret boundaries and cannot themselves be flagged.
 
 BRIEF:
@@ -328,7 +332,10 @@ generated subject by subject.
 
 The Narrative Axis is the one- or two-sentence intention of message that must
 govern the complete future piece. The subjects must operationalize that Axis
-with real depth and avoid superficial coverage of everything.
+with real depth and avoid superficial coverage of everything. Every subject must
+answer a need derived from the brief. Source length and the number of passages
+never authorize a new subject. Extract what serves those needs; omit unrelated
+source themes even when they are well developed.
 
 Start from the requested {brief.duration_minutes} minutes. If incorporating an
 additional subject discovered through source or model enrichment, preserve every

@@ -467,6 +467,13 @@ class EditorialProjectRevisionHeader(StrictModel):
     narrative_axis: NarrativeAxisProposal
 
 
+class SourceEnrichmentAssessment(StrictModel):
+    contributes: bool
+    reason: str = Field(min_length=1)
+    target_subject_index: int | None = Field(default=None, ge=0)
+    additional_minutes: float = Field(ge=0)
+
+
 class EditorialProjectRecord(StrictModel):
     editorial_project_id: UUID = Field(default_factory=uuid4)
     execution_run_id: UUID

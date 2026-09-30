@@ -21,6 +21,7 @@ const stageNames = {
   provisional_editorial_project: "Direção editorial provisória",
   source_research: "Busca e seleção editorial de fontes",
   source_acquisition: "Aquisição das fontes selecionadas",
+  source_enrichment: "Contribuição da fonte externa",
   redigestion: "Redigestão das fontes adquiridas",
   ingestion: "Leitura e normalização das fontes",
   relational_structure: "Estrutura de parágrafos e frases",
@@ -181,7 +182,8 @@ function statusClass(status) { return ["failed", "input_failed"].includes(status
 function renderSourceManifest(known, provisionalProject) {
   const research = known.get("source_research");
   const acquisition = known.get("source_acquisition");
-  const records = Array.isArray(acquisition?.sources) ? acquisition.sources : [];
+  const enrichment = known.get("source_enrichment");
+  const records = [...(acquisition?.sources || []), ...(enrichment?.sources || [])];
   const coverage = research?.subject_coverage || {};
   const subjects = provisionalProject?.subjects || provisionalProject?.source_supported_subjects || [];
   const panel = $("#sources-panel");
@@ -190,7 +192,9 @@ function renderSourceManifest(known, provisionalProject) {
   $("#source-manifest").innerHTML = records.map((record, ordinal) => {
     const candidate = record.candidate || {};
     const indexes = Array.isArray(coverage[candidate.candidate_id]) ? coverage[candidate.candidate_id] : [];
+    const isEnrichment = (enrichment?.sources || []).includes(record);
     const covered = indexes.map((index) => subjects[index]?.title || `Assunto ${index + 1}`);
+    if (isEnrichment) covered.push(`${enrichment.opportunity} — ${enrichment.incorporated ? "incorporada" : "sem acréscimo ao PE"}`);
     const status = record.status === "acquired" ? "Adquirida" : record.status === "partial" ? "Parcial" : "Falhou";
     const route = record.selected_route ? ` · ${record.selected_route}` : "";
     const url = record.final_url || candidate.url;
@@ -312,7 +316,7 @@ function renderRun(run) {
   const canResume = ["failed", "searching_sources"].includes(status);
   $("#resume-plan").hidden = !canResume || state.pendingStatus === status;
   const provisional = status === "provisional_project_proposed" || status === "searching_sources";
-  state.currentProjectSignature = project ? JSON.stringify(project) : null;
+  state.currentProjectSignature = project ? JSON.stringify([project, known.get("source_enrichment")?.completed_at]) : null;
   if (state.pendingStatus && (
     state.pendingStatus !== status ||
     (state.pendingSignature && state.pendingSignature !== state.currentProjectSignature)
@@ -359,7 +363,7 @@ function renderProject(project, provisional = false) {
   $("#project-suggestions").hidden = !model.length && !sources.length;
   $("#project-suggestions").innerHTML = [
     model.length ? '<h3>Contribuições do LLM</h3><p>Pequenos acréscimos para assuntos existentes.</p>' + model.map((item, index) => `<article class="subject"><p>${escapeHtml(item)}</p><button class="secondary-button" data-suggestion="model" data-index="${index}" type="button">Incluir contribuição</button></article>`).join("") : "",
-    sources.length ? '<h3>Enriquecimento com fontes</h3><p>O Hefesto buscará uma fonte para sustentar o assunto escolhido e apresentará um novo projeto.</p>' + sources.map((item, index) => `<article class="subject"><p>${escapeHtml(item)}</p><button class="secondary-button" data-suggestion="source" data-index="${index}" type="button">Buscar fonte</button></article>`).join("") : ""
+    sources.length ? '<h3>Enriquecimento com fontes</h3><p>O Hefesto buscará uma fonte para sustentar o assunto escolhido e agregará a contribuição pertinente ao projeto atual.</p>' + sources.map((item, index) => `<article class="subject"><p>${escapeHtml(item)}</p><button class="secondary-button" data-suggestion="source" data-index="${index}" type="button">Buscar fonte</button></article>`).join("") : ""
   ].join("");
 }
 
