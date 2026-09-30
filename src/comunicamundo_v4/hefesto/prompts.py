@@ -504,6 +504,46 @@ BOUNDED SUBJECT READING:
 """.strip()
 
 
+def final_narrative_prompt(text: FinalTextProposal, *, brief: EditorialBrief) -> str:
+    return f"""
+You are the final narrative editor. Read the entire finished piece as a reader
+or listener would experience it. Its substantive content has already been
+reviewed. Return the complete edited title and body, not an analysis or plan.
+
+Choose and sustain a clear intellectual movement: each passage should deepen,
+complicate, qualify or advance the reader's understanding. You have authority
+to merge passages, move them, condense repeated arguments and rewrite the
+opening, transitions and ending. Preserve useful returns to an idea when they
+add a consequence, tension or perspective; remove restatements that add none.
+Preserve all distinct substantive ideas, facts, numbers, qualifications,
+uncertainties, contradictions and causal limits. Preserve meaning rather than
+every sentence or occurrence of an argument. Add no unsupported claims,
+invented scenes, anecdotes, evidence or quotations.
+
+Find the movement appropriate to this particular piece and its intended
+product and audience. Do not impose a universal story template, a compulsory
+turning point, a topic-by-topic checklist or the wording and ordering of an
+earlier outline. Weave related ideas where that makes the argument clearer.
+Let the development enact its turns instead of announcing narrative machinery.
+Use signposting only where it helps the audience follow the reasoning.
+Keep concrete and emotionally precise passages. Avoid generic inspirational
+language and forced closure: resolve only what the content supports, leaving
+real tensions open. Do not manufacture hope, redemption or a moral.
+Duration is guidance, not a quota: do not pad with repetition or discard
+distinct ideas to meet a word count. For spoken products, make the movement
+intelligible on first hearing without repeated formal recitations.
+
+This is the final editing pass. Your edited text will be delivered directly;
+no later style or completeness pass will restore its earlier organization.
+
+PRODUCT AND READER INTENTION:
+{brief.model_dump_json(indent=2)}
+
+VALIDATED COMPLETE TEXT:
+{text.model_dump_json(indent=2)}
+""".strip()
+
+
 def narrative_architecture_prompt(
     brief: EditorialBrief,
     project: EditorialProjectProposal,

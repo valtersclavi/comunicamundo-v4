@@ -31,12 +31,14 @@ const stageNames = {
   content_revision: "Correção pelo redator",
   content_contract_correction: "Ajuste do contrato de duração",
   product_styling: "Forma e estilo do produto",
-  final_verification: "Verificação final de preservação",
+  final_verification: "Preservação do conteúdo antes da edição final",
+  narrative_architecture: "Direção narrativa inicial",
+  final_narrative_edit: "Edição narrativa final",
   product_style_correction: "Correção de forma e estilo",
   final_reverification: "Verificação final da correção",
   final_text: "Geração do texto final"
 };
-const expectedStages = ["ingestion", "relational_structure", "selection", "editorial_comprehension", "content_draft", "content_review", "content_revision", "product_styling", "final_verification"];
+const expectedStages = ["ingestion", "relational_structure", "selection", "editorial_comprehension", "narrative_architecture", "content_draft", "content_review", "content_revision", "product_styling", "final_verification", "final_narrative_edit"];
 
 function formatSeconds(totalSeconds) {
   if (totalSeconds < 60) return `${totalSeconds.toFixed(1)} s`;
@@ -311,6 +313,13 @@ function renderRun(run) {
   $("#resume-plan").hidden = !canResume || state.pendingStatus === status;
   const provisional = status === "provisional_project_proposed" || status === "searching_sources";
   state.currentProjectSignature = project ? JSON.stringify(project) : null;
+  if (state.pendingStatus && (
+    state.pendingStatus !== status ||
+    (state.pendingSignature && state.pendingSignature !== state.currentProjectSignature)
+  )) {
+    state.pendingStatus = null;
+    state.pendingSignature = null;
+  }
   $("#project-panel").hidden = !project;
   if (project) renderProject(project, provisional);
   $("#approve-project").hidden = !["project_proposed", "provisional_project_proposed"].includes(status) || state.pendingStatus === status;

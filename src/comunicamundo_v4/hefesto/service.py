@@ -52,6 +52,7 @@ from .prompts import (
     condensation_prompt,
     content_draft_prompt,
     narrative_architecture_prompt,
+    final_narrative_prompt,
     content_review_prompt,
     content_revision_prompt,
     preservation_review_prompt,
@@ -366,6 +367,7 @@ class Hefesto:
             "content_draft": None, "content_review": None,
             "corrected_content": None, "styled_text": None,
             "preservation_review": None, "final_text": None,
+            "narrative_text": None,
             "updated_at": datetime.now(UTC),
         })
         await self._repository.save_run(active)
@@ -515,6 +517,20 @@ class Hefesto:
                 run = await self._save_artifact(run, styled_text=styled)
 
             run = await self._verify_and_repair_style(run)
+            if run.narrative_text is None:
+                narrative = await self._generate_step(
+                    run,
+                    stage="final_narrative_edit",
+                    task_type="final_narrative_edit",
+                    prompt=final_narrative_prompt(
+                        run.styled_text,
+                        brief=run.request.brief,
+                    ),
+                    schema=FinalTextProposal,
+                    max_output_tokens=16_384,
+                    thinking_tokens=4_000,
+                )
+                run = await self._save_artifact(run, narrative_text=narrative)
             return await self._complete_final_text(run)
         except Exception as error:
             latest = await self._required_run(run.execution_run_id)
@@ -566,6 +582,10 @@ class Hefesto:
                 "preservation_review": (
                     run.preservation_review.model_dump(mode="json")
                     if run.preservation_review else None
+                ),
+                "narrative_text": (
+                    run.narrative_text.model_dump(mode="json")
+                    if run.narrative_text else None
                 ),
             },
             "processing": await self._repository.work_report(execution_run_id),
@@ -1301,7 +1321,7 @@ class Hefesto:
     async def _complete_final_text(self, run: ProductRun) -> ProductRun:
         if run.editorial_project is None:
             raise ValueError("Final text requires an Editorial Project")
-        if run.styled_text is None or run.preservation_review is None:
+        if run.narrative_text is None or run.preservation_review is None:
             raise ValueError("Final text pipeline is incomplete")
         if not run.preservation_review.approved:
             raise ValueError("Styled text failed final preservation verification")
@@ -1309,8 +1329,8 @@ class Hefesto:
             execution_run_id=run.execution_run_id,
             project_id=run.project_id,
             editorial_project_id=run.editorial_project.editorial_project_id,
-            proposal=run.styled_text,
-            word_count=_word_count(run.styled_text.body),
+            proposal=run.narrative_text,
+            word_count=_word_count(run.narrative_text.body),
         )
         completed = run.model_copy(
             update={

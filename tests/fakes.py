@@ -312,6 +312,7 @@ class FakeGateway:
             )
         elif task_type in {
             "content_draft",
+            "final_narrative_edit",
             "content_revision",
             "content_contract_correction",
             "product_styling",
@@ -322,7 +323,7 @@ class FakeGateway:
                 task_type, int(match.group(1)) if match else 1_120
             )
             value = FinalTextProposal(
-                title="Finished title",
+                title="Narratively edited title" if task_type == "final_narrative_edit" else "Finished title",
                 body=" ".join(["conteúdo"] * words),
             )
         elif task_type == "content_review":

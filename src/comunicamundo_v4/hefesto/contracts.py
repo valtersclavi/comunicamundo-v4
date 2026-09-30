@@ -559,6 +559,7 @@ class ProductRun(StrictModel):
     corrected_content: FinalTextProposal | None = None
     styled_text: FinalTextProposal | None = None
     preservation_review: PreservationReviewProposal | None = None
+    narrative_text: FinalTextProposal | None = None
     final_text: FinalTextRecord | None = None
     error_class: str | None = None
     error_message: str | None = None

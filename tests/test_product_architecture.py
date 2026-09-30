@@ -252,7 +252,10 @@ async def test_approved_project_produces_persisted_editorial_pipeline() -> None:
 
     assert completed.state is RunState.TEXT_READY
     assert completed.final_text is not None
-    assert completed.final_text.proposal.title == "Finished title"
+    assert completed.final_text.proposal.title == "Narratively edited title"
+    assert completed.final_text.proposal == completed.narrative_text
+    assert completed.final_text.proposal != completed.styled_text
+    assert gateway.calls[-1]["task_type"] == "final_narrative_edit"
     assert completed.final_text.word_count == 1_120
     assert repeated.final_text == completed.final_text
     assert completed.narrative_architecture is not None
@@ -392,3 +395,37 @@ async def test_second_rejection_is_preserved_and_resume_continues_from_it() -> N
     assert tasks.count("final_verification") == 1
     assert tasks.count("product_style_correction") == 2
     assert tasks.count("final_reverification") == 2
+
+
+@pytest.mark.asyncio
+async def test_final_narrative_failure_resumes_without_repeating_validated_content() -> None:
+    repository = MemoryRepository()
+    gateway = FakeGateway(fail_task="final_narrative_edit", fail_times=1)
+    hefesto = Hefesto(repository, gateway)
+    run = await hefesto.prepare(request())
+    await hefesto.select(run.execution_run_id)
+    await hefesto.propose_project(run.execution_run_id)
+    await hefesto.approve_project(run.execution_run_id)
+
+    with pytest.raises(Exception, match="synthetic final_narrative_edit failure"):
+        await hefesto.produce_text(run.execution_run_id)
+    failed = repository.runs[run.execution_run_id]
+    assert failed.styled_text is not None
+    assert failed.preservation_review.approved
+    assert failed.narrative_text is None
+    assert failed.final_text is None
+    before = [call["task_type"] for call in gateway.calls]
+
+    completed = await hefesto.produce_text(run.execution_run_id)
+    assert [call["task_type"] for call in gateway.calls[len(before):]] == ["final_narrative_edit"]
+    assert completed.final_text.proposal == completed.narrative_text
+    assert completed.final_text.proposal != completed.styled_text
+    saved = type(completed).model_validate_json(completed.model_dump_json())
+    assert saved.narrative_text == completed.narrative_text
+    receipt = await hefesto.receipt(run.execution_run_id)
+    assert receipt["content_pipeline"]["narrative_text"] == completed.narrative_text.model_dump(mode="json")
+    prompt = str(gateway.calls[-1]["prompt"])
+    assert completed.styled_text.body in prompt
+    assert "VALIDATED COMPLETE TEXT" in prompt
+    assert "editorial_corpus" not in prompt
+    assert "BINDING NARRATIVE ARCHITECTURE" not in prompt

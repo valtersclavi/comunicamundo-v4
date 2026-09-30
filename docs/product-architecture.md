@@ -21,7 +21,8 @@ A aplicação web e a API são entregues pelo mesmo Cloud Run Service. O navegad
 9. Depois da aprovação, o redator de conteúdo recebe esse estado editorial completo, sem reler nem reinterpretar as fontes originais.
 10. Um editor compara a redação com corpus, Eixo e projeto e devolve correções localizadas. O mesmo redator altera somente os pontos pedidos; se não houver defeito, a redação segue intacta.
 11. Um redator de estilo recebe somente o texto editorialmente fechado e a especificação do produto. Ele tem liberdade total de forma e nenhuma liberdade de conteúdo.
-12. Uma verificação final compara as duas versões. Divergências voltam como correções pontuais sobre a versão estilizada, nunca como uma nova redação completa.
+12. Antes da edição narrativa final, uma verificação compara conteúdo fechado e versão estilizada. Divergências voltam como correções pontuais sobre a versão estilizada.
+13. O editor de narrativa lê o texto completo validado e entrega a versão final. Pode fundir e reordenar passagens, condensar argumentos repetidos e reescrever abertura, transições e fechamento. Preserva ideias distintas, fatos, nuances e contradições; a arquitetura inicial serve à redação, sem engessar essa edição. Nenhuma revisão posterior recompõe blocos ou repetições. O artefato é persistido e a retomada não repete etapas concluídas.
 
 Não existem fichas editoriais por parágrafo. O parágrafo é unidade de estrutura e endereço, não uma chamada de inteligência. Nenhum agrupamento usa somente contagem de parágrafos: cada prompt final é medido pelo tokenizer do modelo, com orçamento separado para seleção, compreensão e saída. Um parágrafo excepcionalmente grande só pode ser dividido entre frases completas.
 
