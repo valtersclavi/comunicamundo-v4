@@ -33,8 +33,6 @@ def load_input_request(
 ) -> EditorialInputRequest:
     bucket, name = parse_gs_uri(uri)
     data = client.bucket(bucket).blob(name).download_as_bytes()
-    if len(data) > 1_000_000:
-        raise ValueError("input request exceeds 1 MB")
     return EditorialInputRequest.model_validate_json(data)
 
 
@@ -102,3 +100,4 @@ def persist_receipt(
         data, content_type="application/json"
     )
     return f"gs://{bucket_name}/{name}"
+

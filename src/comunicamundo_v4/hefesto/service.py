@@ -13,6 +13,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from .atomic import generate_atomic
 from .batching import candidate_packets, passages_from_paragraphs, split_packet
 from .contracts import (
     CallUsage,
@@ -85,6 +86,8 @@ class Repository(Protocol):
     async def selection_batches(
         self, execution_run_id: UUID
     ) -> list[SelectionBatch]: ...
+    async def atomic_task(self, execution_run_id: UUID, key: str) -> dict | None: ...
+    async def save_atomic_task(self, execution_run_id: UUID, key: str, state: dict) -> None: ...
     async def subject_reading(self, execution_run_id: UUID, key: str) -> EditorialKnowledgeUnit | None: ...
     async def save_subject_reading(self, execution_run_id: UUID, key: str, unit: EditorialKnowledgeUnit) -> None: ...
     async def save_condensation(
@@ -781,7 +784,8 @@ class Hefesto:
             next_context=following,
         )
         input_tokens = await self._count_tokens(prompt)
-        if input_tokens <= self._selection_budget:
+        empty_prompt = selection_prompt(run.request.brief, core[:1], source_title=source_title)
+        if input_tokens <= self._selection_budget or (len(core) == 1 or await self._count_tokens(empty_prompt) >= self._selection_budget):
             identity = "selection-v2:" + prompt + ":".join(item.passage_id for item in core)
             batch_id = sha256(identity.encode()).hexdigest()
             return [(batch_id, prompt, input_tokens, core)]
@@ -895,7 +899,9 @@ class Hefesto:
     ) -> list[tuple[list[OutputT], str, int]]:
         prompt = render(items)  # type: ignore[operator]
         tokens = await self._count_tokens(prompt)
-        if tokens <= budget:
+        if tokens <= budget or await self._count_tokens(render([])) >= budget:
+            # An oversized shared brief/frame must itself go through paged I/O;
+            # endlessly splitting its one remaining passage cannot shrink it.
             return [(items, prompt, tokens)]
         left, right = (_split_original_work(items) if isinstance(items[0], Passage) else split_packet(items))
         return [
@@ -1444,7 +1450,7 @@ class Hefesto:
                 "stage": stage,
                 "status": "completed",
                 "duration_ms": int((perf_counter() - started) * 1000),
-                "model_invocations": 1,
+                "model_invocations": len(result.usages),
                 "prompt_tokens": usage.prompt_tokens,
                 "cached_tokens": usage.cached_tokens,
                 "output_tokens": usage.output_tokens,
@@ -1479,29 +1485,23 @@ class Hefesto:
     ) -> ModelResult[OutputT]:
         for attempt in range(3):
             try:
-                result = await self._gateway.generate(
-                    task_type=task_type,
-                    prompt=prompt,
-                    schema=schema,
+                result = await generate_atomic(
+                    self._gateway,
+                    task_type=task_type, prompt=prompt, schema=schema,
                     system_instruction=SYSTEM,
-                    max_output_tokens=max_output_tokens,
-                    thinking_tokens=thinking_tokens,
+                    max_output_tokens=max_output_tokens, thinking_tokens=thinking_tokens,
+                    load=lambda key: self._repository.atomic_task(run.execution_run_id, key),
+                    save=lambda key, state: self._repository.save_atomic_task(run.execution_run_id, key, state),
+                    record=lambda usage: self._repository.record_usage(run.execution_run_id, run.project_id, usage),
+                    split_by_caller=task_type in {
+                        "source_selection", "editorial_subject_routing", "editorial_subject_reading",
+                    },
                 )
             except ModelCallError as error:
-                if error.usage is not None:
-                    failed = error.usage.model_copy(
-                        update={"status": "failed", "error_message": str(error)[:2000]}
-                    )
-                    await self._repository.record_usage(
-                        run.execution_run_id, run.project_id, failed
-                    )
                 if error.retryable and "MAX_TOKENS" not in str(error).upper() and attempt < 2:
                     await asyncio.sleep(2 ** (attempt + 1))
                     continue
                 raise
-            await self._repository.record_usage(
-                run.execution_run_id, run.project_id, result.usage
-            )
             return result
         raise AssertionError("unreachable")
 
@@ -1666,7 +1666,7 @@ def _combined_governing_understanding(
         return new_value
     if new_value in existing.governing_understanding:
         return existing.governing_understanding
-    return f"{existing.governing_understanding} {new_value}"[:1_400].strip()
+    return f"{existing.governing_understanding} {new_value}".strip()
 
 
 def _combined_forbidden_inferences(
@@ -1674,7 +1674,7 @@ def _combined_forbidden_inferences(
     new_values: Sequence[str],
 ) -> list[str]:
     values = [*(existing.forbidden_inferences if existing else []), *new_values]
-    return list(dict.fromkeys(values))[:6]
+    return list(dict.fromkeys(values))
 
 
 def _normalize_subject_minutes(

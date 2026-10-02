@@ -264,12 +264,12 @@ async def _propose_provisional_project(
     )
     started = perf_counter()
     try:
-        result = await EditorialSourceEditor(gateway).provisional_project(request.brief)
+        result = await EditorialSourceEditor(gateway, repository=repository, execution_run_id=execution_id).provisional_project(request.brief)
         stage = {
             "stage": "provisional_editorial_project",
             "status": "completed",
             "duration_ms": int((perf_counter() - started) * 1000),
-            "model_invocations": 1,
+            "model_invocations": len(result.usages),
         }
         receipt = {
             "status": "provisional_project_proposed",
@@ -277,7 +277,7 @@ async def _propose_provisional_project(
             "execution_run_id": str(execution_id),
             "provisional_editorial_project": result.value.model_dump(mode="json"),
             "stages": [stage],
-            "usage": _usage_from_calls([result.usage]),
+            "usage": _usage_from_calls(list(result.usages or (result.usage,))),
             "provisional_usage": result.usage.model_dump(mode="json"),
             "generated_at": datetime.now(UTC).isoformat(),
         }
@@ -322,7 +322,7 @@ async def source_search(execution_id: UUID) -> None:
             project=required("GOOGLE_CLOUD_PROJECT"),
             location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
         )
-        editor = EditorialSourceEditor(gateway)
+        editor = EditorialSourceEditor(gateway, repository=repository, execution_run_id=execution_id)
         discovery = SourceDiscovery([
             YouSearchProvider(required("YOU_API_KEY")),
             OpenAlexSearchProvider(required("OPENALEX_API_KEY")),
@@ -466,12 +466,12 @@ async def revise_provisional(execution_id: UUID, instruction_uri: str) -> None:
             project=required("GOOGLE_CLOUD_PROJECT"),
             location=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"),
         )
-        result = await EditorialSourceEditor(gateway).revise_provisional_project(
+        result = await EditorialSourceEditor(gateway, repository=repository, execution_run_id=execution_id).revise_provisional_project(
             request.brief, current, message
         )
         previous_calls = list((receipt.get("usage") or {}).get("calls") or [])
         calls = [CallUsage.model_validate(item) for item in previous_calls]
-        calls.append(result.usage)
+        calls.extend(result.usages or (result.usage,))
         history = list(receipt.get("provisional_revision_history") or [])
         history.append({
             "instruction": message,
@@ -601,7 +601,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             disclaimer="Esta oportunidade exige uma nova fonte.",
         )
         research = SourceResearch(
-            EditorialSourceEditor(gateway),
+            EditorialSourceEditor(gateway, repository=repository, execution_run_id=execution_id),
             SourceDiscovery([
                 YouSearchProvider(required("YOU_API_KEY")),
                 OpenAlexSearchProvider(required("OPENALEX_API_KEY")),

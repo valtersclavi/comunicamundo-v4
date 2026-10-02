@@ -21,6 +21,7 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 class ModelResult(Generic[OutputT]):
     value: OutputT
     usage: CallUsage
+    usages: tuple[CallUsage, ...] = ()
 
 
 class ModelGateway(Protocol):
@@ -68,10 +69,12 @@ class ModelCallError(RuntimeError):
         usage: CallUsage | None = None,
         *,
         retryable: bool = False,
+        usages: tuple[CallUsage, ...] = (),
     ) -> None:
         super().__init__(message)
         self.usage = usage
         self.retryable = retryable
+        self.usages = usages
 
 
 class VertexGateway:
@@ -206,3 +209,4 @@ def _finish_reason(response: object) -> str | None:
     if raw is None:
         return None
     return str(raw).rsplit(".", 1)[-1].upper()
+

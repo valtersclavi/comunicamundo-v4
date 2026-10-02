@@ -566,6 +566,24 @@ class ProductRepository:
             values = await rows.fetchall()
         return [SelectionBatch.model_validate(item[0]) for item in values]
 
+    async def atomic_task(self, execution_run_id: UUID, key: str) -> dict | None:
+        async with self._pool.connection() as connection:
+            rows = await connection.execute(
+                "SELECT payload FROM hefesto_product.atomic_model_tasks WHERE execution_run_id=%s AND task_key=%s",
+                (execution_run_id, key),
+            )
+            row = await rows.fetchone()
+        return row[0] if row else None
+
+    async def save_atomic_task(self, execution_run_id: UUID, key: str, state: dict) -> None:
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                """INSERT INTO hefesto_product.atomic_model_tasks (execution_run_id,task_key,payload)
+                   VALUES (%s,%s,%s::jsonb) ON CONFLICT (execution_run_id,task_key)
+                   DO UPDATE SET payload=EXCLUDED.payload,updated_at=now()""",
+                (execution_run_id, key, json.dumps(state, ensure_ascii=False)),
+            )
+
     async def subject_reading(self, execution_run_id: UUID, key: str) -> EditorialKnowledgeUnit | None:
         async with self._pool.connection() as connection:
             rows = await connection.execute(

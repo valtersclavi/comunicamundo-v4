@@ -116,6 +116,52 @@ chamada de LLM para condensar ou regenerar o conjunto. Leituras concluídas e su
 referências são persistidas e reutilizadas. A remoção do antigo limite de citação
 não invalida leituras completas já salvas sob o mesmo briefing e material.
 
-Essa regra deve orientar também qualquer alteração futura da produção textual:
-dividir tarefas com preservação do contexto e do contrato narrativo, sem
-reintroduzir limites editoriais arbitrários para contornar limites do provedor.
+A mesma regra é aplicada na produção textual, preservando contexto, referências
+e o contrato narrativo. Todas as chamadas editoriais usam o mecanismo comum,
+além da subdivisão semântica já existente na triagem e compreensão.
+
+
+## Processamento comum de entradas e respostas em partes — 02/10/2026
+
+`atomic.py` é utilizado pelo Hefesto e pelo editor de fontes. Cobre pré-PE,
+busca/julgamento de candidatos, PE, sugestões, enriquecimento, remoque,
+arquitetura narrativa, redação, revisão de conteúdo, correção, estilo,
+verificações e edição narrativa final. A regra de desenvolvimento está também
+em `AGENTS.md`, para não ser novamente implementada apenas em algumas etapas.
+
+Chamadas pequenas conservam a tarefa e o schema originais. A entrada é medida
+incluindo instruções e schema. Uma entrada maior que o orçamento, uma extensão
+prevista de saída que não caiba, ou uma resposta interrompida por limite aciona
+leitura/escrita em partes. O orçamento é da operação, não um limite do artefato.
+
+O pedido completo permanece um objeto original endereçável. As partes entregam
+janelas literais, com posições, sem condensações. O modelo pode reler qualquer
+janela do pedido e do resultado em construção; a conclusão exige que todo o
+pedido tenha sido disponibilizado. As operações escrevem ou corrigem partes de
+UM artefato, sem gerar um novo título, introdução ou conclusão para cada parte.
+O editor continua podendo corrigir, fundir e reordenar conteúdo conforme a
+instrução original. O sistema só retorna o resultado após validar o JSON
+completo contra o schema editorial original.
+
+A migração 1007 cria `atomic_model_tasks`. Cada operação concluída grava o
+resultado em construção, a cobertura das janelas e o estado de continuação.
+A chave inclui tarefa, instruções, pedido completo e schema; escopos diferentes
+não reutilizam progresso inadequado. A retomada não reinicia as partes já
+escritas. Respostas cortadas não são incorporadas como operações válidas.
+
+Cada chamada física, inclusive tentativas que atingiram o limite, mantém tokens,
+latência, custo e estado. Na retomada, resultados completos em cache não fazem
+novas chamadas. Cálculos de métricas distinguem o artefato lógico das operações
+físicas usadas para produzi-lo. Repetição de uma operação sem progresso é erro
+de execução do modelo, não um limite de tamanho do conteúdo.
+
+Foram retirados os tetos editoriais de quantidade de fontes, queries e candidatos,
+o limite textual do remoque, o maxlength do tema na interface e a rejeição de
+metadados de briefing acima de 1 MB. Também foram removidos cortes silenciosos
+do entendimento combinado e das inferências proibidas. A leitura e normalização
+de arquivos, bem como as regras de aquisição e o limite aprovado de rodadas de
+busca, permanecem fora desta alteração.
+
+A validação local usa provedores simulados: demonstra preservação, divisão,
+montagem, contabilização e retomada. Qualidade editorial, adesão do Gemini ao
+protocolo de partes e consumo real devem ser avaliados no teste do usuário.

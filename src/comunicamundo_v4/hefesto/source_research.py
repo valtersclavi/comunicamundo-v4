@@ -57,7 +57,7 @@ class SourceResearch:
             subject_count=len(project.subjects),
             attempts_per_subject=self._max_search_rounds,
         )
-        usages = [planned.usage]
+        usages = list(planned.usages or (planned.usage,))
         candidates: list[SourceCandidate] = []
         candidate_ids: set[str] = set()
         judged_ids: set[str] = set()
@@ -100,7 +100,7 @@ class SourceResearch:
                         candidate,
                         eligible_subject_indexes=eligible,
                     )
-                    usages.append(judgment.usage)
+                    usages.extend(judgment.usages or (judgment.usage,))
                     if judgment.value.decision == "skip":
                         continue
                     covered = sorted(
@@ -184,3 +184,4 @@ def _coverage_complete(
     return subject_count > 0 and _covered_subjects(subject_coverage) >= set(
         range(subject_count)
     )
+

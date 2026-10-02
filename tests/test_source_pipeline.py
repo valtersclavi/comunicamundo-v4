@@ -356,6 +356,10 @@ async def test_source_editor_selects_large_candidate_sets_in_batches() -> None:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
 
+        async def count_tokens(self, text):
+            from comunicamundo_v4.hefesto.batching import conservative_tokens
+            return conservative_tokens(text)
+
         async def generate(self, **kwargs):
             self.calls.append(kwargs)
             return ModelResult(
@@ -401,6 +405,10 @@ async def test_source_editor_skips_candidate_without_free_text_decision() -> Non
     valid = candidate()
 
     class Gateway:
+        async def count_tokens(self, text):
+            from comunicamundo_v4.hefesto.batching import conservative_tokens
+            return conservative_tokens(text)
+
         async def generate(self, **kwargs):
             return ModelResult(
                 value=SourceCandidateJudgment(
@@ -553,3 +561,4 @@ async def test_source_research_stops_after_first_query_with_acquired_coverage() 
     assert discovery.queries == ["query 0"]
     assert result.selection.coverage_complete is True
     assert [item.record.status for item in result.acquisitions] == ["acquired"]
+

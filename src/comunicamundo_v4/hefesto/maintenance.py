@@ -19,6 +19,7 @@ _EXECUTION_TABLES = (
     "selection_batches",
     "editorial_condensations",
     "subject_readings",
+    "atomic_model_tasks",
     "paragraphs",
     "call_usage",
     "stage_receipts",

@@ -31,3 +31,14 @@ da nova fonte, inclusive perspectivas novas autorizadas pela oportunidade.
 Remoque pode modificar o PE conforme a vontade do usuário e revisitar fontes
 quando necessário. Uma incorporação que falhe preserva o PE e mantém visível o
 registro da aquisição. Nenhum erro autoriza mudar esses contratos.
+
+
+## Objetos longos — regra global
+
+Todas as etapas editoriais, incluindo redação e revisões, processam objetos
+longos em partes. As operações mantêm os originais e o artefato em construção
+endereçáveis; o tamanho de uma chamada não limita o tamanho total da entrega.
+`MAX_TOKENS` provoca subdivisão/continuação, com persistência do progresso,
+sem truncamento nem resumo substitutivo. O resultado só é apresentado como
+completo após montagem e validação. Isso não altera o contrato do PE congelado,
+a autorização de remoque nem a liberdade narrativa final.

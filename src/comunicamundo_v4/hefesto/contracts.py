@@ -43,7 +43,7 @@ class EditorialInputRequest(StrictModel):
     project_id: UUID = Field(default_factory=uuid4)
     brief: EditorialBrief
     source_mode: SourceMode = SourceMode.PROVIDED
-    sources: list[SourceInput] = Field(default_factory=list, max_length=64)
+    sources: list[SourceInput] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def source_mode_matches_sources(self) -> "EditorialInputRequest":
@@ -61,7 +61,7 @@ class SubjectSearchQuery(StrictModel):
 
 
 class SourceSearchPlan(StrictModel):
-    queries: list[SubjectSearchQuery] = Field(min_length=1, max_length=48)
+    queries: list[SubjectSearchQuery] = Field(min_length=1)
     editorial_coverage: list[str] = Field(min_length=1)
 
 
@@ -80,7 +80,7 @@ class SourceCandidate(StrictModel):
 
 
 class SourceSelectionProposal(StrictModel):
-    selected_candidate_ids: list[Sha256] = Field(default_factory=list, max_length=64)
+    selected_candidate_ids: list[Sha256] = Field(default_factory=list)
     subject_coverage: dict[Sha256, list[int]] = Field(default_factory=dict)
     coverage_complete: bool
 

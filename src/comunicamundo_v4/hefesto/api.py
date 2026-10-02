@@ -194,7 +194,7 @@ class LoginRequest(BaseModel):
 
 class ProvisionalRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    message: str = Field(min_length=1, max_length=10_000)
+    message: str = Field(min_length=1)
 
 
 def _required(name: str) -> str:
@@ -942,3 +942,4 @@ def create_app(
 
 
 app = create_app()
+

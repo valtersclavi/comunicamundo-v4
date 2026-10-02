@@ -38,6 +38,7 @@ class MemoryRepository:
         self.assets: dict[UUID, list[SourceAsset]] = {}
         self.asset_links: dict[UUID, list[ParagraphAssetLink]] = {}
         self.saved_selections: dict[UUID, dict[str, SelectionBatch]] = {}
+        self.atomic_states = {}
         self.readings = {}
         self.saved_condensations: dict[UUID, dict[str, EditorialCondensation]] = {}
         self.usage: dict[UUID, list[CallUsage]] = {}
@@ -78,6 +79,14 @@ class MemoryRepository:
             self.saved_selections.get(execution_run_id, {}).values(),
             key=lambda item: (item.source_ordinal, item.first_passage_ordinal),
         )
+
+    async def atomic_task(self, execution_run_id, key):
+        from copy import deepcopy
+        return deepcopy(self.atomic_states.get((execution_run_id, key)))
+
+    async def save_atomic_task(self, execution_run_id, key, state):
+        from copy import deepcopy
+        self.atomic_states[(execution_run_id, key)] = deepcopy(state)
 
     async def subject_reading(self, execution_run_id, key):
         return self.readings.get((execution_run_id, key))
