@@ -200,12 +200,10 @@ class SourceDiscovery:
         selected = self._providers.get(provider)
         if selected is None:
             raise ValueError(f"unknown source provider: {provider}")
-        try:
-            return deduplicate_candidates(
-                selected.search(query, count=self._results_per_query)
-            )
-        except Exception:
-            return []
+        # Provider failure is not evidence that no sources exist.
+        return deduplicate_candidates(
+            selected.search(query, count=self._results_per_query)
+        )
 
 
 def deduplicate_candidates(candidates: Iterable[SourceCandidate]) -> list[SourceCandidate]:

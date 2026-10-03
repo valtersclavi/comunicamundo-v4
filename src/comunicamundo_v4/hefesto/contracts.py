@@ -99,6 +99,11 @@ class SourceSelectionProposal(StrictModel):
         return self
 
 
+class SourcePromiseHint(StrictModel):
+    promising: bool
+    reason: str
+
+
 class SourceCandidateJudgment(StrictModel):
     decision: str = Field(pattern=r"^(acquire|skip)$")
     covered_subject_indexes: list[int] = Field(default_factory=list)

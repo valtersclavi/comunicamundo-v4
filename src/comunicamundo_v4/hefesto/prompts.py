@@ -76,6 +76,12 @@ judgment about a candidate's prestige. Make later attempts for the same subject
 broader or differently phrased so that a difficult subject receives four real
 chances. Do not impose a fixed number of final sources.
 
+Output language does NOT restrict source language. Search the actual evidence
+promised, including English and other pertinent languages. Use web pages,
+interviews, lived experiences, qualitative research, reports and plain text
+when relevant. Never require PDF or DOI. A mandatory addendum takes priority
+over generic coverage of the original topic.
+
 BRIEF:
 {brief.model_dump_json(indent=2)}
 
@@ -134,7 +140,12 @@ def source_candidate_judgment_prompt(
     ]
     return f"""
 Judge this single source candidate only by whether its visible content summary
-appears to contribute to the Narrative Axis or provisional subjects.
+shows a concrete hint of contribution to the provisional subjects. When a
+mandatory addendum is present, general relevance to the old Narrative Axis is
+NOT sufficient: look for the selected perspective, type of account or evidence.
+This is lightweight triage, not proof of the complete contribution. A promising
+abstract or description is sufficient; do not require every subtopic. Read
+sources in any language and format.
 
 Return only operational signals:
 - decision: "acquire" if the candidate appears to contribute; otherwise "skip".

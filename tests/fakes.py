@@ -26,6 +26,7 @@ from comunicamundo_v4.hefesto.contracts import (
     SourceAsset,
     ReferencedSubjectProposal,
     SubjectPassageRouting,
+    SourceSearchPlan, SubjectSearchQuery, SourceCandidateJudgment,
 )
 from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
 from comunicamundo_v4.hefesto.service import FirstProjectSuggestions
@@ -244,6 +245,13 @@ class FakeGateway:
                     for source, passage in pairs
                 ]
             })
+        elif task_type == "source_search_plan":
+            value = SourceSearchPlan(queries=[
+                SubjectSearchQuery(subject_index=0, query=f"round {i}", provider="you")
+                for i in range(4)
+            ], editorial_coverage=["Find direct evidence"])
+        elif task_type == "source_candidate_judgment":
+            value = SourceCandidateJudgment(decision="acquire", covered_subject_indexes=[0])
         elif task_type == "editorial_project_suggestions":
             value = FirstProjectSuggestions(
                 model_knowledge_suggestions=["Optional model suggestion"],

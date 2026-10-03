@@ -65,6 +65,7 @@ from .prompts import (
     subject_passage_routing_prompt,
 )
 from .segmentation import segment_sources
+from .source_leads import verify_leads
 
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
@@ -1242,16 +1243,40 @@ class Hefesto:
                 "within existing subjects, requiring no search, and one to "
                 "three broader opportunities that need new documentary "
                 "sources. Do not claim model knowledge came from a source. "
+                "Propose only contributions with a concrete search direction: the type "
+                "of evidence and the concepts likely to locate it. Availability will be "
+                "checked before publication. Source language and format are unrestricted. "
                 "Do not invent source identities.\n"
                 f"BRIEF: {run.request.brief.model_dump_json()}\n"
                 f"AXIS: {scaffold.narrative_axis.model_dump_json()}\n"
                 f"SUBJECTS: {', '.join(item.title for item in subjects)}"
             )
-            suggestions = (await self._call(
-                run, task_type="editorial_project_suggestions",
-                prompt=suggestion_prompt, schema=FirstProjectSuggestions,
-                max_output_tokens=1_536, thinking_tokens=0,
-            )).value
+            grounding_key = sha256(("suggestion-grounding-v1:" + suggestion_prompt).encode()).hexdigest()
+            grounding = await self._repository.atomic_task(run.execution_run_id, grounding_key) or {"unlocated": []}
+            while True:
+                suggestions = (await self._call(
+                    run, task_type="editorial_project_suggestions",
+                    prompt=suggestion_prompt + "\nDo not repeat these unlocated proposals; "
+                        "choose a different evidence-backed direction:\n" + str(grounding["unlocated"]),
+                    schema=FirstProjectSuggestions,
+                    max_output_tokens=1_536, thinking_tokens=0,
+                )).value
+                fresh = [o for o in suggestions.source_enrichment_opportunities
+                         if o not in grounding["unlocated"]]
+                if not fresh:
+                    raise ModelCallError("O planejador não propôs contribuição com pista nova de fonte; progresso preservado.")
+                grounded = []
+                for opportunity in fresh:
+                    leads = await verify_leads(run, opportunity, scaffold.narrative_axis,
+                                               self._gateway, self._repository)
+                    if leads:
+                        grounded.append(opportunity)
+                    else:
+                        grounding["unlocated"].append(opportunity)
+                if grounded:
+                    suggestions = suggestions.model_copy(update={"source_enrichment_opportunities": grounded})
+                    break
+                await self._repository.save_atomic_task(run.execution_run_id, grounding_key, grounding)
         value = EditorialProjectProposal(
             working_title=scaffold.working_title,
             editorial_promise=scaffold.editorial_promise,

@@ -14,7 +14,7 @@ from google.cloud import storage
 from google.api_core.exceptions import NotFound
 
 from .gateway import VertexGateway
-from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, ProvisionalEditorialSubject, EditorialInputRequest, RunState, SourceMode
+from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, ProvisionalEditorialSubject, EditorialInputRequest, RunState, SourceMode, SourceCandidate
 from .ingestion import IngestionResult, ingest, ingest_acquired
 from .maintenance import clean_operational_history
 from .postgres import ProductRepository, apply_migrations
@@ -24,6 +24,8 @@ from .segmentation import segment_sources
 from .source_editor import EditorialSourceEditor
 from .source_pipeline import OpenAlexSearchProvider, SourceAcquirer, SourceDiscovery, YouSearchProvider
 from .source_research import SourceResearch, SourceResearchExhausted
+from .contribution_research import ContributionResearch
+from .source_leads import lead_key
 from .storage import load_input_request, persist_receipt
 
 
@@ -612,6 +614,18 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
     async def save_research(progress):
         session["research"] = progress
         await checkpoint()
+        await hefesto.record_stages(execution_id, [{
+            "stage": "source_enrichment", "status": "running",
+            "opportunity": opportunity, "sources": acquired_records,
+            "duration_ms": int((perf_counter() - started) * 1000),
+            "checkpoint_key": session_key, "opportunity_index": index,
+            "summary": "Buscando a contribuição escolhida; fontes passam por triagem antes da digestão.",
+            "search_query": progress.get("current_query"),
+            "attempts_by_subject": progress.get("attempts", {}),
+            "candidate_count": len(progress.get("candidates", {})),
+            "rejections": progress.get("rejections", {}),
+            "incorporated": bool(session.get("incorporated_run")),
+        }])
 
     async def load_research():
         return session["research"]
@@ -632,12 +646,12 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             )],
             disclaimer="Esta oportunidade exige uma nova fonte.",
         )
-        research = SourceResearch(
+        research = ContributionResearch(
             EditorialSourceEditor(gateway, repository=repository, execution_run_id=execution_id),
             SourceDiscovery([
                 YouSearchProvider(required("YOU_API_KEY")),
                 OpenAlexSearchProvider(required("OPENALEX_API_KEY")),
-            ], results_per_query=2),
+            ]),
             SourceAcquirer(
                 you_api_key=required("YOU_API_KEY"),
                 jina_api_key=required("JINA_API_KEY"),
@@ -751,6 +765,13 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             contribution_brief, provisional, accept_acquired=accept_acquired,
             record_usage=lambda usage: repository.record_usage(execution_id, original.project_id, usage),
             load_progress=load_research, save_progress=save_research,
+            rejection_reason=lambda cid: next(
+                (r.get("editorial_reason", "") for r in acquired_records
+                 if r["candidate"]["candidate_id"] == cid), ""
+            ),
+            seed_candidates=[SourceCandidate.model_validate(c) for c in (
+                (await repository.atomic_task(execution_id, lead_key(original.request.brief, opportunity)) or {}).get("leads", [])
+            )],
         )
         report = await hefesto.usage_report(execution_id)
         report["calls"] = report["calls"][usage_offset:]

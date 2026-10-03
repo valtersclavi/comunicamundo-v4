@@ -103,6 +103,20 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
                 decision='acquire', covered_subject_indexes=[0],
             ), usage=usage('source_candidate_judgment'))
 
+        async def next_search_plan(self, brief, project, *, history):
+            if history:
+                assert history[-1]['results'][0]['rejection'] == 'Only the requested new evidence.'
+            if len(history) >= 6:
+                raise ModelCallError('search provider unavailable')
+            return ModelResult(value=SourceSearchPlan(queries=[
+                SubjectSearchQuery(subject_index=0, query=f'round {len(history)}', provider='you')
+            ], editorial_coverage=[opportunity]), usage=usage('source_search_replan'))
+
+        async def inspect_excerpt(self, brief, project, source, excerpt):
+            from comunicamundo_v4.hefesto.contracts import SourcePromiseHint
+            return ModelResult(value=SourcePromiseHint(promising=True, reason='A possible lead'),
+                               usage=usage('source_promise_hint'))
+
     class Discovery:
         def __init__(self, *args, **kwargs):
             pass
@@ -175,7 +189,7 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
     if successful:
         await worker.enrich_project_source(run.execution_run_id, 0)
     else:
-        with pytest.raises(ValueError, match='No source fulfilled'):
+        with pytest.raises(ModelCallError, match='search provider unavailable'):
             await worker.enrich_project_source(run.execution_run_id, 0)
     updated = repo.runs[run.execution_run_id]
     stage = next(s for s in repo.stages[run.execution_run_id] if s['stage'] == 'source_enrichment')
@@ -186,7 +200,7 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
     assert 'NO_PROMISE' in ''.join(p.text for p in repo.structures[run.execution_run_id])
     assert 'NO_PROMISE' not in ''.join(p.text for p in await service._paragraphs(updated))
     if successful:
-        assert discovered == ['round 0', 'round 1']
+        assert discovered == ['round 1']
         assert stage['status'] == 'completed' and stage['incorporated']
         assert [s['editorial_status'] for s in stage['sources']] == ['rejected', 'incorporated']
         assert updated.editorial_project.proposal.duration_minutes == frozen.duration_minutes + 3
@@ -194,17 +208,17 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
         assert updated.editorial_project.proposal.editorial_corpus.units[:-1] == frozen.editorial_corpus.units
         assert len(updated.request.sources) == len(original.request.sources) + 1
     else:
-        assert len(discovered) == 4
+        assert len(discovered) == 5
         assert updated == original
-        assert stage['status'] == 'failed' and not stage['incorporated']
+        assert stage['status'] == 'paused' and stage['resumable'] and not stage['incorporated']
         assert all(s['editorial_status'] == 'rejected' for s in stage['sources'])
         assert updated.editorial_project.proposal.source_enrichment_opportunities == frozen.source_enrichment_opportunities
     if interrupted:
         assert acquired == normalized and len(acquired) == 2
-        assert discovered == ['round 0', 'round 1']
+        assert discovered == ['round 1']
         assert len(repo.usage[run.execution_run_id]) == paid_before_resume + (1 if interrupted is True else 0)
     recorded = [u.task_type for u in repo.usage[run.execution_run_id]]
-    assert recorded.count('source_candidate_judgment') == len(discovered)
+    assert recorded.count('source_candidate_judgment') >= len(discovered) + 1
 
 
 def test_successful_external_contribution_cannot_have_zero_duration():

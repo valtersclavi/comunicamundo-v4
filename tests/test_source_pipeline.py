@@ -188,7 +188,7 @@ def test_discovery_discards_unsafe_candidate_urls_and_keeps_valid_results() -> N
     assert found[0].url == "https://example.org/good"
 
 
-def test_discovery_ignores_provider_failure_when_another_provider_returns_sources() -> None:
+def test_discovery_exposes_provider_failure_instead_of_claiming_no_results() -> None:
     good = candidate()
 
     class BrokenProvider:
@@ -204,7 +204,8 @@ def test_discovery_ignores_provider_failure_when_another_provider_returns_source
             return [good]
 
     discovery = SourceDiscovery([BrokenProvider(), GoodProvider()])
-    assert discovery.discover_query("query", "broken") == []
+    with pytest.raises(ValueError, match="source URLs"):
+        discovery.discover_query("query", "broken")
     found = discovery.discover_query("query", "good")
 
     assert found == [good]

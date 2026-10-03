@@ -62,3 +62,14 @@ da contribuição externa ficam persistidas para retomar a avaliação pendente.
 Uma falha real do provedor aparece como contribuição pausada, com botão de
 retomada; esgotamento da busca aparece como promessa não cumprida. Fontes que
 não cumprem a promessa ficam fora do PE ativo, com originais e leituras guardados.
+
+
+### Busca responsável pela contribuição prometida — 03/10/2026
+
+Esta decisão substitui o limite de quatro rodadas para enriquecimento autorizado. O fluxo de zero fontes permanece separado. Antes de publicar uma sugestão externa, Hefesto localiza uma fonte real e verifica seu título/resumo; a pista fica persistida e é reutilizada quando a contribuição é escolhida. Uma proposta sem pista é substituída antes de ser oferecida.
+
+A aquisição é seguida por leitura rápida, em janelas sucessivas, que termina assim que identifica indício concreto da perspectiva prometida. Isso acontece antes da ingestão e da digestão editorial. Uma triagem positiva não equivale à confirmação final. Quando apenas bytes binários estão disponíveis, o título/resumo já triado orienta o uso do leitor existente; não se rejeita material ainda não lido.
+
+Fontes inadequadas realimentam o planejador com o motivo da rejeição. A próxima consulta pode mudar idioma, conceitos, gênero documental e provedor, sem exigir PDF ou DOI. Não há encerramento por quatro tentativas. Busca, triagem, aquisição e trabalho editorial ficam em checkpoints. Falhas do provedor aparecem como falhas técnicas, nunca como ausência de fontes. Uma incapacidade técnica de gerar consulta nova pausa para retomada; não retira a promessa.
+
+Preservados: leitores e normalização da ingestão, PE congelado, regras de incorporação, referências originais e aumento de duração da contribuição aceita.

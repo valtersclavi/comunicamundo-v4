@@ -26,8 +26,13 @@ inferidas, nem introduzir exceções por tema, arquivo ou execução de teste.
   busca, julgamento e compreensão. Contribuições aos assuntos existentes são
   bem-vindas, mas não substituem a promessa. Uma fonte externa só é incorporada
   se cumprir essa promessa, ampliar argumentos/assuntos visíveis no PE e aumentar
-  a duração. Se não cumprir, trocar a fonte dentro das quatro rodadas existentes;
-  ao esgotá-las, informar a contribuição não cumprida e preservar PE e promessa.
+  a duração. Antes de sugerir contribuição externa, localizar uma pista real de
+  fonte e conferir sua pertinência pelo título/resumo. Antes da digestão, fazer
+  leitura rápida à procura de indícios; só fontes promissoras seguem para ela.
+  Se não cumprir, usar a rejeição para reformular a busca, variando idioma,
+  consulta, gênero e formato sem reduzir a promessa nem encerrar após quatro
+  rodadas. A contribuição autorizada permanece pendente até ser cumprida;
+  impedimentos técnicos pausam com progresso e retomada preservados.
   Contribuições pontuais do LLM não têm essa obrigação de aumentar a duração.
   Remoque pode alterar o PE conforme a vontade explícita do usuário e revisitar fontes.
 - Preservar a liberdade do editor de narrativa para fundir e reordenar passagens;
@@ -44,4 +49,4 @@ inferidas, nem introduzir exceções por tema, arquivo ou execução de teste.
   e compreensão para retomar a etapa pendente. Fontes que não cumprem a promessa
   saem do conjunto editorial ativo, mas seus originais e leituras ficam guardados.
   Falhas reais do provedor devem aparecer com trabalho preservado e retomada;
-  não confundir falha técnica com esgotamento das rodadas de busca autorizadas.
+  não converter falha técnica nem quantidade de consultas em desistência editorial.
