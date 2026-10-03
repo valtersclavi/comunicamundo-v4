@@ -203,22 +203,14 @@ def test_api_submits_generic_manifest_and_returns_stable_execution() -> None:
     assert stored == payload
 
 
-def test_zero_source_mode_is_explicit_and_dispatches_normally() -> None:
+def test_removed_zero_source_mode_is_rejected_without_dispatch() -> None:
     storage, dispatcher = Storage(), Dispatcher()
     api = client(storage, dispatcher)
     payload = request()
-    payload["source_mode"] = "find_for_me"
-    payload["sources"] = []
-
+    payload.update({"source_mode": "find_for_me", "sources": []})
     response = api.post("/v1/plans", json=payload)
-
-    assert response.status_code == 202
-    stored = json.loads(next(
-        value for key, value in storage.values.items()
-        if key.endswith("input-request.json")
-    ))
-    assert stored["source_mode"] == "find_for_me"
-    assert stored["sources"] == []
+    assert response.status_code == 422
+    assert dispatcher.calls == []
 
 
 def test_zero_sources_are_rejected_without_find_for_me_mode() -> None:
@@ -233,7 +225,7 @@ def test_provisional_approval_dispatches_internal_source_search() -> None:
     receipt = {"status": "provisional_project_proposed"}
     api = client(storage, dispatcher, receipt=receipt, access=access)
     payload = request()
-    payload.update({"source_mode": "find_for_me", "sources": []})
+    # Existing receipt is supplied by the fixture; new zero-source submissions are disabled.
     execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
 
     response = api.post(f"/v1/plans/{execution_id}/approve-provisional-project")
@@ -250,7 +242,7 @@ def test_provisional_approval_does_not_redispatch_active_source_search() -> None
     receipt = {"status": "searching_sources"}
     api = client(storage, dispatcher, receipt=receipt, access=access)
     payload = request()
-    payload.update({"source_mode": "find_for_me", "sources": []})
+    # Existing receipt is supplied by the fixture; new zero-source submissions are disabled.
     execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
 
     response = api.post(f"/v1/plans/{execution_id}/approve-provisional-project")
@@ -264,7 +256,7 @@ def test_provisional_chat_dispatches_revision_with_immutable_instruction() -> No
     receipt = {"status": "provisional_project_proposed"}
     api = client(storage, dispatcher, receipt=receipt, access=access)
     payload = request()
-    payload.update({"source_mode": "find_for_me", "sources": []})
+    # Existing receipt is supplied by the fixture; new zero-source submissions are disabled.
     execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
 
     response = api.post(
@@ -290,7 +282,7 @@ def test_provisional_chat_does_not_start_source_search() -> None:
     receipt = {"status": "provisional_project_proposed"}
     api = client(storage, dispatcher, receipt=receipt, access=access)
     payload = request()
-    payload.update({"source_mode": "find_for_me", "sources": []})
+    # Existing receipt is supplied by the fixture; new zero-source submissions are disabled.
     execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
 
     response = api.post(
@@ -308,7 +300,7 @@ def test_provisional_chat_is_rejected_after_preproject_approval() -> None:
     receipt = {"status": "searching_sources"}
     api = client(storage, dispatcher, receipt=receipt, access=access)
     payload = request()
-    payload.update({"source_mode": "find_for_me", "sources": []})
+    # Existing receipt is supplied by the fixture; new zero-source submissions are disabled.
     execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
 
     response = api.post(
@@ -600,7 +592,7 @@ def test_failed_zero_source_generation_resumes_at_source_search_with_fresh_dispa
         access=access,
     )
     payload = request()
-    payload.update({"source_mode": "find_for_me", "sources": []})
+    # Existing receipt is supplied by the fixture; new zero-source submissions are disabled.
     execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
 
     response = api.post(f"/v1/plans/{execution_id}/resume")
@@ -625,7 +617,7 @@ def test_stuck_source_search_can_be_resumed_with_fresh_dispatch() -> None:
         access=access,
     )
     payload = request()
-    payload.update({"source_mode": "find_for_me", "sources": []})
+    # Existing receipt is supplied by the fixture; new zero-source submissions are disabled.
     execution_id = api.post("/v1/plans", json=payload).json()["execution_run_id"]
 
     response = api.post(f"/v1/plans/{execution_id}/resume")

@@ -14,7 +14,7 @@ from google.cloud import storage
 from google.api_core.exceptions import NotFound
 
 from .gateway import VertexGateway
-from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, ProvisionalEditorialSubject, EditorialInputRequest, RunState, SourceMode, SourceCandidate
+from .contracts import CallUsage, NormalizedSource, PlanningRequest, ProductRun, ProvisionalEditorialProject, ProvisionalEditorialSubject, EditorialInputRequest, RunState, SourceMode, SourceCandidate, SourceInput
 from .ingestion import IngestionResult, ingest, ingest_acquired
 from .maintenance import clean_operational_history
 from .postgres import ProductRepository, apply_migrations
@@ -67,7 +67,7 @@ async def plan(args: argparse.Namespace) -> None:
     )
     execution_id = args.execution_run_id or uuid4()
     bucket_name = required("HEFESTO_GCS_BUCKET")
-    if input_request.source_mode is SourceMode.FIND_FOR_ME:
+    if input_request.source_mode.value == "find_for_me":
         try:
             await _propose_provisional_project(
                 input_request, execution_id, client, bucket_name,
@@ -312,7 +312,7 @@ async def source_search(execution_id: UUID) -> None:
         receipt = await repository.product_receipt(execution_id)
         if request is None or receipt is None:
             raise KeyError("zero-source submission is missing")
-        if request.source_mode is not SourceMode.FIND_FOR_ME:
+        if request.source_mode.value != "find_for_me":
             raise ValueError("source search is only valid for find-for-me submissions")
         if receipt.get("status") != "provisional_project_proposed":
             raise ValueError(
@@ -694,7 +694,9 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
                 )
                 isolated_request = EditorialInputRequest(
                     project_id=isolated_project_id, brief=contribution_brief,
-                    source_mode=SourceMode.FIND_FOR_ME,
+                    source_mode=SourceMode.PROVIDED,
+                    sources=[SourceInput(uri=payload.record.candidate.acquisition_url,
+                                         title=payload.record.candidate.title)],
                 )
                 ingested = await asyncio.to_thread(
                     ingest_acquired, isolated_request, [payload],

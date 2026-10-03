@@ -27,7 +27,6 @@ class EditorialBrief(StrictModel):
 
 class SourceMode(StrEnum):
     PROVIDED = "provided"
-    FIND_FOR_ME = "find_for_me"
 
 
 class SourceInput(StrictModel):
@@ -47,10 +46,10 @@ class EditorialInputRequest(StrictModel):
 
     @model_validator(mode="after")
     def source_mode_matches_sources(self) -> "EditorialInputRequest":
-        if self.source_mode is SourceMode.PROVIDED and not self.sources:
+        if self.source_mode is not SourceMode.PROVIDED:
+            raise ValueError("only the provided source mode is supported")
+        if not self.sources:
             raise ValueError("provided source mode requires at least one source")
-        if self.source_mode is SourceMode.FIND_FOR_ME and self.sources:
-            raise ValueError("find-for-me source mode starts with zero sources")
         return self
 
 
