@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -562,3 +563,15 @@ async def test_source_research_stops_after_first_query_with_acquired_coverage() 
     assert result.selection.coverage_complete is True
     assert [item.record.status for item in result.acquisitions] == ["acquired"]
 
+
+
+def test_source_research_checkpoint_preserves_original_bytes_and_acquisition_record():
+    from comunicamundo_v4.hefesto.source_research import _pack_payload, _unpack_payload
+    source = candidate()
+    text = 'The complete acquired original.'
+    payload = AcquisitionPayload(record=AcquiredSource(
+        candidate=source, status='acquired', normalized_text=text,
+        normalized_text_sha256=sha256(text.encode()).hexdigest(),
+    ), original_bytes=b'%PDF-1.7\x00\xff\xfe', original_content_type='application/pdf')
+    restored = _unpack_payload(json.loads(json.dumps(_pack_payload(payload))))
+    assert restored == payload

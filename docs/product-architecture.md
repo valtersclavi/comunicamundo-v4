@@ -182,7 +182,7 @@ existentes são bem-vindos, mas não substituem o tipo de contribuição prometi
 
 A aquisição técnica não encerra a busca de enriquecimento. Depois da leitura dos
 originais, a avaliação verifica se a fonte efetivamente cumpre a proposta e agrega
-argumentos. Só então marca a cobertura. Se não cumprir, remove da execução apenas
+argumentos. Só então marca a cobertura. Se não cumprir, retira do conjunto editorial ativo apenas
 os dados anexados por essa tentativa, preserva o PE e a proposta e avalia outra
 candidata ou a rodada seguinte. Mantém as quatro rodadas já previstas; ao esgotar
 as opções, registra falha de cumprimento, sem reformular ou apagar a promessa.
@@ -201,3 +201,31 @@ e a justificativa. A interface distingue fontes adquiridas porém rejeitadas das
 incorporadas. A contabilização registra as chamadas de busca e julgamento à medida
 que ocorrem, inclusive se nenhuma fonte cumprir a promessa. Nenhum parser, formato
 ou regra de desmontagem/ingestão foi alterado.
+
+
+### Recuperação de saída e contribuição externa (2026-10-03)
+
+O gateway preserva o texto de respostas JSON malformadas como trabalho em
+progresso, nunca como artefato validado. O processador atômico repara esse objeto
+ou regenera apenas um comando malformado, sem apagar fragmentos aplicados. Falhas
+consecutivas reduzem a operação. Se o provedor não conseguir emitir nem operações
+mínimas, a execução pausa com seu checkpoint, sem rejeitar a fonte. Chamadas
+concluídas são reutilizadas; correções e reverificações editoriais deliberadamente
+novas podem executar novamente, mesmo com o mesmo texto.
+
+A contribuição possui checkpoint por PE congelado e oportunidade em
+`atomic_model_tasks`: plano, consultas, candidatos, julgamentos, conteúdo adquirido
+e bytes originais, estrutura e leituras concluídas. Uma falha técnica na avaliação
+não repete aquisição, ingestão ou compreensão. Fontes inadequadas são excluídas
+da leitura editorial ativa por identidade, mantendo originais e leituras no banco.
+Os leitores e a normalização da ingestão permanecem inalterados.
+
+Falha técnica aparece no recibo e na interface como contribuição pausada, com
+retomada da mesma oportunidade. Esgotar as quatro rodadas autorizadas aparece como
+promessa não cumprida, preservando PE e material. A retomada também reconhece o PE
+já incorporado caso a publicação do recibo falhe, para não agregar duas vezes.
+
+Verificação local: JSON inválido antes e durante a montagem, preservação do prefixo,
+contabilidade das tentativas, cache de operação concluída, interrupção após a
+compreensão e retomada somente da avaliação, isolamento editorial de fontes
+guardadas e encaminhamento da retomada pela API. Nenhuma chamada paga nos testes.

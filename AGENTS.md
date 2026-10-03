@@ -35,3 +35,13 @@ inferidas, nem introduzir exceções por tema, arquivo ou execução de teste.
 - Testes locais devem simular limites, falhas, referências e retomada. Não usar
   chamadas pagas ao LLM nem acompanhar testes de produção sem autorização. O
   usuário conduz a avaliação real de qualidade e consumo.
+
+- JSON malformado e limites de transporte são falhas da operação, nunca motivos
+  para rejeitar uma fonte ou descartar trabalho. Regenerar/reparar apenas a
+  operação inválida, conservando os fragmentos já construídos. Reduzir operações
+  sem impor limite total ao artefato. Não atuar como juiz editorial.
+- Na contribuição externa, persistir busca, julgamento, aquisição, estruturação
+  e compreensão para retomar a etapa pendente. Fontes que não cumprem a promessa
+  saem do conjunto editorial ativo, mas seus originais e leituras ficam guardados.
+  Falhas reais do provedor devem aparecer com trabalho preservado e retomada;
+  não confundir falha técnica com esgotamento das rodadas de busca autorizadas.

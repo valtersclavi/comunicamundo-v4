@@ -52,3 +52,13 @@ Redação, revisão e correção continuam recebendo os parágrafos originais re
 pelas referências, com o processamento por tamanho já existente. A ingestão e a
 análise por parágrafo permanecem preservadas. PEs antigos são carregados mantendo
 análise e referências, descartando apenas o campo legado de recitação.
+
+
+### Recuperação sem descarte — 03/10/2026
+
+Resposta ou comando com JSON malformado é reparado na operação que falhou,
+conservando a saída válida já construída. Aquisição, estruturação e compreensão
+da contribuição externa ficam persistidas para retomar a avaliação pendente.
+Uma falha real do provedor aparece como contribuição pausada, com botão de
+retomada; esgotamento da busca aparece como promessa não cumprida. Fontes que
+não cumprem a promessa ficam fora do PE ativo, com originais e leituras guardados.

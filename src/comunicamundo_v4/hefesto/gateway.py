@@ -70,15 +70,19 @@ class ModelCallError(RuntimeError):
         *,
         retryable: bool = False,
         usages: tuple[CallUsage, ...] = (),
+        malformed: bool = False,
+        response_text: str | None = None,
     ) -> None:
         super().__init__(message)
         self.usage = usage
         self.retryable = retryable
         self.usages = usages
+        self.malformed = malformed
+        self.response_text = response_text
 
 
 class VertexGateway:
-    """One provider attempt per semantic call; paid malformed output is never retried implicitly."""
+    """One provider attempt; the task orchestrator owns recorded format recovery."""
 
     def __init__(
         self,
@@ -167,7 +171,10 @@ class VertexGateway:
                 str(getattr(response, "text", "") or "")
             )
         except (ValidationError, ValueError, json.JSONDecodeError) as error:
-            raise ModelCallError(f"invalid {schema.__name__}: {error}", usage) from error
+            raise ModelCallError(
+                f"invalid {schema.__name__}: {error}", usage, malformed=True,
+                response_text=str(getattr(response, "text", "") or ""),
+            ) from error
         return ModelResult(value=value, usage=usage)
 
 
@@ -209,4 +216,3 @@ def _finish_reason(response: object) -> str | None:
     if raw is None:
         return None
     return str(raw).rsplit(".", 1)[-1].upper()
-

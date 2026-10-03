@@ -23,7 +23,7 @@ from .prompts import source_contribution_brief
 from .segmentation import segment_sources
 from .source_editor import EditorialSourceEditor
 from .source_pipeline import OpenAlexSearchProvider, SourceAcquirer, SourceDiscovery, YouSearchProvider
-from .source_research import SourceResearch
+from .source_research import SourceResearch, SourceResearchExhausted
 from .storage import load_input_request, persist_receipt
 
 
@@ -567,6 +567,10 @@ async def accept_model_suggestion(execution_id: UUID, index: int) -> None:
         await repository.close()
 
 
+def proposal_id(run: ProductRun) -> str:
+    return str(run.editorial_project.editorial_project_id)
+
+
 async def enrich_project_source(execution_id: UUID, index: int) -> None:
     client = storage_client()
     repository, hefesto = await services()
@@ -575,16 +579,43 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
         await repository.close()
         raise ValueError("Editorial Project is not awaiting source enrichment")
     proposal = original.editorial_project.proposal
-    options = proposal.source_enrichment_opportunities
-    if index < 0 or index >= len(options):
-        await repository.close()
-        raise ValueError("unknown source enrichment opportunity")
-    opportunity = options[index]
+    session_key = sha256(f"enrichment-session:{proposal_id(original)}:{index}".encode()).hexdigest()
     prior_receipt = await repository.product_receipt(execution_id)
+    prior_stage = next((stage for stage in reversed(await repository.stage_report(execution_id))
+                        if stage.get("stage") == "source_enrichment"), {})
+    if prior_stage.get("status") == "paused" and prior_stage.get("opportunity_index") == index:
+        previous_key = prior_stage.get("checkpoint_key")
+        previous = await repository.atomic_task(execution_id, previous_key) if previous_key else None
+        if previous and (proposal_id(original) == proposal_id(ProductRun.model_validate(previous["original"]))
+                         or (previous.get("incorporated_run") and proposal_id(original) == proposal_id(ProductRun.model_validate(previous["incorporated_run"])))):
+            session_key = previous_key
+    session = await repository.atomic_task(execution_id, session_key)
+    if session is None:
+        options = proposal.source_enrichment_opportunities
+        if index < 0 or index >= len(options):
+            await repository.close()
+            raise ValueError("unknown source enrichment opportunity")
+        session = {"original": original.model_dump(mode="json"), "opportunity": options[index],
+                   "records": [], "structured": {}, "research": None}
+        await repository.save_atomic_task(execution_id, session_key, session)
+    else:
+        original = ProductRun.model_validate(session["original"])
+        proposal = original.editorial_project.proposal
+    opportunity = session["opportunity"]
     started = perf_counter()
     usage_offset = len((await hefesto.usage_report(execution_id))["calls"])
-    added_ids: list[UUID] = []
-    acquired_records: list[dict[str, object]] = []
+    acquired_records = session["records"]
+
+    async def checkpoint():
+        await repository.save_atomic_task(execution_id, session_key, session)
+
+    async def save_research(progress):
+        session["research"] = progress
+        await checkpoint()
+
+    async def load_research():
+        return session["research"]
+
     try:
         gateway = VertexGateway(
             project=required("GOOGLE_CLOUD_PROJECT"),
@@ -614,67 +645,86 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             ),
         )
         contribution_brief = source_contribution_brief(original.request.brief, proposal, opportunity)
-        updated, reason = original, ""
+        updated = ProductRun.model_validate(session["incorporated_run"]) if session.get("incorporated_run") else original
+        reason = next((record.get("editorial_reason", "") for record in acquired_records
+                       if record.get("editorial_status") == "incorporated"), "")
 
         async def accept_acquired(payload):
-            nonlocal added_ids, updated, reason
-            record = payload.record.model_dump(mode="json")
+            nonlocal updated, reason
+            candidate_id = payload.record.candidate.candidate_id
+            record = next((r for r in acquired_records if r["candidate"]["candidate_id"] == candidate_id), None)
+            if record is None:
+                record = payload.record.model_dump(mode="json")
+                acquired_records.append(record)
+            if session.get("incorporated_run"):
+                updated = ProductRun.model_validate(session["incorporated_run"])
+                reason = record.get("editorial_reason", "")
+                await repository.save_run(updated)
+                return True
             record["editorial_status"] = "evaluating"
-            acquired_records.append(record)
+            await checkpoint()
             await hefesto.record_stages(execution_id, [{
                 "stage": "source_enrichment", "status": "running",
                 "duration_ms": int((perf_counter() - started) * 1000),
                 "opportunity": opportunity, "sources": acquired_records,
+                "checkpoint_key": session_key, "opportunity_index": index,
                 "incorporated": False,
             }])
-            isolated_project_id = uuid5(
-                original.project_id,
-                "editorial-source:"
-                + str(original.editorial_project.editorial_project_id)
-                + f":{index}:"
-                + payload.record.candidate.candidate_id,
-            )
-            isolated_request = EditorialInputRequest(
-                project_id=isolated_project_id, brief=contribution_brief,
-                source_mode=SourceMode.FIND_FOR_ME,
-            )
-            ingested = await asyncio.to_thread(
-                ingest_acquired, isolated_request, [payload],
-                client=client, bucket_name=required("HEFESTO_GCS_BUCKET"),
-                provisional_project=provisional,
-                supported_subject_indexes=[0],
-                subject_coverage={payload.record.candidate.candidate_id: [0]},
-            )
-            offset = len(original.request.sources)
-            additions = list(ingested.request.sources)
-            if not additions:
-                reason = "A fonte não forneceu conteúdo legível para cumprir a contribuição escolhida."
-                record.update(editorial_status="rejected", editorial_reason=reason)
-                return False
-            added_ids = [source.source_id for source in additions]
-            paragraphs = [
-                item.model_copy(update={"source_ordinal": offset + rank})
-                for rank, source in enumerate(additions, start=1)
-                for item in segment_sources([source])
-            ]
-            assets = [
-                item.model_copy(update={"source_ordinal": offset + rank})
-                for rank, source in enumerate(additions, start=1)
-                for item in source.assets
-            ]
-            links = [item for source in additions for item in source.asset_links]
-            # Preserve old structured rows; append only the new source's rows.
-            await repository.save_structure(execution_id, paragraphs, assets, links)
-            clean_additions = [
-                source.model_copy(update={
-                    "paragraphs": [], "assets": [], "asset_links": [],
-                }) for source in additions
-            ]
-            request = original.request.model_copy(update={
-                "sources": [*original.request.sources, *clean_additions],
-                "existing_editorial_project": proposal,
-            })
-            active = original.model_copy(update={"request": request})
+            if candidate_id not in session["structured"]:
+                isolated_project_id = uuid5(
+                    original.project_id,
+                    "editorial-source:"
+                    + str(original.editorial_project.editorial_project_id)
+                    + f":{index}:"
+                    + payload.record.candidate.candidate_id,
+                )
+                isolated_request = EditorialInputRequest(
+                    project_id=isolated_project_id, brief=contribution_brief,
+                    source_mode=SourceMode.FIND_FOR_ME,
+                )
+                ingested = await asyncio.to_thread(
+                    ingest_acquired, isolated_request, [payload],
+                    client=client, bucket_name=required("HEFESTO_GCS_BUCKET"),
+                    provisional_project=provisional,
+                    supported_subject_indexes=[0],
+                    subject_coverage={payload.record.candidate.candidate_id: [0]},
+                )
+                offset = len(original.request.sources)
+                additions = list(ingested.request.sources)
+                if not additions:
+                    raise ValueError("Source normalization did not produce readable originals; acquired source retained for recovery")
+                added_ids = [source.source_id for source in additions]
+                paragraphs = [
+                    item.model_copy(update={"source_ordinal": offset + rank})
+                    for rank, source in enumerate(additions, start=1)
+                    for item in segment_sources([source])
+                ]
+                assets = [
+                    item.model_copy(update={"source_ordinal": offset + rank})
+                    for rank, source in enumerate(additions, start=1)
+                    for item in source.assets
+                ]
+                links = [item for source in additions for item in source.asset_links]
+                # Preserve old structured rows; append only the new source's rows.
+                await repository.save_structure(execution_id, paragraphs, assets, links)
+                clean_additions = [
+                    source.model_copy(update={
+                        "paragraphs": [], "assets": [], "asset_links": [],
+                    }) for source in additions
+                ]
+                request = original.request.model_copy(update={
+                    "sources": [*original.request.sources, *clean_additions],
+                    "existing_editorial_project": proposal,
+                })
+                active = original.model_copy(update={"request": request})
+                await repository.save_run(active)
+                session["structured"][candidate_id] = {
+                    "run": active.model_dump(mode="json"), "source_ids": [str(v) for v in added_ids],
+                }
+                await checkpoint()
+            saved = session["structured"][candidate_id]
+            active = ProductRun.model_validate(saved["run"])
+            added_ids = [UUID(v) for v in saved["source_ids"]]
             await repository.save_run(active)
             updated, reason = await hefesto.enrich_project(
                 execution_id, opportunity=opportunity, new_source_ids=added_ids,
@@ -682,11 +732,8 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             record["editorial_reason"] = reason
             if updated.editorial_round == original.editorial_round:
                 record["editorial_status"] = "rejected"
-                await repository.rollback_enrichment_sources(
-                    execution_id, added_ids, original.editorial_round,
-                )
                 await repository.save_run(original)
-                added_ids = []
+                await checkpoint()
                 await hefesto.record_stages(execution_id, [{
                     "stage": "source_enrichment", "status": "running",
                     "duration_ms": int((perf_counter() - started) * 1000),
@@ -696,11 +743,14 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
                 }])
                 return False
             record["editorial_status"] = "incorporated"
+            session["incorporated_run"] = updated.model_dump(mode="json")
+            await checkpoint()
             return True
 
         result = await research.run(
             contribution_brief, provisional, accept_acquired=accept_acquired,
             record_usage=lambda usage: repository.record_usage(execution_id, original.project_id, usage),
+            load_progress=load_research, save_progress=save_research,
         )
         report = await hefesto.usage_report(execution_id)
         report["calls"] = report["calls"][usage_offset:]
@@ -715,21 +765,20 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             "sources": acquired_records,
         }])
     except Exception as error:
-        if added_ids:
-            await repository.rollback_enrichment_sources(
-                execution_id, added_ids, original.editorial_round,
-            )
-        await repository.save_run(original)
+        # Technical errors preserve the active source, structured originals,
+        # readings, acquisition and search checkpoints. No source rejection.
+        await checkpoint()
         await _restore_editable_receipt(repository, execution_id, prior_receipt)
         report = await hefesto.usage_report(execution_id)
         report["calls"] = report["calls"][usage_offset:]
         await _persist_product_receipt(hefesto, client, execution_id, [{
-            "stage": "source_enrichment", "status": "failed",
+            "stage": "source_enrichment", "status": "failed" if isinstance(error, SourceResearchExhausted) else "paused",
+            "resumable": not isinstance(error, SourceResearchExhausted), "opportunity_index": index, "checkpoint_key": session_key,
             "completed_at": datetime.now(UTC).isoformat(),
             "duration_ms": int((perf_counter() - started) * 1000),
             **_task_metrics(report, {call["task_type"] for call in report["calls"]}),
             "opportunity": opportunity, "sources": acquired_records,
-            "incorporated": False,
+            "incorporated": bool(session.get("incorporated_run")),
             "error_class": type(error).__name__, "error_message": str(error)[:2000],
         }])
         raise

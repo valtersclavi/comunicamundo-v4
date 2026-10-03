@@ -1478,6 +1478,7 @@ class Hefesto:
                     load=lambda key: self._repository.atomic_task(run.execution_run_id, key),
                     save=lambda key, state: self._repository.save_atomic_task(run.execution_run_id, key, state),
                     record=lambda usage: self._repository.record_usage(run.execution_run_id, run.project_id, usage),
+                    reuse_complete=task_type not in {"product_style_correction", "final_reverification"},
                     split_by_caller=task_type in {
                         "source_selection", "editorial_subject_routing", "editorial_subject_reading",
                     },
@@ -1519,7 +1520,8 @@ class Hefesto:
     async def _paragraphs(self, run: ProductRun) -> list[Paragraph]:
         paragraphs = await self._repository.structure(run.execution_run_id)
         if paragraphs:
-            return paragraphs
+            active_ids = {source.source_id for source in run.request.sources}
+            return [paragraph for paragraph in paragraphs if paragraph.source_id in active_ids]
         return segment_sources(run.request.sources)
 
     async def _activate(self, run: ProductRun, state: RunState) -> ProductRun:

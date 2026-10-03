@@ -194,7 +194,7 @@ function renderSourceManifest(known, provisionalProject) {
     const indexes = Array.isArray(coverage[candidate.candidate_id]) ? coverage[candidate.candidate_id] : [];
     const isEnrichment = (enrichment?.sources || []).includes(record);
     const covered = indexes.map((index) => subjects[index]?.title || `Assunto ${index + 1}`);
-    if (isEnrichment) covered.push(`${enrichment.opportunity} — ${record.editorial_status === "rejected" ? "fonte não cumpriu a contribuição" : enrichment.status === "failed" ? "incorporação falhou; PE preservado" : enrichment.status === "running" ? "em análise" : enrichment.incorporated ? "incorporada" : "contribuição não concluída"}`);
+    if (isEnrichment) covered.push(`${enrichment.opportunity} — ${record.editorial_status === "rejected" ? "fonte não cumpriu a contribuição" : enrichment.status === "paused" ? "avaliação pausada; trabalho preservado" : enrichment.status === "failed" ? "incorporação falhou; PE preservado" : enrichment.status === "running" ? "em análise" : enrichment.incorporated ? "incorporada" : "contribuição não concluída"}`);
     const status = record.status === "acquired" ? "Adquirida" : record.status === "partial" ? "Parcial" : "Falhou";
     const route = record.selected_route ? ` · ${record.selected_route}` : "";
     const url = record.final_url || candidate.url;
@@ -310,11 +310,13 @@ function renderRun(run) {
     $("#metric-cost").textContent = `US$ ${Number(usage.rated_cost_usd || 0).toFixed(6)}`;
   }
   const failed = ["failed", "input_failed"].includes(status);
-  const actionError = run.last_action_error;
+  const enrichment = known.get("source_enrichment");
+  const pausedEnrichment = status === "project_proposed" && enrichment?.status === "paused" && enrichment?.resumable;
+  const actionError = run.last_action_error || (enrichment?.error_message && ["paused", "failed"].includes(enrichment.status) ? enrichment : null);
   $("#run-error").hidden = !(failed || actionError);
   if (failed) $("#run-error").textContent = `${run.error_class || "Falha no processamento"}: ${run.error_message || "Não foi possível concluir esta execução."}`;
   else if (actionError) $("#run-error").textContent = `${actionError.error_class || "Falha na ação"}: ${actionError.error_message || "Não foi possível concluir esta ação."}`;
-  const canResume = ["failed", "searching_sources"].includes(status);
+  const canResume = ["failed", "searching_sources"].includes(status) || pausedEnrichment;
   $("#resume-plan").hidden = !canResume || state.pendingStatus === status;
   const provisional = status === "provisional_project_proposed" || status === "searching_sources";
   state.currentProjectSignature = project ? JSON.stringify([project, known.get("source_enrichment")?.completed_at]) : null;

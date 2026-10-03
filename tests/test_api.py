@@ -89,6 +89,18 @@ class Access:
     async def list_submissions(self, owner_id):
         return [{key: value for key, value in item.items() if key != "owner_id"} for item in self.submissions.values() if item["owner_id"] == owner_id]
 
+    async def claim_editorial_action(self, execution_id, token):
+        submission = self.submissions[execution_id]
+        if submission.get('active_action'):
+            return False
+        submission['active_action'] = token
+        return True
+
+    async def release_editorial_action(self, execution_id, token):
+        submission = self.submissions[execution_id]
+        if submission.get('active_action') == token:
+            submission.pop('active_action')
+
     async def register_upload(self, **values) -> None:
         self.uploads[values["upload_id"]] = {**values, "status": "uploading"}
 
@@ -408,7 +420,8 @@ def test_canonical_receipt_exposes_the_persisted_final_text() -> None:
 
     class Repository:
         async def product_receipt(self, execution_id):
-            return {"input": {"submitted_sources": [{"title": "sample.pdf"}],
+            return {"last_action_error": {"error_class": "ModelCallError", "error_message": "malformed command"},
+                    "input": {"submitted_sources": [{"title": "sample.pdf"}],
                               "sources": [{"title": "sample.pdf", "stored_sentences": 4}]}}
 
         async def work_report(self, execution_id):
@@ -432,6 +445,7 @@ def test_canonical_receipt_exposes_the_persisted_final_text() -> None:
     )
     receipt = asyncio.run(_canonical_receipt(Repository(), run))
     assert receipt["status"] == "text_ready"
+    assert receipt["last_action_error"]["error_message"] == "malformed command"
     assert receipt["final_text"] == final_text
     assert receipt["input"]["sources"][0]["stored_sentences"] == 4
 
@@ -621,3 +635,18 @@ def test_stuck_source_search_can_be_resumed_with_fresh_dispatch() -> None:
         "source-search", f"--execution-run-id={execution_id}",
     ]
     assert dispatcher.calls[-1][2].startswith("--dispatch-key=resume-source-search-")
+
+
+
+def test_paused_external_enrichment_resumes_its_selected_opportunity():
+    storage, dispatcher = Storage(), Dispatcher()
+    api = client(storage, dispatcher, receipt={
+        "status": "project_proposed", "editorial_project": {"approved": False},
+        "stages": [{"stage": "source_enrichment", "status": "paused", "resumable": True,
+                    "opportunity_index": 2}],
+    })
+    execution_id = api.post("/v1/plans", json=request()).json()["execution_run_id"]
+    response = api.post(f"/v1/plans/{execution_id}/resume")
+    assert response.status_code == 202
+    assert dispatcher.calls[-1][:2] == ["enrich-project-source", f"--execution-run-id={execution_id}"]
+    assert "--index=2" in dispatcher.calls[-1]

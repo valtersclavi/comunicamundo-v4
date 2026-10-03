@@ -10,7 +10,7 @@ from comunicamundo_v4.hefesto.contracts import (
     AcquiredSource, NormalizedSource, SourceCandidateJudgment,
     SourceEnrichmentAssessment, SourceSearchPlan, SubjectSearchQuery,
 )
-from comunicamundo_v4.hefesto.gateway import ModelResult
+from comunicamundo_v4.hefesto.gateway import ModelCallError, ModelResult
 from comunicamundo_v4.hefesto.source_pipeline import AcquisitionPayload
 from fakes import MemoryRepository
 from test_frozen_enrichment import EnrichmentGateway, prepared
@@ -53,8 +53,8 @@ class FlowGateway(EnrichmentGateway):
         return result
 
 
-@pytest.mark.parametrize('successful', [True, False])
-async def test_worker_replaces_unfulfilled_source_without_changing_promise(monkeypatch, successful):
+@pytest.mark.parametrize('successful,interrupted', [(True, False), (False, False), (True, True), (True, 'receipt')])
+async def test_worker_replaces_unfulfilled_source_without_changing_promise(monkeypatch, successful, interrupted):
     memory, _, service, run, frozen, unused_source = await prepared()
     # Begin with the original two sources, before this test's acquired source.
     original = run.model_copy(update={'request': run.request.model_copy(update={
@@ -67,11 +67,22 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
     repo.__dict__.update(memory.__dict__)
     old_rows = list(repo.structures[run.execution_run_id])
     gateway = FlowGateway()
+    ordinary_generate = gateway.generate
+    fail_once = interrupted is True
+    async def generate(**kwargs):
+        nonlocal fail_once
+        if kwargs['task_type'] == 'source_enrichment_assessment' and 'PROMISED_EXPERIENCES' in kwargs['prompt'] and fail_once:
+            fail_once = False
+            raise ModelCallError('temporary external outage')
+        return await ordinary_generate(**kwargs)
+    gateway.generate = generate
     from comunicamundo_v4.hefesto.service import Hefesto
     service = Hefesto(repo, gateway)
     opportunity = frozen.source_enrichment_opportunities[0]
     seen = []
     discovered = []
+    acquired = []
+    normalized = []
 
     class Editor:
         def __init__(self, *args, **kwargs):
@@ -106,6 +117,7 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
             pass
 
         def acquire(self, source):
+            acquired.append(source.candidate_id)
             text = 'PROMISED_EXPERIENCES' if successful and source.title == 'round 1' else 'NO_PROMISE'
             return AcquisitionPayload(record=AcquiredSource(candidate=source,
                 status='acquired', normalized_text=text,
@@ -115,6 +127,7 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
     def ingest(acquisition_request, payloads, **kwargs):
         seen.append(acquisition_request.brief)
         record = payloads[0].record
+        normalized.append(record.candidate.candidate_id)
         return SimpleNamespace(request=SimpleNamespace(sources=[NormalizedSource(
             source_id=uuid5(NAMESPACE_URL, record.candidate.candidate_id),
             title=record.candidate.title, language='en', text=record.normalized_text,
@@ -123,7 +136,12 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
     async def services():
         return repo, service
 
+    publication_failed = False
     async def persist(hefesto, client, execution_id, stages, **kwargs):
+        nonlocal publication_failed
+        if interrupted == 'receipt' and stages[0]['status'] == 'completed' and not publication_failed:
+            publication_failed = True
+            raise ModelCallError('temporary external outage')
         await hefesto.record_stages(execution_id, stages)
 
     async def restore(*args):
@@ -142,6 +160,18 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
     monkeypatch.setattr(worker, '_persist_product_receipt', persist)
     monkeypatch.setattr(worker, '_restore_editable_receipt', restore)
 
+    if interrupted:
+        with pytest.raises(ModelCallError, match='temporary external outage'):
+            await worker.enrich_project_source(run.execution_run_id, 0)
+        stage = next(s for s in repo.stages[run.execution_run_id] if s['stage'] == 'source_enrichment')
+        assert stage['status'] == 'paused' and stage['resumable']
+        if interrupted is True:
+            assert repo.runs[run.execution_run_id].editorial_project.proposal == frozen
+        else:
+            assert repo.runs[run.execution_run_id].editorial_round == original.editorial_round + 1
+        assert 'PROMISED_EXPERIENCES' in ''.join(p.text for p in repo.structures[run.execution_run_id])
+        paid_before_resume = len(repo.usage[run.execution_run_id])
+        assert acquired == normalized and len(acquired) == 2
     if successful:
         await worker.enrich_project_source(run.execution_run_id, 0)
     else:
@@ -153,7 +183,8 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
     assert all(opportunity in brief.approach for brief in seen)
     assert updated.request.brief == original.request.brief
     assert all(p in repo.structures[run.execution_run_id] for p in old_rows)
-    assert 'NO_PROMISE' not in ''.join(p.text for p in repo.structures[run.execution_run_id])
+    assert 'NO_PROMISE' in ''.join(p.text for p in repo.structures[run.execution_run_id])
+    assert 'NO_PROMISE' not in ''.join(p.text for p in await service._paragraphs(updated))
     if successful:
         assert discovered == ['round 0', 'round 1']
         assert stage['status'] == 'completed' and stage['incorporated']
@@ -168,6 +199,10 @@ async def test_worker_replaces_unfulfilled_source_without_changing_promise(monke
         assert stage['status'] == 'failed' and not stage['incorporated']
         assert all(s['editorial_status'] == 'rejected' for s in stage['sources'])
         assert updated.editorial_project.proposal.source_enrichment_opportunities == frozen.source_enrichment_opportunities
+    if interrupted:
+        assert acquired == normalized and len(acquired) == 2
+        assert discovered == ['round 0', 'round 1']
+        assert len(repo.usage[run.execution_run_id]) == paid_before_resume + (1 if interrupted is True else 0)
     recorded = [u.task_type for u in repo.usage[run.execution_run_id]]
     assert recorded.count('source_candidate_judgment') == len(discovered)
 

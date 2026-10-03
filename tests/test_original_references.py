@@ -44,6 +44,9 @@ async def test_new_source_local_index_resolves_to_its_real_identity_and_roundtri
                               text='The newly acquired original supports this contribution.')
     rows = [p.model_copy(update={'source_ordinal': 7}) for p in segment_sources([source])]
     repo.structures[run.execution_run_id].extend(rows)
+    run = run.model_copy(update={"request": run.request.model_copy(update={
+        "sources": [*run.request.sources, source],
+    })})
     passages = passages_from_paragraphs(rows, passage_token_target=1000)
     subject = EditorialSubject(title='Authorized opportunity', editorial_role='Add a perspective',
                                depth='Develop that perspective', allocated_minutes=2)

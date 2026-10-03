@@ -228,3 +228,72 @@ def test_combining_editorial_understanding_does_not_cut_content_or_limits():
     assert combined == f'{corpus.governing_understanding} {addition}'.strip()
     limits = _combined_forbidden_inferences(corpus, ['New limit', 'Original limit 0'])
     assert limits == [*corpus.forbidden_inferences, 'New limit']
+
+
+async def test_malformed_atomic_command_preserves_written_prefix_and_recovers():
+    value = FinalTextProposal(title='Quotes', body='A family says "keep every detail". ' * 30)
+    class MalformedProvider(PagedProvider):
+        malformed_count = 0
+        async def generate(self, **kwargs):
+            if kwargs['schema'] is AtomicCommand and self.writes and self.malformed_count < 4:
+                self.calls.append(kwargs)
+                self.malformed_count += 1
+                raise ModelCallError('invalid AtomicCommand: invalid JSON', usage(kwargs['task_type'], 'failed'),
+                                     malformed=True, response_text='{"action":"append","text":"bad "quote"}')
+            return await super().generate(**kwargs)
+    provider = MalformedProvider(value)
+    store = {}
+    async def save(key, state):
+        store[key] = deepcopy(state)
+    result = await generate_atomic(provider, task_type='source_enrichment_assessment', prompt='Assess the full contribution.',
+        schema=type(value), system_instruction='Preserve all content.', max_output_tokens=2048, thinking_tokens=0, save=save)
+    assert result.value == value
+    assert provider.malformed_count == 4
+    assert ''.join(piece for _, piece in provider.writes) == provider.serialized
+    assert result.usage.total_tokens == len(provider.calls) * 15
+    assert next(iter(store.values()))['complete']
+
+
+async def test_malformed_normal_response_is_repaired_without_repeating_the_full_task():
+    value = FinalTextProposal(title='Title', body='The intact completed argument.')
+    class RepairProvider(PagedProvider):
+        async def generate(self, **kwargs):
+            if kwargs['schema'] is not AtomicCommand:
+                self.calls.append(kwargs)
+                self.initial_calls += 1
+                raise ModelCallError('invalid FinalTextProposal: incomplete JSON', usage(kwargs['task_type'], 'failed'),
+                                     malformed=True, response_text=self.serialized[:-1])
+            return await super().generate(**kwargs)
+    provider = RepairProvider(value)
+    result = await generate_atomic(provider, task_type='editorial_subject_reading', prompt='Read originals.',
+        schema=type(value), system_instruction='Use references.', max_output_tokens=2048, thinking_tokens=0,
+        split_by_caller=True)
+    assert result.value == value
+    assert provider.initial_calls == 1
+    assert provider.writes == [(len(provider.serialized)-1, '}')]
+    assert result.usage.total_tokens == len(provider.calls) * 15
+
+
+async def test_completed_ordinary_task_is_durable_and_does_not_consume_again():
+    value = SourceCandidateJudgment(decision='acquire', covered_subject_indexes=[0])
+    class SmallProvider:
+        calls = 0
+        async def count_tokens(self, text):
+            return 1
+        async def generate(self, **kwargs):
+            self.calls += 1
+            return ModelResult(value=value, usage=usage(kwargs['task_type']))
+    provider, store = SmallProvider(), {}
+    async def load(key):
+        return deepcopy(store.get(key))
+    async def save(key, state):
+        store[key] = deepcopy(state)
+    kwargs = dict(task_type='source_candidate_judgment', prompt='Consider this candidate.', schema=type(value),
+                  system_instruction='Respect the promise.', max_output_tokens=2048, thinking_tokens=0, load=load, save=save)
+    assert (await generate_atomic(provider, **kwargs)).value == value
+    repeated = await generate_atomic(provider, **kwargs)
+    assert repeated.value == value and repeated.usage.total_tokens == 0
+    assert provider.calls == 1
+    # A deliberate new editorial correction can request a fresh completed task.
+    await generate_atomic(provider, reuse_complete=False, **kwargs)
+    assert provider.calls == 2

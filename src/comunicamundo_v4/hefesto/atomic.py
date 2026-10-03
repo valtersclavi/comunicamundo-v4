@@ -81,11 +81,15 @@ def _size_failure(error: Exception) -> bool:
     ))
 
 
+def _malformed(error: ModelCallError) -> bool:
+    return error.malformed or str(error).startswith('invalid ')
+
+
 async def generate_atomic(
     gateway: ModelGateway, *, task_type: str, prompt: str, schema: type[T],
     system_instruction: str, max_output_tokens: int, thinking_tokens: int,
     input_budget: int = 64_000, load: Load | None = None, save: Save | None = None,
-    record: Record | None = None, split_by_caller: bool = False,
+    record: Record | None = None, split_by_caller: bool = False, reuse_complete: bool = True,
 ) -> ModelResult[T]:
     """Keep ordinary small calls unchanged; page any oversized task/result.
 
@@ -96,7 +100,10 @@ async def generate_atomic(
     schema_text = json.dumps(schema.model_json_schema(), ensure_ascii=False)
     key = sha256(('atomic-v1:' + task_type + system_instruction + prompt + schema_text).encode()).hexdigest()
     state = await load(key) if load else None
+    if state and state.get('complete') and not reuse_complete:
+        state = None
     calls: list[CallUsage] = []
+    repair_output = ''
 
     async def attempt(**kwargs):
         try:
@@ -141,13 +148,19 @@ async def generate_atomic(
                         system_instruction=system_instruction,
                         max_output_tokens=max_output_tokens, thinking_tokens=thinking_tokens,
                     )
+                    state = {'complete': True, 'output': return_value.value.model_dump_json(),
+                             'usages': [u.model_dump(mode='json') for u in calls]}
+                    await checkpoint()
                     return ModelResult(value=return_value.value, usage=_total(task_type, calls), usages=tuple(calls))
                 except ModelCallError as error:
-                    if split_by_caller or not _size_failure(error):
+                    if _malformed(error):
+                        repair_output = error.response_text or ''
+                    elif split_by_caller or not _size_failure(error):
                         raise
-            state = {'output': '', 'ranges': [], 'input_start': 0, 'output_start': 0,
+            state = {'output': repair_output, 'ranges': [], 'input_start': 0, 'output_start': 0,
                      'segment_chars': max(1, min(8192, max_output_tokens * 2)),
-                     'window_tokens': max(1, input_budget // 4), 'feedback': '',
+                     'window_tokens': max(1, input_budget // 4),
+                     'feedback': 'Repair the existing malformed output locally, preserving its valid content.' if repair_output else '',
                      'complete': False, 'last_action': '', 'repetitions': 0,
                      'usages': [usage.model_dump(mode='json') for usage in calls], 'seen_actions': {}}
             await checkpoint()
@@ -204,6 +217,23 @@ reads may repeat as necessary; do not repeatedly issue an unchanged no-op.
                     thinking_tokens=min(thinking_tokens, max(1024, max_output_tokens) // 4),
                 )
             except ModelCallError as error:
+                if _malformed(error):
+                    failures = state.setdefault('malformed_commands', {})
+                    failures['consecutive'] = failures.get('consecutive', 0) + 1
+                    state['feedback'] = (
+                        'The last operation had malformed JSON/schema and was NOT applied. '
+                        'Regenerate only that operation, keeping all completed output. '
+                        'Return valid AtomicCommand JSON; escape every quotation mark, '
+                        'backslash and newline inside text, which contains a literal JSON fragment.'
+                    )
+                    if failures['consecutive'] >= 3:
+                        if state['segment_chars'] == 1:
+                            await checkpoint()
+                            raise ModelCallError('Provider repeatedly returned malformed minimal operations; progress retained') from error
+                        state['segment_chars'] = max(1, state['segment_chars'] // 2)
+                        failures.clear()
+                    await checkpoint()
+                    continue
                 if not _size_failure(error):
                     await checkpoint()
                     raise
@@ -215,6 +245,7 @@ reads may repeat as necessary; do not repeatedly issue an unchanged no-op.
                 await checkpoint()
                 continue
             command = response.value
+            state['malformed_commands'] = {}
             previous_ranges = [pair[:] for pair in state['ranges']]
             state['ranges'] = _cover(state['ranges'], input_start, input_start + len(original))
             state['ranges'] = _cover(state['ranges'], 0, len(frame))
@@ -224,8 +255,17 @@ reads may repeat as necessary; do not repeatedly issue an unchanged no-op.
             state['repetitions'] = seen[signature] - 1
             state['last_action'] = signature
             if state['repetitions'] >= 3:
+                if state['segment_chars'] > 1:
+                    state['segment_chars'] = max(1, state['segment_chars'] // 2)
+                    state['seen_actions'] = {}
+                    unread = _unread(state['ranges'], len(prompt))
+                    if unread is not None:
+                        state['input_start'] = unread
+                    state['feedback'] = 'The last operations did not advance. Read the next unread input or repair/complete the current output using a smaller operation.'
+                    await checkpoint()
+                    continue
                 await checkpoint()
-                raise ModelCallError('Atomic model repeated an unchanged operation without progress')
+                raise ModelCallError('Provider repeated unchanged minimal operations; progress retained')
             state['feedback'] = ''
             if command.action == 'read_input':
                 if 0 <= command.start < len(prompt):

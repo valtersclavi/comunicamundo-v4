@@ -399,6 +399,7 @@ async def _canonical_receipt(
             run.final_text.model_dump(mode="json") if run.final_text else None
         ),
         "processing": await repository.work_report(execution_id),
+        "last_action_error": stored.get("last_action_error"),
         "error_class": run.error_class,
         "error_message": run.error_message,
         "stages": await repository.stage_report(execution_id),
@@ -762,7 +763,12 @@ def create_app(
         execution_id: UUID, request: Request
     ) -> dict[str, Any]:
         receipt = await required_receipt(execution_id, request)
-        if receipt["status"] not in {
+        enrichment = next((stage for stage in reversed(receipt.get("stages") or [])
+                           if stage.get("stage") == "source_enrichment"), {})
+        resume_enrichment = (receipt["status"] == "project_proposed"
+                             and enrichment.get("status") == "paused"
+                             and enrichment.get("resumable") is True)
+        if not resume_enrichment and receipt["status"] not in {
             "failed", "searching_sources", "selecting", "comprehending",
             "source_structure_ready", "producing_text",
         }:
@@ -774,7 +780,9 @@ def create_app(
                 ),
             )
         project = receipt.get("editorial_project") or {}
-        if receipt.get("provisional_editorial_project") and not project:
+        if resume_enrichment:
+            action = "enrich-project-source"
+        elif receipt.get("provisional_editorial_project") and not project:
             action = "source-search"
         else:
             action = "produce-text" if project.get("approved") else "resume-plan"
@@ -783,12 +791,20 @@ def create_app(
                 f"resume-{action}-"
                 f"{sha256(datetime.now(UTC).isoformat().encode()).hexdigest()[:16]}"
             )
+            if resume_enrichment:
+                if not await access.claim_editorial_action(execution_id, dispatch_key):
+                    raise HTTPException(status_code=409, detail="project is already being updated")
+                try:
+                    return await asyncio.to_thread(service().dispatch_action, execution_id, action,
+                        extra_args=[f"--index={enrichment['opportunity_index']}"], dispatch_key=dispatch_key)
+                except Exception:
+                    await access.release_editorial_action(execution_id, dispatch_key)
+                    raise
             return await asyncio.to_thread(
-                service().dispatch_action,
-                execution_id,
-                action,
-                dispatch_key=dispatch_key,
+                service().dispatch_action, execution_id, action, dispatch_key=dispatch_key,
             )
+        except HTTPException:
+            raise
         except Exception as error:
             raise HTTPException(
                 status_code=503, detail=f"dispatch failed: {error}"
