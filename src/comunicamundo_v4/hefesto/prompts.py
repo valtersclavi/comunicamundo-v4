@@ -339,8 +339,9 @@ tensions, qualifications and contradictions pertinent to the authorized scope.
 Every factual point must be grounded in evidence identifying passage_indexes
 from this packet. Use these local indexes exactly; source identities are
 resolved by the program. Do not invent identifiers, facts or quotations.
-Quote exact original wording when necessary; otherwise use null. Preserve the
-complete quotation without truncation or a character-count limit.
+Return the analytical contribution and passage indexes only. Do not transcribe
+or recite documentary excerpts in the evidence output. The program retrieves
+the original paragraphs through these references when needed.
 The originals remain the documentary authority and will be recovered through
 these references. Do not impose a fixed number of ideas or evidence items.
 A selected enrichment may add pertinent new perspectives without replacing

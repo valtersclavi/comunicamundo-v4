@@ -101,8 +101,9 @@ The revised PE returns for user approval and invalidates previous text artifacts
 ## Regra obrigatória de tamanho e tarefas atômicas
 
 Comprimento de conteúdo não autoriza truncamento, resumo substitutivo ou rejeição
-por quantidade de caracteres. Citações não têm teto de 280 caracteres: preservam
-o texto literal e sua referência ao original, inclusive espaços significativos.
+por quantidade de caracteres. Os originais permanecem completos no banco,
+inclusive espaços significativos. Evidências retornam análise e referências,
+sem exigir cópia literal dos trechos pelo LLM.
 
 Triagem, encaminhamento por assunto e compreensão operam em lotes. Além de medir
 a entrada, tratam `MAX_TOKENS` de saída dividindo o trabalho, nunca repetindo o
@@ -113,8 +114,9 @@ Uma resposta cortada pelo provedor não é aceita como resultado parcial válido
 
 A montagem do corpus/PE concatena os resultados validados no código; não existe
 chamada de LLM para condensar ou regenerar o conjunto. Leituras concluídas e suas
-referências são persistidas e reutilizadas. A remoção do antigo limite de citação
-não invalida leituras completas já salvas sob o mesmo briefing e material.
+referências são persistidas e reutilizadas. O contrato de leitura sem recitação
+tem identidade própria de cache. PEs antigos continuam legíveis; cópias literais
+legadas são descartadas ao carregar as evidências, preservando análise e referências.
 
 A mesma regra é aplicada na produção textual, preservando contexto, referências
 e o contrato narrativo. Todas as chamadas editoriais usam o mecanismo comum,

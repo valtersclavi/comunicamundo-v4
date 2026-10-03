@@ -13,7 +13,6 @@ from test_product_architecture import request
 
 class EvidenceGateway(FakeGateway):
     invalid_index = False
-    invented_quote = False
 
     async def generate(self, **kwargs):
         result = await super().generate(**kwargs)
@@ -21,23 +20,17 @@ class EvidenceGateway(FakeGateway):
             evidence = result.value.evidence[0]
             if self.invalid_index:
                 evidence = evidence.model_copy(update={'passage_indexes': [9999]})
-            if self.invented_quote:
-                evidence = evidence.model_copy(update={'verbatim_excerpt': 'An invented quotation.'})
             return ModelResult(value=result.value.model_copy(update={'evidence': [evidence]}), usage=result.usage)
         return result
 
 
-@pytest.mark.parametrize('invalid_index,invented_quote,message', [
-    (True, False, 'outside its original packet'),
-    (False, True, 'does not occur'),
-])
-async def test_invalid_grounding_is_not_saved(invalid_index, invented_quote, message):
+async def test_invalid_grounding_is_not_saved():
     repo, gateway = MemoryRepository(), EvidenceGateway()
-    gateway.invalid_index, gateway.invented_quote = invalid_index, invented_quote
+    gateway.invalid_index = True
     service = Hefesto(repo, gateway)
     run = await service.prepare(request())
     await service.select(run.execution_run_id)
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match='outside its original packet'):
         await service.propose_project(run.execution_run_id)
     assert not repo.readings
     assert repo.runs[run.execution_run_id].editorial_project is None
@@ -144,7 +137,7 @@ class AtomicGateway(FakeGateway):
             texts = json.loads(prompt.split('ORIGINAL PASSAGES (local indexes, not source numbers):\n')[1])
             value = result.value.model_copy(update={'evidence': [
                 result.value.evidence[0].model_copy(update={
-                    'passage_indexes': [item['passage_index']], 'verbatim_excerpt': item['text'],
+                    'passage_indexes': [item['passage_index']],
                 }) for item in texts
             ]})
             return ModelResult(value=value, usage=result.usage)
@@ -152,7 +145,7 @@ class AtomicGateway(FakeGateway):
 
 
 @pytest.mark.parametrize('paragraph_count', [1, 4])
-async def test_max_tokens_splits_work_preserves_long_quotes_and_reuses_completed_work(paragraph_count):
+async def test_max_tokens_splits_work_preserves_original_references_and_reuses_completed_work(paragraph_count):
     import json
     from comunicamundo_v4.hefesto.contracts import ReferencedSubjectProposal
     repo, gateway = MemoryRepository(), AtomicGateway('editorial_subject_reading', 650)
@@ -167,9 +160,9 @@ async def test_max_tokens_splits_work_preserves_long_quotes_and_reuses_completed
     subject = EditorialSubject(title='Authorized subject', editorial_role='Explain the qualification',
                                depth='Preserve all evidence', allocated_minutes=8)
     unit = await service._create_subject_corpus(run, subject, passages, {1:'Long original'})
-    # Formerly rejected excerpts now pass schema validation and remain exact.
-    assert max(len(e.verbatim_excerpt) for e in unit.evidence) > 280
-    assert ''.join(e.verbatim_excerpt for e in unit.evidence) == ''.join(p.text for p in passages)
+    assert 'verbatim_excerpt' not in unit.model_dump_json()
+    assert {ref.paragraph_id for e in unit.evidence for ref in e.passage_references} == {p.paragraph_id for p in rows}
+    assert ''.join(p.text for p in passages) == ''.join(p.text for p in rows)
     assert all(ref.paragraph_id in {p.paragraph_id for p in rows}
                for e in unit.evidence for ref in e.passage_references)
     assert any(size > 650 for _, size in gateway.attempts)
@@ -180,6 +173,7 @@ async def test_max_tokens_splits_work_preserves_long_quotes_and_reuses_completed
     assert len(gateway.attempts) == count
     schema = json.dumps(ReferencedSubjectProposal.model_json_schema())
     assert 'maxLength' not in schema
+    assert 'verbatim_excerpt' not in schema
 
 
 def test_splitting_one_long_sentence_preserves_every_character():
@@ -227,3 +221,44 @@ def test_oversized_single_sentence_is_batched_without_loss():
     assert ''.join(p.text for p in packets) == rows[0].text
     assert all(conservative_tokens(p.text) <= 100 for p in packets)
     assert all(p.paragraph_ordinal == rows[0].ordinal for p in packets)
+
+
+def test_evidence_schema_requests_analysis_and_references_without_recitation():
+    from comunicamundo_v4.hefesto.contracts import ReferencedSubjectProposal, EditorialEvidence
+    assert 'verbatim_excerpt' not in ReferencedSubjectProposal.model_json_schema()['$defs']['ReferencedEvidenceProposal']['properties']
+    assert 'verbatim_excerpt' not in EditorialEvidence.model_json_schema()['properties']
+
+
+async def test_legacy_recitation_is_discarded_and_writing_still_receives_original_paragraphs():
+    import json
+    from comunicamundo_v4.hefesto.contracts import EditorialProjectProposal
+    repo, gateway = MemoryRepository(), FakeGateway()
+    service = Hefesto(repo, gateway)
+    run = await service.prepare(request())
+    await service.select(run.execution_run_id)
+    proposed = await service.propose_project(run.execution_run_id)
+    data = proposed.editorial_project.proposal.model_dump()
+    for unit in data['editorial_corpus']['units']:
+        for evidence in unit['evidence']:
+            evidence['verbatim_excerpt'] = 'Legacy recitation differs from the stored original.'
+    restored = EditorialProjectProposal.model_validate(data)
+    assert restored == proposed.editorial_project.proposal
+    assert 'verbatim_excerpt' not in restored.model_dump_json()
+    repo.runs[run.execution_run_id] = proposed.model_copy(update={
+        'editorial_project': proposed.editorial_project.model_copy(update={'proposal': restored})
+    })
+    await service.approve_project(run.execution_run_id)
+    await service.produce_text(run.execution_run_id)
+    writing = [call for call in gateway.calls if call['task_type'] in {'content_draft', 'content_review'}]
+    assert {call['task_type'] for call in writing} == {'content_draft', 'content_review'}
+    refs = {ref.paragraph_id for unit in restored.editorial_corpus.units
+            for evidence in unit.evidence for ref in evidence.passage_references}
+    originals = [p for p in repo.structures[run.execution_run_id] if p.paragraph_id in refs]
+    assert originals
+    for call in writing:
+        assert 'verbatim_excerpt' not in call['prompt']
+        assert 'Legacy recitation' not in call['prompt']
+        for paragraph in originals:
+            assert paragraph.text in call['prompt']
+    reading = next(call for call in gateway.calls if call['task_type'] == 'editorial_subject_reading')
+    assert 'Do not transcribe' in reading['prompt']

@@ -1062,18 +1062,9 @@ class Hefesto:
         semaphore = asyncio.Semaphore(self._concurrency)
 
         async def read_packet(items: list[Passage], prompt: str) -> EditorialKnowledgeUnit:
-            identity = "referenced-reading-v1:" + SYSTEM + prompt + ":".join(p.passage_id for p in items)
+            identity = "referenced-reading-v2:" + SYSTEM + prompt + ":".join(p.passage_id for p in items)
             key = sha256(identity.encode()).hexdigest()
             cached = await self._repository.subject_reading(run.execution_run_id, key)
-            if cached is None:
-                old_prompt = prompt.replace(
-                    "Quote exact original wording when necessary; otherwise use null. Preserve the\ncomplete quotation without truncation or a character-count limit.",
-                    "Quote at most 280 characters of exact original wording when necessary; otherwise use null.",
-                )
-                old_identity = "referenced-reading-v1:" + SYSTEM + old_prompt + ":".join(p.passage_id for p in items)
-                cached = await self._repository.subject_reading(
-                    run.execution_run_id, sha256(old_identity.encode()).hexdigest()
-                )
             if cached is not None:
                 return cached
             try:
@@ -1101,10 +1092,6 @@ class Hefesto:
                 if any(index < 0 or index >= len(items) for index in indexes):
                     raise ValueError("Evidence references a passage outside its original packet")
                 originals = [items[index] for index in indexes]
-                if item.verbatim_excerpt is not None and not any(
-                    item.verbatim_excerpt in passage.text for passage in originals
-                ):
-                    raise ValueError("Evidence quotation does not occur in its referenced original")
                 references = []
                 for passage in originals:
                     paragraph = paragraphs.get((passage.source_id, passage.paragraph_ordinal))
@@ -1117,7 +1104,6 @@ class Hefesto:
                 evidence.append(EditorialEvidence(
                     source_ordinals=sorted({p.source_ordinal for p in originals}),
                     passage_references=references, contribution=item.contribution,
-                    verbatim_excerpt=item.verbatim_excerpt,
                 ))
             unit = EditorialKnowledgeUnit(
                 title=subject.title, synthesis=result.value.synthesis,

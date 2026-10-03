@@ -384,7 +384,6 @@ class OriginalPassageReference(StrictModel):
 class ReferencedEvidenceProposal(StrictModel):
     passage_indexes: list[int] = Field(min_length=1)
     contribution: str = Field(min_length=1)
-    verbatim_excerpt: Annotated[str, StringConstraints(strip_whitespace=False)] | None = None
 
 
 class ReferencedSubjectProposal(StrictModel):
@@ -399,7 +398,15 @@ class EditorialEvidence(StrictModel):
     source_ordinals: list[int] = Field(min_length=1)
     contribution: str = Field(min_length=1)
     passage_references: list[OriginalPassageReference] = Field(default_factory=list)
-    verbatim_excerpt: Annotated[str, StringConstraints(strip_whitespace=False)] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_recitation(cls, value):
+        # Existing projects remain readable; documentary copies are no longer
+        # carried into prompts or persisted again. Originals resolve by reference.
+        if isinstance(value, dict) and "verbatim_excerpt" in value:
+            return {key: item for key, item in value.items() if key != "verbatim_excerpt"}
+        return value
 
 
 class EditorialKnowledgeUnit(StrictModel):

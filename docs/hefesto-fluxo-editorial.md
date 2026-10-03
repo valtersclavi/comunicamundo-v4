@@ -42,3 +42,13 @@ endereçáveis; o tamanho de uma chamada não limita o tamanho total da entrega.
 sem truncamento nem resumo substitutivo. O resultado só é apresentado como
 completo após montagem e validação. Isso não altera o contrato do PE congelado,
 a autorização de remoque nem a liberdade narrativa final.
+
+### Evidências sem recitação — 03/10/2026
+
+A compreensão devolve a contribuição analítica e os índices dos trechos lidos.
+O programa resolve e valida suas referências aos parágrafos originais. Não pede
+cópia literal nem interrompe a compreensão por diferença textual em uma cópia.
+Redação, revisão e correção continuam recebendo os parágrafos originais recuperados
+pelas referências, com o processamento por tamanho já existente. A ingestão e a
+análise por parágrafo permanecem preservadas. PEs antigos são carregados mantendo
+análise e referências, descartando apenas o campo legado de recitação.

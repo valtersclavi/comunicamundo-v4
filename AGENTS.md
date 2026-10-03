@@ -6,6 +6,10 @@ inferidas, nem introduzir exceções por tema, arquivo ou execução de teste.
 - O briefing define as perguntas e a direção antes da leitura das fontes.
 - Fontes originais permanecem no PostgreSQL, com referências estáveis. Notas de
   entendimento editorial não substituem os trechos documentais por resumos.
+- Evidências devolvidas pelo LLM contêm análise e referências, sem recitação
+  documental. Recuperar os parágrafos originais pelas referências quando preciso;
+  preservar sua análise e divisão por tamanho. Não exigir reprodução literal
+  como condição de aceitação da compreensão.
 - A ingestão/desmontagem está congelada. Não alterar leitores, normalização,
   formatos ou interpretação de documentos como parte de correções editoriais.
 - Conteúdo longo deve ser dividido em unidades de processamento. Isso vale em
