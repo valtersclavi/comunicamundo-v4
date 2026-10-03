@@ -61,6 +61,7 @@ from .prompts import (
     render_passages,
     selection_prompt,
     referenced_subject_prompt,
+    source_contribution_brief,
     subject_passage_routing_prompt,
 )
 from .segmentation import segment_sources
@@ -631,21 +632,7 @@ class Hefesto:
             raise ValueError("Source enrichment requires the existing editorial corpus")
         if opportunity not in frozen.source_enrichment_opportunities:
             raise ValueError("Source enrichment must match the selected opportunity")
-        scoped_brief = run.request.brief.model_copy(update={
-            "approach": (
-                run.request.brief.approach
-                + "\nCURRENT PE PURPOSE (including user revisions): "
-                + frozen.editorial_promise + "\nCURRENT AXIS: " + frozen.narrative_axis.statement
-                + "\nExplicit user revisions in this PE take precedence over the original brief. "
-                + "\nEXTRACTION SCOPE: Only extract evidence, qualifications or contradictions "
-                "for this user-selected contribution, including new pertinent perspectives, "
-                "examples and dimensions not anticipated by the original brief: " + opportunity
-                + "\nThe previous Editorial Project is frozen. Do not extract other topics "
-                "unrelated to that opportunity. The selected opportunity authorizes a pertinent "
-                "extension of the brief, not a replacement of its focus. Novelty is welcome; "
-                "prior mention in the brief is not required. Select nothing if nothing relevant is added."
-            ),
-        })
+        scoped_brief = source_contribution_brief(run.request.brief, frozen, opportunity)
         scoped = run.model_copy(update={
             "request": run.request.model_copy(update={"brief": scoped_brief}),
         })
@@ -668,18 +655,25 @@ class Hefesto:
         assessment = (await self._call(
             run, task_type="source_enrichment_assessment",
             prompt=(
-                "Assess only whether the extracted contribution adds substantive value to the "
+                "Assess whether the extracted originals fulfill the SELECTED PROMISE, which is a "
+                "mandatory briefing addendum and the primary objective. General support for old "
+                "subjects cannot substitute for the promised contribution. Reject the source if "
+                "it does not deliver the promised evidence; never narrow or rewrite the promise. "
+                "Assess whether it adds substantive value to the "
                 "frozen Editorial Project through the selected opportunity, relevant to the brief's "
                 "purpose without requiring prior mention in it. New perspectives, examples, "
                 "contrasts and dimensions may add color and diversity. "
                 "Evidence may support, qualify or contradict; repeated or unrelated information "
                 "does not contribute. Novelty alone is never a reason to reject. Preserve the "
                 "existing project and its focus; do not propose an unrelated agenda. "
-                "Return contributes=false if nothing pertinent is added. If it contributes, "
+                "Return contributes=false whenever the selected promise is not fulfilled, "
+                "even if the source supports existing subjects in other ways. If it contributes, "
                 "choose the zero-based existing subject index it enriches, or null only if the "
                 "selected opportunity needs its own subject. Estimate additional_minutes needed "
-                "to develop only this contribution; do not reallocate existing time.\n"
-                f"BRIEF: {run.request.brief.model_dump_json()}\n"
+                "to develop only this contribution; do not reallocate existing time. "
+                "A successful external contribution MUST increase duration: estimate strictly "
+                "positive additional_minutes from its substance, never use zero.\n"
+                f"BRIEF WITH MANDATORY ADDENDUM: {scoped_brief.model_dump_json()}\n"
                 f"SELECTED OPPORTUNITY: {opportunity}\n"
                 f"FROZEN PROJECT: {frozen.model_dump_json()}\n"
                 f"NEW CONTRIBUTION: {unit.model_dump_json()}"
@@ -695,10 +689,15 @@ class Hefesto:
         if index is None:
             if assessment.additional_minutes <= 0:
                 raise ValueError("A new contribution subject requires additional duration")
-            subjects.append(subject.model_copy(update={"allocated_minutes": assessment.additional_minutes}))
+            subjects.append(subject.model_copy(update={
+                "allocated_minutes": assessment.additional_minutes,
+                "depth": opportunity + "\n" + "\n".join(unit.essential_points),
+            }))
         else:
             subjects[index] = subjects[index].model_copy(update={
                 "allocated_minutes": subjects[index].allocated_minutes + assessment.additional_minutes,
+                "depth": subjects[index].depth + "\nContribuição adicional: " + opportunity
+                + "\n" + "\n".join(unit.essential_points),
             })
         proposal = frozen.model_copy(update={
             "source_supported_subjects": subjects,

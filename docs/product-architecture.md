@@ -59,15 +59,19 @@ acquired sources are selected and read directly; the general scaffold/routing bu
 is not called. The contribution is assessed against the brief, opportunity and
 frozen PE. Pertinence does not require prior mention in the original brief: the
 selected opportunity authorizes new perspectives, examples, contrasts and
-dimensions that add color and diversity without replacing the focus. No pertinent addition means the same PE remains unchanged. Otherwise
+dimensions that add color and diversity without replacing the focus. The selected
+promise is a mandatory primary briefing addendum. If the original does not fulfill
+it, preserve the PE and promise and continue searching within the existing four
+rounds. Acquisition alone is not completion. On successful fulfillment,
 append the new knowledge unit, attach it to an existing subject or append only
-the selected opportunity as a subject, and add the time it needs. Preserve the
+the selected opportunity as a subject, expose the additional arguments in its
+depth and add strictly positive time. Preserve the
 previous title, promise, axis, subject content, knowledge units, qualifications
 and forbidden inferences. Do not reread old sources to discover additional topics.
 Acquisition identity, contribution outcome and enrichment-specific usage are
 recorded in the source_enrichment stage and the source is displayed in the UI.
 Acquisition records survive failed incorporation; the UI distinguishes failure
-from a completed assessment that found no addition, while preserving the old PE.
+from a source rejected for not fulfilling the promise, while preserving the old PE.
 
 Writing and narrative editing use the approved PE's current duration, including
 additions, rather than the original briefing duration. Duration remains guidance,
@@ -167,3 +171,33 @@ busca, permanecem fora desta alteração.
 A validação local usa provedores simulados: demonstra preservação, divisão,
 montagem, contabilização e retomada. Qualidade editorial, adesão do Gemini ao
 protocolo de partes e consumo real devem ser avaliados no teste do usuário.
+
+## Contribuição externa como promessa editorial — 03/10/2026
+
+A oportunidade escolhida pelo usuário passa a ser adendo obrigatório e prioritário
+na busca, julgamento de candidatas e compreensão da fonte adquirida. O briefing
+original e o PE congelado contextualizam a proposta, sem excluir evidências novas
+por não estarem previstos originalmente. Outros achados pertinentes aos assuntos
+existentes são bem-vindos, mas não substituem o tipo de contribuição prometido.
+
+A aquisição técnica não encerra a busca de enriquecimento. Depois da leitura dos
+originais, a avaliação verifica se a fonte efetivamente cumpre a proposta e agrega
+argumentos. Só então marca a cobertura. Se não cumprir, remove da execução apenas
+os dados anexados por essa tentativa, preserva o PE e a proposta e avalia outra
+candidata ou a rodada seguinte. Mantém as quatro rodadas já previstas; ao esgotar
+as opções, registra falha de cumprimento, sem reformular ou apagar a promessa.
+Erros técnicos continuam sendo informados como erros, sem rejeitar arbitrariamente
+uma fonte nem disparar novas buscas para mascará-los.
+
+Toda incorporação de fonte externa aumenta a duração, com tempo adicional estimado
+pelo conteúdo. Quando aprofunda um assunto existente, mantém seu título e papel,
+acrescenta a contribuição e seus argumentos à profundidade visível no PE e aumenta
+seu tempo. Quando requer assunto próprio, acrescenta assunto, argumentos e tempo.
+As unidades anteriores do corpus permanecem intactas. A regra difere da contribuição
+pontual do LLM, que não precisa aumentar a duração.
+
+Os registros preservam a identidade de cada fonte tentada, sua aceitação/rejeição
+e a justificativa. A interface distingue fontes adquiridas porém rejeitadas das
+incorporadas. A contabilização registra as chamadas de busca e julgamento à medida
+que ocorrem, inclusive se nenhuma fonte cumprir a promessa. Nenhum parser, formato
+ou regra de desmontagem/ingestão foi alterado.

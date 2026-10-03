@@ -470,6 +470,12 @@ class SourceEnrichmentAssessment(StrictModel):
     target_subject_index: int | None = Field(default=None, ge=0)
     additional_minutes: float = Field(ge=0)
 
+    @model_validator(mode="after")
+    def substantive_contribution_requires_time(self):
+        if self.contributes and self.additional_minutes <= 0:
+            raise ValueError("External source contribution requires positive additional duration")
+        return self
+
 
 class EditorialRevisionSubject(StrictModel):
     subject: EditorialSubject

@@ -59,8 +59,14 @@ async def test_enrichment_preserves_frozen_content_and_reads_only_new_source(tar
     assert proposal.editorial_corpus.units[:-1] == frozen.editorial_corpus.units
     assert proposal.editorial_corpus.forbidden_inferences == frozen.editorial_corpus.forbidden_inferences
     assert proposal.editorial_corpus.governing_understanding == frozen.editorial_corpus.governing_understanding
-    for before, after in zip(frozen.source_supported_subjects, proposal.source_supported_subjects):
-        assert before.model_dump(exclude={'allocated_minutes'}) == after.model_dump(exclude={'allocated_minutes'})
+    for i, (before, after) in enumerate(zip(frozen.source_supported_subjects, proposal.source_supported_subjects)):
+        if i == target:
+            assert before.model_dump(exclude={'allocated_minutes', 'depth'}) == after.model_dump(exclude={'allocated_minutes', 'depth'})
+            assert after.depth.startswith(before.depth)
+            assert frozen.source_enrichment_opportunities[0] in after.depth
+            assert all(point in after.depth for point in proposal.editorial_corpus.units[-1].essential_points)
+        else:
+            assert before == after
     assert proposal.duration_minutes == frozen.duration_minutes + 3
     assert _target_words(run.request.brief, proposal) == proposal.duration_minutes * 140
     assert not any(c['task_type'] in {'editorial_project_scaffold', 'editorial_subject_routing'} for c in gateway.calls)
@@ -69,6 +75,7 @@ async def test_enrichment_preserves_frozen_content_and_reads_only_new_source(tar
             assert 'NEW_ONLY' in c['prompt']
             assert 'First claim.' not in c['prompt']
             assert 'EXTRACTION SCOPE' in c['prompt']
+            assert 'MANDATORY BRIEF ADDENDUM' in c['prompt']
     await service.approve_project(run.execution_run_id)
     await service.produce_text(run.execution_run_id)
     draft = next(c for c in gateway.calls if c['task_type'] == 'content_draft')

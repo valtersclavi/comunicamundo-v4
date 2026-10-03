@@ -19,6 +19,7 @@ from .ingestion import IngestionResult, ingest, ingest_acquired
 from .maintenance import clean_operational_history
 from .postgres import ProductRepository, apply_migrations
 from .service import Hefesto
+from .prompts import source_contribution_brief
 from .segmentation import segment_sources
 from .source_editor import EditorialSourceEditor
 from .source_pipeline import OpenAlexSearchProvider, SourceAcquirer, SourceDiscovery, YouSearchProvider
@@ -612,63 +613,94 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
                 browser_use_api_key=required("BROWSER_USE_API_KEY"),
             ),
         )
-        result = await research.run(original.request.brief, provisional)
-        acquired_records = [item.record.model_dump(mode="json") for item in result.acquisitions]
-        await hefesto.record_stages(execution_id, [{
-            "stage": "source_enrichment", "status": "running",
-            "duration_ms": int((perf_counter() - started) * 1000),
-            "opportunity": opportunity, "sources": acquired_records,
-            "incorporated": False,
-        }])
-        for usage in result.usages:
-            await repository.record_usage(execution_id, original.project_id, usage)
-        isolated_project_id = uuid5(
-            original.project_id,
-            "editorial-source:"
-            + str(original.editorial_project.editorial_project_id)
-            + f":{index}:"
-            + ":".join(sorted(result.selection.selected_candidate_ids)),
-        )
-        isolated_request = EditorialInputRequest(
-            project_id=isolated_project_id, brief=original.request.brief,
-            source_mode=SourceMode.FIND_FOR_ME,
-        )
-        ingested = await asyncio.to_thread(
-            ingest_acquired, isolated_request, list(result.acquisitions),
-            client=client, bucket_name=required("HEFESTO_GCS_BUCKET"),
-            provisional_project=provisional,
-            supported_subject_indexes=[0],
-            subject_coverage=result.selection.subject_coverage,
-        )
-        offset = len(original.request.sources)
-        additions = list(ingested.request.sources)
-        added_ids = [source.source_id for source in additions]
-        paragraphs = [
-            item.model_copy(update={"source_ordinal": offset + rank})
-            for rank, source in enumerate(additions, start=1)
-            for item in segment_sources([source])
-        ]
-        assets = [
-            item.model_copy(update={"source_ordinal": offset + rank})
-            for rank, source in enumerate(additions, start=1)
-            for item in source.assets
-        ]
-        links = [item for source in additions for item in source.asset_links]
-        # Preserve old structured rows; append only the new source's rows.
-        await repository.save_structure(execution_id, paragraphs, assets, links)
-        clean_additions = [
-            source.model_copy(update={
-                "paragraphs": [], "assets": [], "asset_links": [],
-            }) for source in additions
-        ]
-        request = original.request.model_copy(update={
-            "sources": [*original.request.sources, *clean_additions],
-            "existing_editorial_project": proposal,
-        })
-        active = original.model_copy(update={"request": request})
-        await repository.save_run(active)
-        updated, reason = await hefesto.enrich_project(
-            execution_id, opportunity=opportunity, new_source_ids=added_ids,
+        contribution_brief = source_contribution_brief(original.request.brief, proposal, opportunity)
+        updated, reason = original, ""
+
+        async def accept_acquired(payload):
+            nonlocal added_ids, updated, reason
+            record = payload.record.model_dump(mode="json")
+            record["editorial_status"] = "evaluating"
+            acquired_records.append(record)
+            await hefesto.record_stages(execution_id, [{
+                "stage": "source_enrichment", "status": "running",
+                "duration_ms": int((perf_counter() - started) * 1000),
+                "opportunity": opportunity, "sources": acquired_records,
+                "incorporated": False,
+            }])
+            isolated_project_id = uuid5(
+                original.project_id,
+                "editorial-source:"
+                + str(original.editorial_project.editorial_project_id)
+                + f":{index}:"
+                + payload.record.candidate.candidate_id,
+            )
+            isolated_request = EditorialInputRequest(
+                project_id=isolated_project_id, brief=contribution_brief,
+                source_mode=SourceMode.FIND_FOR_ME,
+            )
+            ingested = await asyncio.to_thread(
+                ingest_acquired, isolated_request, [payload],
+                client=client, bucket_name=required("HEFESTO_GCS_BUCKET"),
+                provisional_project=provisional,
+                supported_subject_indexes=[0],
+                subject_coverage={payload.record.candidate.candidate_id: [0]},
+            )
+            offset = len(original.request.sources)
+            additions = list(ingested.request.sources)
+            if not additions:
+                reason = "A fonte não forneceu conteúdo legível para cumprir a contribuição escolhida."
+                record.update(editorial_status="rejected", editorial_reason=reason)
+                return False
+            added_ids = [source.source_id for source in additions]
+            paragraphs = [
+                item.model_copy(update={"source_ordinal": offset + rank})
+                for rank, source in enumerate(additions, start=1)
+                for item in segment_sources([source])
+            ]
+            assets = [
+                item.model_copy(update={"source_ordinal": offset + rank})
+                for rank, source in enumerate(additions, start=1)
+                for item in source.assets
+            ]
+            links = [item for source in additions for item in source.asset_links]
+            # Preserve old structured rows; append only the new source's rows.
+            await repository.save_structure(execution_id, paragraphs, assets, links)
+            clean_additions = [
+                source.model_copy(update={
+                    "paragraphs": [], "assets": [], "asset_links": [],
+                }) for source in additions
+            ]
+            request = original.request.model_copy(update={
+                "sources": [*original.request.sources, *clean_additions],
+                "existing_editorial_project": proposal,
+            })
+            active = original.model_copy(update={"request": request})
+            await repository.save_run(active)
+            updated, reason = await hefesto.enrich_project(
+                execution_id, opportunity=opportunity, new_source_ids=added_ids,
+            )
+            record["editorial_reason"] = reason
+            if updated.editorial_round == original.editorial_round:
+                record["editorial_status"] = "rejected"
+                await repository.rollback_enrichment_sources(
+                    execution_id, added_ids, original.editorial_round,
+                )
+                await repository.save_run(original)
+                added_ids = []
+                await hefesto.record_stages(execution_id, [{
+                    "stage": "source_enrichment", "status": "running",
+                    "duration_ms": int((perf_counter() - started) * 1000),
+                    "opportunity": opportunity, "sources": acquired_records,
+                    "summary": reason + " A busca continua para cumprir a mesma contribuição.",
+                    "incorporated": False,
+                }])
+                return False
+            record["editorial_status"] = "incorporated"
+            return True
+
+        result = await research.run(
+            contribution_brief, provisional, accept_acquired=accept_acquired,
+            record_usage=lambda usage: repository.record_usage(execution_id, original.project_id, usage),
         )
         report = await hefesto.usage_report(execution_id)
         report["calls"] = report["calls"][usage_offset:]
@@ -678,6 +710,7 @@ async def enrich_project_source(execution_id: UUID, index: int) -> None:
             "duration_ms": int((perf_counter() - started) * 1000),
             **_task_metrics(report, {call["task_type"] for call in report["calls"]}),
             "opportunity": opportunity, "summary": reason,
+            "attempts_by_subject": result.attempts_by_subject,
             "incorporated": updated.editorial_round != original.editorial_round,
             "sources": acquired_records,
         }])
@@ -1319,4 +1352,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

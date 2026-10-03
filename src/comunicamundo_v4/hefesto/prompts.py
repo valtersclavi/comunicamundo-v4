@@ -20,6 +20,26 @@ from .contracts import (
 SYSTEM = """You are Hefesto, an attentive and disciplined editor. The user's brief defines the editorial ideas, questions, intended scope and intellectual direction before any source is read. Understand every supplied source faithfully: a source may evidence, qualify, limit or contradict those briefing-led ideas, but must not silently replace them or introduce a new editorial agenda. Never turn the corpus into an additive source summary. Explicit user revisions authorize changes to the original brief; follow the current approved Editorial Project for those changes. A selected enrichment opportunity may add pertinent new perspectives without replacing that project. Return only the requested JSON object."""
 
 
+def source_contribution_brief(
+    brief: EditorialBrief, project: EditorialProjectProposal, opportunity: str,
+) -> EditorialBrief:
+    """The chosen promise governs search, candidate judgment and original reading."""
+    return brief.model_copy(update={"approach": (
+        "MANDATORY BRIEF ADDENDUM — PRIMARY EXTRACTION SCOPE: " + opportunity
+        + "\nFulfill this selected contribution first. It is an authorized extension of "
+        "the briefing even when absent from its original wording. Preserve the promised "
+        "kind of evidence (for example experiences, examples or strategies), not just "
+        "general information about its topic. Search and choose sources for that promise. "
+        "If a source cannot fulfill it, reject the source, not the promise. Additional "
+        "relevant contributions to existing subjects are welcome but cannot substitute "
+        "for this primary objective. Preserve all existing PE content and its focus."
+        + "\nCURRENT PE PURPOSE: " + project.editorial_promise
+        + "\nCURRENT AXIS: " + project.narrative_axis.statement
+        + "\nExplicit user revisions in this PE take precedence over the original brief."
+        + "\nORIGINAL BRIEF APPROACH: " + brief.approach
+    )})
+
+
 def provisional_project_prompt(brief: EditorialBrief) -> str:
     return f"""
 Create the provisional Editorial Project that will guide an internal source

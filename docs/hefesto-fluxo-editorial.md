@@ -12,7 +12,7 @@ O experimento da matriz não concluiu o Projeto Editorial do Teste B após cerca
 | Zero fontes | Pré-projeto gerado pelo LLM, aprovação do usuário, busca e aquisição de fontes, ingestão e Projeto Editorial definitivo. As duas listas de sugestões ficam vazias nessa segunda apresentação. |
 | Remoque | O campo permanece sob o pré-projeto e sob todas as versões do Projeto Editorial. O pedido do usuário provoca revisão e nova apresentação para aprovação. |
 | Contribuição do LLM | Ideia pequena inserida no assunto pertinente, sem alegar que veio de fonte documental. A versão revista não gera outra lista automática. |
-| Enriquecimento por fonte | Busca pontual para o assunto escolhido, aquisição e ingestão apenas da fonte nova, seleção de seus trechos e revisão do projeto com a compreensão já existente. Pode aumentar a duração; preserva os demais assuntos. |
+| Enriquecimento por fonte | A proposta escolhida vira adendo prioritário ao briefing. Busca, aquisição e compreensão precisam cumprir essa promessa. Incorporação amplia argumentos/assuntos e duração, preservando o PE anterior. Fontes que não cumprem a proposta são rejeitadas e a busca continua nas quatro rodadas previstas. |
 
 O pré-projeto aprovado orienta a busca e o projeto definitivo. Assuntos sem suporte nas fontes adquiridas não devem ser apresentados como sustentados documentalmente. A ingestão original, seus formatos, extração, normalização e estrutura persistida não fazem parte das revisões editoriais.
 

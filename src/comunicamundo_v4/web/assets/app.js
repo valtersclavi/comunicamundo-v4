@@ -194,7 +194,7 @@ function renderSourceManifest(known, provisionalProject) {
     const indexes = Array.isArray(coverage[candidate.candidate_id]) ? coverage[candidate.candidate_id] : [];
     const isEnrichment = (enrichment?.sources || []).includes(record);
     const covered = indexes.map((index) => subjects[index]?.title || `Assunto ${index + 1}`);
-    if (isEnrichment) covered.push(`${enrichment.opportunity} — ${enrichment.status === "failed" ? "incorporação falhou; PE preservado" : enrichment.status === "running" ? "em análise" : enrichment.incorporated ? "incorporada" : "sem acréscimo ao PE"}`);
+    if (isEnrichment) covered.push(`${enrichment.opportunity} — ${record.editorial_status === "rejected" ? "fonte não cumpriu a contribuição" : enrichment.status === "failed" ? "incorporação falhou; PE preservado" : enrichment.status === "running" ? "em análise" : enrichment.incorporated ? "incorporada" : "contribuição não concluída"}`);
     const status = record.status === "acquired" ? "Adquirida" : record.status === "partial" ? "Parcial" : "Falhou";
     const route = record.selected_route ? ` · ${record.selected_route}` : "";
     const url = record.final_url || candidate.url;
@@ -205,6 +205,7 @@ function renderSourceManifest(known, provisionalProject) {
       <h3>${escapeHtml(candidate.title || "Fonte sem título")}</h3>
       <p class="source-meta">${escapeHtml(candidate.publisher || candidate.provider || "Origem não informada")}${candidate.doi ? ` · DOI ${escapeHtml(candidate.doi)}` : ""} ${link}</p>
       <div class="source-coverage"><span>Cobre</span>${covered.length ? covered.map((title) => `<em>${escapeHtml(title)}</em>`).join("") : "<em>Cobertura não registrada</em>"}</div>
+      ${record.editorial_reason ? `<p class="source-meta">${escapeHtml(record.editorial_reason)}</p>` : ""}
     </article>`;
   }).join("");
 }

@@ -22,8 +22,14 @@ inferidas, nem introduzir exceções por tema, arquivo ou execução de teste.
 - Não aceitar JSON/resposta interrompida como artefato completo. Montagem e
   validação finais são locais. Originais devem poder ser relidos por referência.
 - Enriquecimento congela o PE anterior e agrega apenas a oportunidade autorizada;
-  pode adicionar perspectivas pertinentes novas e aumentar a duração. Remoque
-  pode alterar o PE conforme a vontade explícita do usuário e revisitar fontes.
+  a proposta escolhida vira adendo obrigatório e prioritário ao briefing para
+  busca, julgamento e compreensão. Contribuições aos assuntos existentes são
+  bem-vindas, mas não substituem a promessa. Uma fonte externa só é incorporada
+  se cumprir essa promessa, ampliar argumentos/assuntos visíveis no PE e aumentar
+  a duração. Se não cumprir, trocar a fonte dentro das quatro rodadas existentes;
+  ao esgotá-las, informar a contribuição não cumprida e preservar PE e promessa.
+  Contribuições pontuais do LLM não têm essa obrigação de aumentar a duração.
+  Remoque pode alterar o PE conforme a vontade explícita do usuário e revisitar fontes.
 - Preservar a liberdade do editor de narrativa para fundir e reordenar passagens;
   fronteiras de processamento não são fronteiras editoriais.
 - Testes locais devem simular limites, falhas, referências e retomada. Não usar

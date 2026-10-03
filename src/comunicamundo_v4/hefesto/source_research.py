@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
 
 from .contracts import (
     CallUsage,
@@ -50,6 +51,9 @@ class SourceResearch:
         self,
         brief: EditorialBrief,
         project: ProvisionalEditorialProject,
+        *,
+        accept_acquired: Callable[[AcquisitionPayload], Awaitable[bool]] | None = None,
+        record_usage: Callable[[CallUsage], Awaitable[None]] | None = None,
     ) -> SourceResearchResult:
         planned = await self._editor.search_plan(brief, project)
         query_map = _query_map(
@@ -58,6 +62,9 @@ class SourceResearch:
             attempts_per_subject=self._max_search_rounds,
         )
         usages = list(planned.usages or (planned.usage,))
+        if record_usage:
+            for call in usages:
+                await record_usage(call)
         candidates: list[SourceCandidate] = []
         candidate_ids: set[str] = set()
         judged_ids: set[str] = set()
@@ -100,7 +107,11 @@ class SourceResearch:
                         candidate,
                         eligible_subject_indexes=eligible,
                     )
-                    usages.extend(judgment.usages or (judgment.usage,))
+                    physical_calls = judgment.usages or (judgment.usage,)
+                    usages.extend(physical_calls)
+                    if record_usage:
+                        for call in physical_calls:
+                            await record_usage(call)
                     if judgment.value.decision == "skip":
                         continue
                     covered = sorted(
@@ -112,6 +123,10 @@ class SourceResearch:
                     if payload.record.status != "acquired":
                         failed_acquisition_count += 1
                         continue
+                    # Metadata relevance is provisional. External enrichment
+                    # marks coverage only after the original fulfills its promise.
+                    if accept_acquired is not None and not await accept_acquired(payload):
+                        continue
                     acquisitions.append(payload)
                     acquired_ids.append(candidate.candidate_id)
                     subject_coverage[candidate.candidate_id] = covered
@@ -122,6 +137,8 @@ class SourceResearch:
                 break
 
         if not acquired_ids:
+            if accept_acquired is not None:
+                raise ValueError("No source fulfilled the selected contribution within the search rounds; promise and PE preserved")
             raise ValueError("source research did not acquire any usable source")
 
         complete = _coverage_complete(subject_coverage, len(project.subjects))
@@ -184,4 +201,3 @@ def _coverage_complete(
     return subject_count > 0 and _covered_subjects(subject_coverage) >= set(
         range(subject_count)
     )
-
