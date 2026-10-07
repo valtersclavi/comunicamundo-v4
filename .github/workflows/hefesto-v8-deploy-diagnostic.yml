@@ -1,4 +1,4 @@
-name: Hefesto V8 deployment diagnostic
+name: Hefesto V8 deployment diagnostic (read only)
 on:
   push:
     branches: [main]
