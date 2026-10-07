@@ -1,10 +1,10 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: criação da branch hefesto-v8 a partir do HEAD confirmado de main.
-Last commit: base 80748b2ce2993aa8f0d28e05262abef4b1a242a7; SHA deste primeiro commit documental será registrado no próximo commit documental (um commit não pode conter seu próprio SHA).
-Current task: Fase 0 — registrar este guia canônico.
-Next task: Fase 1 — inspeção do código, histórico, componentes e invariantes.
+Last completed task: Fase 0 — branch dedicada e guia canônico commitado exclusivamente como documentação.
+Last commit: cdfd5a9c1920adfcff9aacae8350ac6718551bc2 — plano inicial; a presente atualização documental registra a inspeção e seu próprio SHA é verificável no histórico.
+Current task: Fase 1 — IN PROGRESS, inventário e inspeção estrutural concluídos; falta concluir revisão das branches divergentes e invariantes/testes.
+Next task: concluir comparação da branch hefesto/pdf-caption-assets (fb1236e1d53ba1eeab78397bab11bf40bbc4469b) com main, ler fixtures/contratos de testes e migrations restantes; fechar Fase 1 documental antes de criar contratos mínimos V8 (Fase 2).
 Known blocker: nenhum para operações GitHub; clone HTTPS local sem credencial falhou, usar connector GitHub.
 Paid validation authorized: no
 Deploy status: não executado para V8.
@@ -94,8 +94,8 @@ Branch hefesto-v8; legado isolado durante transição. Não copiar sistema intei
 Legenda: [ ] PENDING; [~] IN PROGRESS; [x] DONE; [!] BLOCKED.
 Ordem só muda por dependência demonstrada no código e registrada com justificativa.
 
-- [~] Fase 0 — documentar/congelar: branch, plano, commit só documental, HEAD main e SHA do plano.
-- [ ] Fase 1 — inspeção: histórico pós-80748b2/Copilot, fluxo, schema, ingestão, Hermes, PE, remoque, geração, jobs, checkpoints, UI/API; atualizar plano sem correções.
+- [x] Fase 0 — documentar/congelar: branch, plano, commit só documental, HEAD main e SHA do plano.
+- [~] Fase 1 — inspeção: histórico pós-80748b2/Copilot, fluxo, schema, ingestão, Hermes, PE, remoque, geração, jobs, checkpoints, UI/API; atualizar plano sem correções.
 - [ ] Fase 2 — contratos mínimos Source, Corpus, EditorialProject, Remoque, GeneratedWork, SupportReference, ExecutionState; adaptar existentes.
 - [ ] Fase 3 — persistência aditiva necessária: versões, raw, checkpoints, tokens, status; preservar V4.
 - [ ] Fase 4 — ingestão mecânica contínua/endereçável, extração confiável, sem transformação editorial no V8; manter legado.
@@ -141,3 +141,50 @@ Primeiro passo obrigatório: abrir repo; descobrir main HEAD; criar/usar hefesto
 
 ## Registro de execução e decisões
 2026-10-07: connector GitHub confirmou main em 80748b2ce2993aa8f0d28e05262abef4b1a242a7; busca não encontrou branch hefesto-v8; branch criada exatamente nesse SHA. Alegação de commits posteriores ainda será confrontada com comparação/histórico e branches. Nenhum código alterado. Clone local HTTPS requer credencial indisponível; acesso GitHub via connector funciona, portanto não é bloqueio da documentação/inspeção.
+
+## Fase 1 — inspeção real, 2026-10-07 (em andamento)
+
+### Histórico confirmado
+Comparação 80748b2...main: identical, ahead=0, behind=0. Não há commits posteriores ao marco em main. Histórico recente: 80748b2 ← 44c1399 (remove speculative search/LLM suggestions) ← fd3f3fa ← 488a702. O conteúdo real contradiz uma interpretação de que 44c1399 removeu tudo: contratos, serviço, API e UI ainda carregam sugestões e pré-PE. Não presumir intenção pelo título do commit.
+
+Branches observadas:
+- main: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
+- hefesto-v8: plano inicial cdfd5a9c1920adfcff9aacae8350ac6718551bc2 antes desta atualização.
+- fix/final-narrative-editor: 391ea3f, ancestral de main, 13 commits atrás.
+- refactor/no-speculative-suggestions: fd3f3fa, ancestral de main, 2 commits atrás.
+- hefesto/pdf-caption-assets: fb1236e, divergente (2 commits próprios; 145 atrás); revisar patch integral antes de decisão.
+- hefesto/text-first-incremental-ingestion: fd6c31f, divergente (7 próprios; 146 atrás), commits de 2026-09-24, não posteriores cronologicamente a main. Patch lido: PDF nativo, extração incremental, persistência por fonte, progresso UI e testes; também desativa estrutura/imagens de tabelas/figuras e documento estruturado. Main já apresenta vários mecanismos de PDF nativo e extração incremental. Não mesclar automaticamente nem importar redução de preservação dos assets. Nenhuma branch sobrescrita.
+
+### Mapa funcional e reutilização
+| Componente | Evidência no código | Decisão V8 |
+|---|---|---|
+| contracts.py | EditorialBrief; NormalizedSource.text; Paragraph com página/offsets; hashes; assets; SourceMode só provided | Reusar briefing/localizações/identidade; criar domínio V8 mínimo separado, sem herdar PE baseado em assuntos |
+| ingestion.py | originais imutáveis, hashes binário/texto, normalização, callback por fonte, ThreadPoolExecutor; falhas de fontes registradas | Reusar extração; adapter V8 deve exigir manifesto explícito de integridade/completude, sem ignorar falhas/partial |
+| document_normalization.py | pypdf-native-text-v1, canonical_text_uri, páginas/offsets; Docling para outros formatos | Preservar parsers; verificar requisitos de representação antes de qualquer alteração |
+| storage.py | persist_bytes_immutable com if_generation_match=0; conflito compara bytes | Reusar armazenamento e invariantes; não duplicar sistema |
+| postgres.py | runs JSONB, paragraphs/sentences/assets, atomic_model_tasks, subject_readings, call_usage, receipts, auth/uploads | Reusar acesso/infra; persistência V8 aditiva e versionada, sem sobrescrever PE anterior |
+| service.py | select→propose_project; _create_project usa scaffold do briefing, routing e _create_subject_corpus; budgets 24k/120k/60k/5k; remoque por plano de assuntos | Manter legado isolado; V8 direto não chama seleção/compreensão por assunto |
+| service.py produce_text | arquitetura narrativa, draft, review, correction, style, preservation review, final_narrative_edit | Não usar essa cadeia no V8; escrita contínua e verificação localizada |
+| source_research.py | max_search_rounds=4, queries por assunto, SourceResearchExhausted | Não reusar política editorial de término; transportar clientes/acquisition sem número de rodadas como conclusão |
+| source_pipeline.py | DOI/URL dedup; You/OpenAlex; aquisição direct/You/Jina/Browser Use; candidato preservado | Reusar transportes com testes de identidade/completude; identidade declarada no payload não prova equivalência documental |
+| gateway.py | VertexGateway default gemini-2.5-flash; count_tokens; generate com schema | Adapter V8 separado, capacidade/provider atual verificados antes de orçamento/contexto |
+| atomic.py | hash de tarefa, checkpoints e reparo; input_budget=64000; paginação por caracteres | Reaproveitar princípios/testes, não paginação editorial nem orçamento fixo no V8 |
+| api.py/worker.py | autenticação, uploads, ownership, receipts, jobs/actions e retomada; pré-PE/suggestions persistem | Reusar infraestrutura; rotas/estado V8 explícitos |
+| web/assets/app.js | find_for_me, pré-PE, suggestions e PE por assuntos | Adaptar só na Fase 19; legado intocado por ora |
+| migrations | 1000 runs/paragraphs/sentences/usage; 1005 assets; 1007 atomic tasks | Aditividade; revisar demais migrations antes de schema V8 |
+| .github/workflows/main.yml | push branches=[main], pytest e deploy Cloud Run/migrations/smoke | Commit V8 não dispara esse deploy por push; nenhum workflow disparado manualmente |
+
+### Riscos concretos encontrados (não corrigidos nesta inspeção)
+1. gateway.generate faz parsing antes de retorno; ModelResult não transporta raw. No finish_reason não STOP, lança erro antes de parsing sem response_text parcial. Fases 3/6/17 precisam garantir persistência raw anterior a parsing/validação/finish handling.
+2. atomic.py persiste resultado validado no caminho curto, não resposta bruta anterior à interpretação. Reparo existente não satisfaz sozinho requisito absoluto V8.
+3. gateway._usage fixa preços 0.30/0.03 (e preço de saída no código); telemetria V8 deve identificar modelo/provider e fonte/data de preços, sem assumir tarifa.
+4. ModelGateway Protocol contém implementação embed duplicada; VertexGateway não mostra método embed concreto. Não refatorar oportunisticamente; V8 direto não precisa embeddings.
+5. postgres.get_run contém normalização duplicada do PE antigo; cosmético, deixar intocado.
+6. ingestão pode montar PlanningRequest com fontes bem-sucedidas e registrar falhas de outras. V8 não pode tratar corpus como integral sem decisão explícita sobre fontes pendentes/falhas.
+7. SourceMode provided rejeita zero fontes, mas UI preserva find_for_me. V8 resolve pela entrada Hermes, sem reativar pré-PE legado.
+
+### Conflitos com AGENTS.md e decisões
+AGENTS.md lido. Regras de ingestão congelada, divisão em TODAS as chamadas sem teto de obra, enriquecimento por sugestões e editor narrativo refletem arquitetura anterior. Instrução explícita V8 do usuário prevalece somente no caminho V8: ingestão mecânica reaproveitada, teto de dois contextos, escrita contínua, sem sugestões/editor narrativo automático. Legado permanece protegido. Sem mudança silenciosa do AGENTS ou código atual. Mantêm-se proibições de truncamento, fixtures especiais, perda de estado e chamadas pagas não autorizadas.
+Ordem de fases mantida. Capacidade/caching/provider atuais ainda NÃO verificados: obrigatório antes das Fases 5/6, sem hardcode de memória.
+SHA Fase 0: cdfd5a9c1920adfcff9aacae8350ac6718551bc2.
+Testes: nenhuma execução funcional; inspeção somente. Deploy: nenhum. Chamadas pagas: nenhuma.
