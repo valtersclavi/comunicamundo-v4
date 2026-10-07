@@ -1,11 +1,11 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: inspeção real concluída; contratos e persistência aditiva V8 implementados.
-Last commit: 26e7a8f8c28ee38d10f33dd3dfa9dd363951ed1b — contratos V8 e persistência aditiva.
+Last completed task: núcleo V8 integrado; 166 testes locais passaram.
+Last commit: bb7baadf1bac32ae8b568a23d0775e1a73ab8bcd — núcleo editorial, Hermes, contexto e recuperação V8.
 Current task: validação técnica e commits da implementação integrada; núcleo e API/UI montados localmente.
 Next task: concluir smoke da interface, registrar commits do núcleo e runtime, verificar pacote/CI e finalizar registro de entrega.
-Known blocker: nenhum para operações GitHub; clone HTTPS local sem credencial falhou, usar connector GitHub.
+Known blocker: Chromium indisponível localmente (download retornou arquivo inválido); smoke visual e imagem Docker executados no CI. Deploy e validação paga não executados.
 Paid validation authorized: no
 Deploy status: não executado para V8.
 Main HEAD observado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
@@ -229,3 +229,6 @@ lastro não cabe, expõe limitação em vez de cortar conteúdo.
 Modelo e preços verificados e documentados em HEFESTO_V8_PROVIDER.md. Aposentadoria
 anunciada para gemini-2.5-flash em 2026-10-20 exige perfil/modelo explícito nessa
 data, sem troca silenciosa. Uso inline/cache implícito não cobra cache explícito.
+
+## Commit do núcleo integrado
+Commit: bb7baadf1bac32ae8b568a23d0775e1a73ab8bcd. Fases 4–18 implementadas. 166 testes locais passaram (144 legados + 22 V8). Smoke visual com fixtures transferido ao CI devido a falha de download do Chromium neste ambiente. Nenhuma chamada paga.

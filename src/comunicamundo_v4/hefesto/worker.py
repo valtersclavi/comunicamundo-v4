@@ -1153,6 +1153,10 @@ def _task_metrics(
 
 
 async def run(args: argparse.Namespace) -> None:
+    if args.command == "v8-run":
+        from .v8.runtime import run as run_v8
+        print(json.dumps(await run_v8(args.execution_run_id), ensure_ascii=False))
+        return
     if args.command is None:
         print(json.dumps({"status": "ready", "model_invocations": 0}))
         return
@@ -1375,6 +1379,8 @@ def _input_transport(command: argparse.ArgumentParser) -> None:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description="Hefesto editorial product")
     commands = root.add_subparsers(dest="command")
+    v8 = commands.add_parser("v8-run")
+    v8.add_argument("--execution-run-id", type=UUID, required=True)
     commands.add_parser("migrate-postgres")
     commands.add_parser("check-postgres")
     cleanup = commands.add_parser("clean-operational-history")
@@ -1424,3 +1430,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

@@ -1,0 +1,56 @@
+name: Hefesto V8 technical validation
+on:
+  push:
+    branches: [hefesto-v8]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hefesto-v8-technical
+  cancel-in-progress: false
+jobs:
+  contracts-build-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12.14'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: No-cost technical tests
+        run: |
+          python -m pip install -e '.[dev]' build
+          python -m pip check
+          python -m pytest
+          python -m compileall -q src tests
+          node --check src/comunicamundo_v4/web/assets/v8.js
+          python -m build --wheel --no-isolation
+          python -m comunicamundo_v4.hefesto.worker --help
+      - name: PostgreSQL migrations without production access
+        run: |
+          npm install --no-save @electric-sql/pglite@0.5.8 @electric-sql/pglite-pgvector@0.0.9
+          node scripts/verify_v8_migrations.mjs
+      - name: Offline browser flow smoke
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          node scripts/smoke_v8_ui.cjs
+      - name: Build existing production image
+        run: docker build --tag hefesto-v8:technical .
+      - name: Image startup and V8 route smoke (no model calls)
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python hefesto-v8:technical -m comunicamundo_v4.hefesto.document_smoke
+          container="$(docker run --detach --publish 127.0.0.1:8080:8080 --entrypoint uvicorn hefesto-v8:technical comunicamundo_v4.hefesto.api:app --host 0.0.0.0 --port 8080)"
+          trap 'docker rm --force "${container}" >/dev/null' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz >/tmp/health.json; then break; fi
+            sleep 1
+          done
+          jq -e '.status == "ready"' /tmp/health.json
+          curl --fail --silent http://127.0.0.1:8080/v8 >/tmp/v8.html
+          grep -q 'Hefesto V8' /tmp/v8.html
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8080/v8/projects)" = 401

@@ -420,6 +420,7 @@ def create_app(
     access_store: AccessStore | None = None,
     auth_store: AuthStore | None = None,
     identity_reader: IdentityReader | None = None,
+    v8_backend: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Hefesto Editorial API", version="2.0.0")
     access = access_store or PostgresAccessStore()
@@ -954,8 +955,11 @@ def create_app(
                 status_code=503, detail=f"dispatch failed: {error}"
             ) from error
 
+    from .v8.routes import install
+    install(app, owner, access, lambda: dispatcher or _default_dispatcher(), v8_backend)
     return app
 
 
 app = create_app()
+
 
