@@ -3,11 +3,11 @@
 ## CURRENT STATUS
 Last completed task: entrega técnica V8 integrada (Fases 0–20), com CI e todos os smoke tests concluídos.
 Last commit: 39dc77942654cb0552120585bdd9d5f59284846a — identidade da submissão preservada após resposta HTTP interrompida.
-Current task: deploy solicitado explicitamente pelo usuário em 2026-10-07; preparar pipeline, promover branch validada e acompanhar migrations/API/job/smoke publicado.
-Next task: promover o commit de preparação de deploy para main sem sobrescrever alterações alheias, aguardar o pipeline de produção e conferir a URL /v8; registrar revisão/image digest/migrations/smokes e entregar para teste do usuário.
+Current task: deploy de produção em execução no Actions run 37634099690, revisão 8e75454af470ddea35831d5ca6957ce15a8eadec. Testes, build, smoke da imagem e autenticação Google Cloud passaram; publicação/migration/API ainda em execução.
+Next task: acompanhar os steps restantes do run 37634099690; conferir migration/check PostgreSQL, revisão API/job/imagem por digest e smoke HTTP /v8; registrar os resultados e entregar URL pronta para teste.
 Known blocker: nenhum confirmado; deploy em andamento dentro do escopo explicitamente autorizado pelo usuário.
 Paid validation authorized: no
-Deploy status: autorizado e em preparação; nenhum deploy ou migration de produção concluído ainda.
+Deploy status: main promovida por fast-forward sem perda de commits; execução de deploy em andamento. Revisão alvo 8e75454; conclusão ainda não confirmada.
 Main HEAD observado e reconfirmado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
 CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37630267314.
 Testes: CI final SUCCESS, 169 testes passaram (inclui PostgreSQL 17 real); migrations histórico+1008, smoke navegador e smoke imagem passaram. Local: 168 passaram e 1 integração sem banco externo pulada; SQL também passou em PostgreSQL WASM. Wheel, compile, Node syntax e dependências passaram.
@@ -268,3 +268,8 @@ A entrega está pronta para implantação e teste editorial pelo usuário depois
 Usuário solicitou explicitamente: terminar deploy/commits e deixar pronto para o teste. Isso autoriza promover a branch validada para produção; desenvolvimento continua em hefesto-v8, sem alterar main diretamente durante implementação. Main reconfirmada em 80748b2; V8 em cb40b3e (mesmo código funcional 39dc779 validado pelo CI SUCCESS 37630267314).
 Pipeline existente publica API/job na mesma imagem por digest, aplica migrations antes de atualizar API e executa smoke do job com --help (nenhum LLM). Secrets esperados: pooler/direct PostgreSQL, You/OpenAlex/Jina/Browser Use; job já vinculava todos, API vincula pooler/direct. Vertex V8 é explicitamente configurado com modelo/perfil já verificado e localização global. Nenhuma chamada editorial paga autorizada.
 Preparação adiciona smoke HTTP publicado (/healthz, /v8, asset JS, projetos sem sessão=401) e registra recibo no resumo/logs de Actions. Remove comentário automático em issue: o usuário autorizou deploy, não mensagens para terceiros. Commits somente docs não provocam redeploy. UI V8 fica em /v8; / permanece legado durante transição.
+
+## Checkpoint do deploy ativo
+Commit de release: 8e75454af470ddea35831d5ca6957ce15a8eadec. Promoção main: fast-forward de 80748b2, expected SHA conferido, sem overwrite ou force. Branch de desenvolvimento permanece hefesto-v8.
+Run produção: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37634099690. Job 112835638798. CI técnico concomitante: run 37634067634.
+Histórico real: deploy anterior de main80748b2 (37157270246) falhou na execução de migration hefesto-v4-rebuild-h4pgv. A última versão deployada com sucesso antes dele era fd3f3fa (37144909653). O diff dessa versão para80748b2 não modifica nenhuma migration; a causa da falha anterior não está identificada nos logs de Actions. Não presumir conflito de checksum ou modificar migrations antigas por hipótese. A migration atual será avaliada pelo resultado real.
