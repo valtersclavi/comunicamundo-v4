@@ -252,6 +252,7 @@ class SourceAcquirer:
         browser_poll_seconds: float = 5,
         browser_timeout_seconds: int = 90,
         use_browser: bool = False,
+        acceptable: Callable[[str], bool] | None = None,
     ) -> None:
         self._you_api_key = you_api_key
         self._jina_api_key = jina_api_key
@@ -260,6 +261,7 @@ class SourceAcquirer:
         self._browser_poll_seconds = browser_poll_seconds
         self._browser_timeout_seconds = browser_timeout_seconds
         self._use_browser = use_browser
+        self._acceptable = acceptable or _acceptable
 
     def acquire(self, candidate: SourceCandidate) -> AcquisitionPayload:
         attempts: list[AcquisitionAttempt] = []
@@ -281,7 +283,7 @@ class SourceAcquirer:
                 original_bytes=original_bytes,
                 original_content_type=original_content_type or "application/pdf",
             )
-        if direct_text and _acceptable(direct_text):
+        if direct_text and self._acceptable(direct_text):
             return self._success(
                 candidate, "direct", direct_text, attempts,
                 final_url=candidate.acquisition_url,
@@ -290,14 +292,14 @@ class SourceAcquirer:
             )
 
         text, _, final_url = self._you_contents(candidate, attempts)
-        if text and _acceptable(text):
+        if text and self._acceptable(text):
             return self._success(
                 candidate, "you_contents", text, attempts, final_url=final_url,
                 original_bytes=original_bytes, original_content_type=original_content_type,
             )
 
         text, final_url = self._jina(candidate, attempts)
-        if text and _acceptable(text):
+        if text and self._acceptable(text):
             return self._success(
                 candidate, "jina_reader", text, attempts, final_url=final_url,
                 original_bytes=original_bytes, original_content_type=original_content_type,
@@ -311,7 +313,7 @@ class SourceAcquirer:
                     failure_reason="public acquisition requires human action",
                 )
                 return AcquisitionPayload(record=record, original_bytes=original_bytes, original_content_type=original_content_type)
-            if browser_text and _acceptable(browser_text):
+            if browser_text and self._acceptable(browser_text):
                 return self._success(
                     candidate, "browser_use", browser_text, attempts,
                     final_url=browser_url,
@@ -548,3 +550,4 @@ def _result_url(value: str) -> str | None:
 def _last_error(attempts: Sequence[AcquisitionAttempt]) -> str:
     errors = [item.error for item in attempts if item.error]
     return errors[-1] if errors else "no route produced integral readable content"
+

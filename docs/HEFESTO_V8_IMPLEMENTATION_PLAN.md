@@ -2,7 +2,7 @@
 
 ## CURRENT STATUS
 Last completed task: inspeção real concluída; contratos e persistência aditiva V8 implementados.
-Last commit: 8b3bb9b4e536a285808086acc244c0d13f06a1a3 — adendo integrado; commits técnicos desta sessão serão encadeados no histórico.
+Last commit: 26e7a8f8c28ee38d10f33dd3dfa9dd363951ed1b — contratos V8 e persistência aditiva.
 Current task: validação técnica e commits da implementação integrada; núcleo e API/UI montados localmente.
 Next task: concluir smoke da interface, registrar commits do núcleo e runtime, verificar pacote/CI e finalizar registro de entrega.
 Known blocker: nenhum para operações GitHub; clone HTTPS local sem credencial falhou, usar connector GitHub.
@@ -98,21 +98,21 @@ Ordem só muda por dependência demonstrada no código e registrada com justific
 - [x] Fase 1 — inspeção: histórico pós-80748b2/Copilot, fluxo, schema, ingestão, Hermes, PE, remoque, geração, jobs, checkpoints, UI/API; atualizar plano sem correções.
 - [x] Fase 2 — contratos mínimos Source, Corpus, EditorialProject, Remoque, GeneratedWork, SupportReference, ExecutionState; adaptar existentes.
 - [x] Fase 3 — persistência aditiva necessária: versões, raw, checkpoints, tokens, status; preservar V4.
-- [ ] Fase 4 — ingestão mecânica contínua/endereçável, extração confiável, sem transformação editorial no V8; manter legado.
-- [ ] Fase 5 — Corpus Builder: fontes/tokens/manifesto/orçamento real/1 ou 2 contextos/rejeição, sem chamadas editoriais.
-- [ ] Fase 6 — Context Provider simples: mecanismo atual recomendado, encapsular Gemini fora do domínio.
-- [ ] Fase 7 — PE direto: briefing+corpus, raw antes de parse, sem digestão de uma janela.
-- [ ] Fase 8 — remoque com contexto existente e nova versão, preservando anteriores.
-- [ ] Fase 9 — avaliar necessidade de fonte e acionar Hermes, sem sugestão de busca.
-- [ ] Fase 10 — zero fontes via Hermes→corpus→fluxo normal, sem pré-PE.
-- [ ] Fase 11 — dois contextos: leituras fundamentadas A/B→PE único, origens preservadas, máximo dois.
-- [ ] Fase 12 — aprovação explícita da versão, obrigatória antes de escrita.
-- [ ] Fase 13 — redação contínua com briefing+corpus original+PE aprovado.
-- [ ] Fase 14 — escrita mínima em duas janelas preservando narrativa, grounding, leituras e referências; sem máquina de chunks.
-- [ ] Fase 15 — proveniência recuperável de afirmações importantes, sem poluir texto público.
-- [ ] Fase 16 — verificação limitada e correção localizada.
-- [ ] Fase 17 — recuperação genérica: malformed,429,timeout,restart,parcial,MAX_TOKENS,cache perdido sem repetir caro.
-- [ ] Fase 18 — telemetria custo/tokens/latência por etapa.
+- [x] Fase 4 — ingestão mecânica contínua/endereçável, extração confiável, sem transformação editorial no V8; manter legado.
+- [x] Fase 5 — Corpus Builder: fontes/tokens/manifesto/orçamento real/1 ou 2 contextos/rejeição, sem chamadas editoriais.
+- [x] Fase 6 — Context Provider simples: mecanismo atual recomendado, encapsular Gemini fora do domínio.
+- [x] Fase 7 — PE direto: briefing+corpus, raw antes de parse, sem digestão de uma janela.
+- [x] Fase 8 — remoque com contexto existente e nova versão, preservando anteriores.
+- [x] Fase 9 — avaliar necessidade de fonte e acionar Hermes, sem sugestão de busca.
+- [x] Fase 10 — zero fontes via Hermes→corpus→fluxo normal, sem pré-PE.
+- [x] Fase 11 — dois contextos: leituras fundamentadas A/B→PE único, origens preservadas, máximo dois.
+- [x] Fase 12 — aprovação explícita da versão, obrigatória antes de escrita.
+- [x] Fase 13 — redação contínua com briefing+corpus original+PE aprovado.
+- [x] Fase 14 — escrita mínima em duas janelas preservando narrativa, grounding, leituras e referências; sem máquina de chunks.
+- [x] Fase 15 — proveniência recuperável de afirmações importantes, sem poluir texto público.
+- [x] Fase 16 — verificação limitada e correção localizada.
+- [x] Fase 17 — recuperação genérica: malformed,429,timeout,restart,parcial,MAX_TOKENS,cache perdido sem repetir caro.
+- [x] Fase 18 — telemetria custo/tokens/latência por etapa.
 - [ ] Fase 19 — API/UI fontes ou sem→PE→remoque→aprovar→produzir, remover sugestões/matrizes/estados obsoletos do V8.
 - [ ] Fase 20 — limpeza só após caminho funcional, remover/isolar editorial V4 sem uso; legado não contamina V8.
 - [ ] Fase 21 — validação real autorizada: três fontes existentes de luto infantil; avaliar PE, remoque, narrativa, duração, fundamentação, custo/tokens/tempo; sem A/B.
@@ -210,3 +210,22 @@ Este adendo prevalece sobre qualquer interpretação que transforme V8 em pequen
 - Gateways legados/editor narrativo/sugestões/pré-PE não são utilizados pelo V8. Sem refatoração cosmética de duplicações legadas.
 - Única extensão de transporte compartilhado: SourceAcquirer recebe predicado de aceitabilidade opcional, mantendo default legado. V8 não rejeita fonte por 800 caracteres/100 palavras; verifica identidade/completude/lastro semanticamente.
 - Não iniciado teste editorial nem chamada paga, deploy ou merge.
+
+### Núcleo integrado — conclusão técnica
+Fases 4–18 implementadas em hefesto/v8: ingestão adaptada, corpus, contexto,
+PE direto, remoque versionado, suporte/Hermes, zero fontes, dois blocos, aprovação,
+redação única, proveniência, verificação localizada, recuperação e telemetria.
+Commit dos contratos/persistência: 26e7a8f8c28ee38d10f33dd3dfa9dd363951ed1b.
+Testes do núcleo: 22 genéricos V8 (incluindo percurso completo, transportes,
+JSON/raw, parcial/MAX_TOKENS, restart, 429, timeout, cache, busca e identidade,
+fonte curta, corpus e recuperação por ação). Nenhuma chamada paga.
+Não afirmar custo zero de respostas perdidas nem de APIs externas sem tarifa;
+telemetria marca custo desconhecido. Uma requisição interrompida antes de guardar
+resposta só é repetida com reconhecimento explícito na interface de retomada.
+No MAX_TOKENS, continuação substantiva recebe o contexto original reutilizável e
+o prefixo já produzido; reparo JSON recebe somente resposta/endereço/erro.
+Caminho duas janelas preserva originais referenciados; se representação final de
+lastro não cabe, expõe limitação em vez de cortar conteúdo.
+Modelo e preços verificados e documentados em HEFESTO_V8_PROVIDER.md. Aposentadoria
+anunciada para gemini-2.5-flash em 2026-10-20 exige perfil/modelo explícito nessa
+data, sem troca silenciosa. Uso inline/cache implícito não cobra cache explícito.
