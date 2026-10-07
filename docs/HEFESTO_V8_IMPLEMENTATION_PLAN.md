@@ -1,19 +1,19 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: entrega técnica integrada e deploy de produção do Hefesto V8, com smoke público SUCCESS.
-Last commit: e372045fad460f304b3a5e96a7945db40a52b27e — último commit funcional efetivamente implantado. Checkpoint documental anterior: a62d07b19851f3ee80faff387168bcc0710e7b32; este recibo é persistido no HEAD documental da branch.
-Current task: CI 37650271569 SUCCESS (178 testes, migrations, navegador e imagem); correção 96adcf86545ae103dd528678aceba7512e3465ae promovida por fast-forward e deploy 37651327855 em andamento.
-Next task: acompanhar deploy 37651327855 até migration/check/startup/smoke HTTP SUCCESS; registrar SHA e imagem efetivamente implantados da correção máxima de thinking. Depois usuário executa primeiro teste editorial; não gerar autonomamente.
+Last completed task: correção mínima do provider: thinking máximo por perfil, temperatura nativa 1.0, testes e deploy corretivo SUCCESS.
+Last commit: 96adcf86545ae103dd528678aceba7512e3465ae — commit funcional efetivamente implantado desta correção. Checkpoint documental anterior: 4d45ebc4d2bcb5174a0c2ac0c5488d8eee04d76d; registro final é o HEAD documental.
+Current task: correção concluída e implantada; aguardando primeiro teste editorial real pelo usuário.
+Next task: usuário executa primeiro teste editorial pelo link /v8 abaixo. O assistente não inicia geração paga. Futuras sessões leem este plano no GitHub e verificam HEAD/produção antes de modificar código.
 Known blocker: nenhum impedimento técnico observado na entrega. Qualidade editorial e disponibilidade da geração real serão verificadas pelo usuário; nenhuma geração paga foi executada pelo assistente.
 Paid validation authorized: no
-Deploy status: DONE — API hefesto-v4-api-00086-rnx e job hefesto-v4-rebuild publicados com a mesma imagem por digest; migration, check PostgreSQL, startup sem modelo e smoke HTTP público passaram.
+Deploy status: DONE — correção publicada na API hefesto-v4-api-00087-p5p e job hefesto-v4-rebuild com a mesma imagem por digest; migration/check/startup/smoke público SUCCESS.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
-Deployment commit: e372045fad460f304b3a5e96a7945db40a52b27e
-Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:2ed432caf417ab81aeb1dd07afb4272cd02988d1cf22e9fd6e1cf81bb761d71f
-Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37637702188 — SUCCESS em 2026-10-07 15:02 UTC.
-CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37637700213 — SUCCESS; 169 testes, PostgreSQL 17 real, migrations, navegador, wheel/build/dependências e imagem de produção.
-Testes locais: 168 passaram, 1 integração com banco externo pulada; 25 testes API e compile passaram após alias /health. CI executou também a integração PostgreSQL sem skip. Smoke público: /health ready, /v8 HTML, assets/v8.js e API privada 401. Sem chamadas de geração.
+Deployment commit: 96adcf86545ae103dd528678aceba7512e3465ae
+Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:c60e9c2783ee1bffe988698811c44699166b957749338aefa74908636973e7c2
+Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37651327855 — SUCCESS em 2026-10-07 16:45 UTC.
+CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37650271569 — SUCCESS; 178 testes, PostgreSQL 17 real, migrations, navegador, wheel/build/dependências e imagem de produção.
+Testes locais: 177 passaram, 1 integração PostgreSQL externa pulada; 33 testes V8 passaram. CI executou todos os 178 testes sem skip. pip check, compileall, Node syntax, git diff --check passaram. Smoke público /health, /v8, assets e API privada 401 passaram; nenhuma geração paga.
 Main HEAD na inspeção inicial de 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7. Branches main e hefesto-v8 sincronizadas por fast-forward após desenvolvimento na branch V8; commits documentais posteriores não mudam a imagem implantada.
 Alterações: V8 completo em domínio/persistência/corpus/editor/Hermes/runtime/API/UI; parsers preservados. Checkout local raso validado contra SHA/tree/blobs exatos do GitHub. GitHub permanece memória canônica e fonte do histórico completo.
 
@@ -311,7 +311,7 @@ Fim de sessão: todos os arquivos funcionais commitados; registro final document
 
 ## Correção isolada do provider — maximum thinking (2026-10-07)
 
-[~] Provider V8: usar thinking_budget_max=24576 do perfil verificado Gemini 2.5 Flash e temperature=1.0. Consulta oficial refeita hoje: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking e https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/2-5-flash. Fonte/prices: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing.
+[x] Provider V8: usar thinking_budget_max=24576 do perfil verificado Gemini 2.5 Flash e temperature=1.0. Consulta oficial refeita hoje: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking e https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/2-5-flash. Fonte/prices: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing.
 
 Escopo: somente provider.py, testes técnicos e documentação deste provider/registro. Nenhuma alteração em ingestão/corpus/PE/remoque/Hermes/busca/banco/schemas editoriais/redação/verificação/proveniência/UI/zero-fontes/caching ou workflows. Limite cognitivo e fonte pertencem ao perfil por modelo; perfil ausente/inválido pausa antes de chamada, sem fallback. max_output_tokens existente (65536) mantido; telemetria/custo de reasoning já existente mantida e protegida por teste do journal/reuso. topP/topK intactos. Sem chamadas de geração pagas.
 
@@ -320,3 +320,18 @@ Testes locais desta correção: 177 passaram, 1 integração PostgreSQL externa 
 [x] Código da correção mínima do provider — commit 96adcf86545ae103dd528678aceba7512e3465ae. [~] CI técnico 37650271569; após SUCCESS promover fast-forward para main, executar deploy/smokes não editoriais e registrar SHA/imagem. Não há alteração de workflows ou de outros componentes funcionais.
 
 [x] CI técnico desta correção — run 37650271569 SUCCESS: 178 testes, PostgreSQL 17, migrations, navegador, wheel/build/dependências, imagem/startup/rotas sem modelos. [~] Deploy da correção — run 37651327855, commit alvo 96adcf86545ae103dd528678aceba7512e3465ae. Promoção respeitou HEAD esperado de main; documentação posterior não dispara rebuild. Apenas provider/tests/docs alterados; nenhum teste editorial pago.
+
+### Recibo final da correção mínima do provider — 2026-10-07
+
+[x] Correção e deploy concluídos — SHA efetivamente implantado `96adcf86545ae103dd528678aceba7512e3465ae`.
+- Gemini 2.5 Flash: thinking_budget=24576 (máximo manual do perfil verificado); temperature=1.0 (padrão nativo). Sem modo automático, orçamento econômico ou heurística por etapa. topP/topK intactos.
+- Limite cognitivo e fonte são específicos do perfil; modelo sem limite verificado positivo/fonte pausa antes de generate_content. Nenhum fallback silencioso.
+- Registro de input/output/cached input/reasoning/modelo/custo mantido; teste SDK+journal confirma pensamentos efetivos e custo combinado, sem repetir chamada concluída.
+- CI técnico 37650271569 SUCCESS: 178 testes + migrations + navegador + imagem.
+- Deploy 37651327855 SUCCESS; API `hefesto-v4-api-00087-p5p` e worker `hefesto-v4-rebuild` com `us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:c60e9c2783ee1bffe988698811c44699166b957749338aefa74908636973e7c2`.
+- Migration/check existentes: `hefesto-v4-rebuild-vvvds` / `hefesto-v4-rebuild-62rqv` SUCCESS; nenhuma migration ou mudança de banco nesta correção.
+- Startup sem modelo `hefesto-v4-rebuild-wmpxr` SUCCESS; smoke HTTP público /health + /v8 + assets + API privada 401 SUCCESS.
+- Escopo confirmado no diff do commit: somente provider.py, tests/test_v8.py, documentação do provider e plano operacional. Nenhuma outra lógica funcional ou workflow alterado.
+- Nenhuma geração editorial paga e nenhum teste de luto infantil. Próxima tarefa exata: usuário realiza o primeiro teste editorial.
+
+Fim desta sessão: correção commitada e implantada; branches main/hefesto-v8 sincronizadas por fast-forward; registro documental posterior não altera a imagem. Não há mudança funcional incompleta nesta correção. Consultar o SHA funcional/digest acima para identificar produção, e HEAD para documentação atual.
