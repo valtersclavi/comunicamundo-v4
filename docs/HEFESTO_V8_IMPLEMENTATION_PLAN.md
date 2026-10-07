@@ -241,3 +241,7 @@ Commit integrado API/UI/testes: 6cb011cca0ac1c1f2d9f02d41cc52de741bbd5e5 (Fases 
 Modelo retirado ou perfil desconhecido agora produz pausa de configuração recuperável, não erro de tamanho do corpus; nenhuma capacidade retirada é cacheada. 168 testes locais (24 V8) passaram. Modelo padrão mantém a documentação verificada em 2026-10-07 e retirada prevista para 2026-10-20; troca exige modelo/perfil explícito, nunca fallback silencioso.
 CI https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37628573456 (e9777d6): testes/build/migrations e smoke navegador passaram; imagem Docker em execução. Smoke navegador: login, zero fontes, proposta, histórico de versões, remoque, aprovação, produção, referências e viewport iPad, com fixtures e zero chamadas LLM.
 Commits somente docs não repetem o CI caro sem mudanças de código. A validação de imagem usa o Dockerfile existente e parsers/modelos documentais já previstos; não toca em produção.
+
+## Recuperação de processo interrompido na UI
+A API já permite retomar estados ativos preservados após crash; a UI agora também oferece Retomar nesses estados. Uma execução ainda ativa é protegida pelo advisory lock (409), enquanto o processo morto libera o lock e reaproveita o journal. Smoke de navegador inclui a retomada. CI sem deploy cancela revisões anteriores quando chega nova correção para validar apenas a versão atual.
+Commit anterior: b75e92d0a0b29cea2af450cf5c225c5718981972 (falhas de configuração do provider; 168 testes locais passaram).

@@ -55,7 +55,9 @@ retry, since the provider cannot promise that the first request was not billed.
 No claim of exactly-once external network effects is possible across that gap.
 PostgreSQL session advisory locks prevent overlapping project jobs; revision CAS
 also protects against stale saves. Locks automatically release on disconnected
-sessions. PE and work versions are never silently discarded.
+sessions. The UI also offers resume while a job was left in an active/queued state
+after a process crash; the advisory lock rejects overlap with a still-running
+worker. PE and work versions are never silently discarded.
 
 ## Technical validation (no model calls)
 
@@ -71,3 +73,5 @@ patches, JSON repair, MAX_TOKENS, 429, timeout, restart, cache loss and ownershi
 
 The final editorial paid test is exclusively the user's responsibility. This
 technical delivery does not prove editorial quality or live provider availability.
+
+Offline browser smoke: install Playwright/Chromium, then run `node scripts/smoke_v8_ui.cjs`; every HTTP response is a fixture and no model call is made.

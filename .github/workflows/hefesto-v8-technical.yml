@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: hefesto-v8-technical
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   contracts-build-smoke:
     runs-on: ubuntu-latest
