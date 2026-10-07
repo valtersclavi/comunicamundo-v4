@@ -125,29 +125,33 @@ async def run(execution_id: UUID):
     async with repository() as repo:
         async with repo.lock(execution_id):
             state=await repo.get(execution_id)
-            provider=Vertex(required("GOOGLE_CLOUD_PROJECT"),
-                os.environ.get("HEFESTO_VERTEX_LOCATION","global"),
-                os.environ.get("HEFESTO_V8_MODEL",os.environ.get("HEFESTO_MODEL","gemini-2.5-flash")))
-            client=storage.Client(project=required("GOOGLE_CLOUD_PROJECT"))
-            acquirer=SourceAcquirer(you_api_key=os.environ.get("YOU_API_KEY",""),
-                jina_api_key=os.environ.get("JINA_API_KEY",""),
-                browser_use_api_key=os.environ.get("BROWSER_USE_API_KEY", ""),
-                use_browser=bool(os.environ.get("BROWSER_USE_API_KEY")),
-                acceptable=lambda text: bool(text.strip()))
-            providers=[]
-            if os.environ.get("YOU_API_KEY"):providers.append(YouSearchProvider(os.environ["YOU_API_KEY"]))
-            if os.environ.get("OPENALEX_API_KEY"):providers.append(OpenAlexSearchProvider(os.environ["OPENALEX_API_KEY"]))
-            # Provided corpus works without search credentials. Hermes exposes a
-            # real configuration pause if a later remoque needs research.
-            discovery=SourceDiscovery(providers) if providers else None
-            ingestor=Ingestor(client,required("HEFESTO_GCS_BUCKET"),provider,acquirer)
-            hermes=Hermes(repo,discovery,acquirer,ingestor)
-            calls=Calls(repo,provider,state)
-            editor=Editor(repo,provider,ingestor,hermes)
-            state.job["status"]="running"
-            await repo.save(state)
             try:
+                provider=Vertex(required("GOOGLE_CLOUD_PROJECT"),
+                    os.environ.get("HEFESTO_VERTEX_LOCATION","global"),
+                    os.environ.get("HEFESTO_V8_MODEL",os.environ.get("HEFESTO_MODEL","gemini-2.5-flash")))
+                client=storage.Client(project=required("GOOGLE_CLOUD_PROJECT"))
+                acquirer=SourceAcquirer(you_api_key=os.environ.get("YOU_API_KEY",""),
+                    jina_api_key=os.environ.get("JINA_API_KEY",""),
+                    browser_use_api_key=os.environ.get("BROWSER_USE_API_KEY", ""),
+                    use_browser=bool(os.environ.get("BROWSER_USE_API_KEY")),
+                    acceptable=lambda text: bool(text.strip()))
+                providers=[]
+                if os.environ.get("YOU_API_KEY"):providers.append(YouSearchProvider(os.environ["YOU_API_KEY"]))
+                if os.environ.get("OPENALEX_API_KEY"):providers.append(OpenAlexSearchProvider(os.environ["OPENALEX_API_KEY"]))
+                # Provided corpus works without search credentials. Hermes exposes a
+                # real configuration pause if a later remoque needs research.
+                discovery=SourceDiscovery(providers) if providers else None
+                ingestor=Ingestor(client,required("HEFESTO_GCS_BUCKET"),provider,acquirer)
+                hermes=Hermes(repo,discovery,acquirer,ingestor)
+                calls=Calls(repo,provider,state)
+                editor=Editor(repo,provider,ingestor,hermes)
+                state.job["status"]="running"
+                await repo.save(state)
                 await editor.execute(state,calls)
+            except Exception as error:
+                state.status="paused"
+                state.error=dict(type=type(error).__name__,message=str(error),recoverable=True,
+                    requires_retry_ack=bool(getattr(error,"requires_retry_ack",False)))
             finally:
                 state.job["status"]="completed" if state.status not in {"paused","project_too_large"} else "paused"
                 await repo.save(state)

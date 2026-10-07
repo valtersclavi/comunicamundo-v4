@@ -405,3 +405,18 @@ async def test_large_single_location_with_multiple_sources_is_split_losslessly()
     assert sum(block.count("A") for block in corpus.blocks)>=3100
     assert b.text in corpus.blocks[-1]
     assert all(n<=corpus.useful_tokens for n in corpus.block_tokens)
+
+
+@pytest.mark.asyncio
+async def test_worker_initialization_failure_is_a_persisted_recoverable_pause(monkeypatch):
+    from comunicamundo_v4.hefesto.v8 import runtime
+    repo=Memory();st=state();await repo.create(st)
+    @asynccontextmanager
+    async def db():yield repo
+    monkeypatch.setattr(runtime,"repository",db)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT",raising=False)
+    result=await runtime.run(st.execution_id)
+    restored=await repo.get(st.execution_id)
+    assert result["status"]=="paused" and restored.job["status"]=="paused"
+    assert restored.error["recoverable"] and "GOOGLE_CLOUD_PROJECT" in restored.error["message"]
+    assert restored.action["id"]=="initial" and not repo.ops

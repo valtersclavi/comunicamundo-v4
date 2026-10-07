@@ -27,7 +27,7 @@ jobs:
           python -m pytest
           python -m compileall -q src tests
           node --check src/comunicamundo_v4/web/assets/v8.js
-          python -m build --wheel --no-isolation
+          python -m build --wheel
           python -m comunicamundo_v4.hefesto.worker --help
       - name: PostgreSQL migrations without production access
         run: |

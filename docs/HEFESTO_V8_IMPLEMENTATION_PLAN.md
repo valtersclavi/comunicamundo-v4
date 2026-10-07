@@ -113,8 +113,8 @@ Ordem só muda por dependência demonstrada no código e registrada com justific
 - [x] Fase 16 — verificação limitada e correção localizada.
 - [x] Fase 17 — recuperação genérica: malformed,429,timeout,restart,parcial,MAX_TOKENS,cache perdido sem repetir caro.
 - [x] Fase 18 — telemetria custo/tokens/latência por etapa.
-- [ ] Fase 19 — API/UI fontes ou sem→PE→remoque→aprovar→produzir, remover sugestões/matrizes/estados obsoletos do V8.
-- [ ] Fase 20 — limpeza só após caminho funcional, remover/isolar editorial V4 sem uso; legado não contamina V8.
+- [x] Fase 19 — API/UI fontes ou sem→PE→remoque→aprovar→produzir, remover sugestões/matrizes/estados obsoletos do V8.
+- [x] Fase 20 — limpeza só após caminho funcional, remover/isolar editorial V4 sem uso; legado não contamina V8.
 - [ ] Fase 21 — validação real autorizada: três fontes existentes de luto infantil; avaliar PE, remoque, narrativa, duração, fundamentação, custo/tokens/tempo; sem A/B.
 - [ ] Fase 22 — prova editorial complexa futura compatível com projeto bíblico, após estabilidade; não bloqueia infraestrutura.
 
@@ -232,3 +232,7 @@ data, sem troca silenciosa. Uso inline/cache implícito não cobra cache explíc
 
 ## Commit do núcleo integrado
 Commit: bb7baadf1bac32ae8b568a23d0775e1a73ab8bcd. Fases 4–18 implementadas. 166 testes locais passaram (144 legados + 22 V8). Smoke visual com fixtures transferido ao CI devido a falha de download do Chromium neste ambiente. Nenhuma chamada paga.
+
+## API/UI e revisão técnica final
+Commit integrado API/UI/testes: 6cb011cca0ac1c1f2d9f02d41cc52de741bbd5e5 (Fases 19–20). Legado isolado, sem remoção dos parsers ou migração destrutiva. V8 usa /v8 e tabelas próprias aditivas.
+167 testes locais passaram após proteção de falha de inicialização do worker. CI inicial confirmou os 166 anteriores; falhou somente no empacotamento sem setuptools no runner limpo. Correção: build com ambiente isolado declarado em pyproject, sem pressupor dependências do runner. Smoke navegador usa localhost como contexto seguro; não chama providers.

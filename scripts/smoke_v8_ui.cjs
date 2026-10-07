@@ -8,7 +8,7 @@ const fs=require('node:fs');const path=require('node:path');const assert=require
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   let auth=false,submission=null;
   let state={execution_id:'11111111-1111-4111-8111-111111111111',status:'project_proposed',projects:[{version:1,document:'Central question, narrative movement and an ending.'}],sources:[{source_id:'source-a',title:'Generic original',tokens:100,locations:[{location_id:'p1',page:1}]}],usage:{call_count:1,input_tokens:100,output_tokens:20,cost_usd:'0.001',latency_ms:100}};
-  await page.route('http://v8.test/**',async route=>{
+  await page.route('http://localhost/**',async route=>{
     const url=new URL(route.request().url());const method=route.request().method();
     const reply=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
     if(url.pathname==='/v8')return route.fulfill({contentType:'text/html',body:fs.readFileSync(path.join(__dirname,'../src/comunicamundo_v4/web/v8.html'),'utf8')});
@@ -26,7 +26,7 @@ const fs=require('node:fs');const path=require('node:path');const assert=require
     }
     return reply(state);
   });
-  await page.goto('http://v8.test/v8');
+  await page.goto('http://localhost/v8');
   await page.locator('[name=username]').fill('fixture');await page.locator('[name=password]').fill('fixture');await page.getByRole('button',{name:'Entrar',exact:true}).click();
   await page.locator('#workspace').waitFor({state:'visible'});
   await page.locator('[name=theme]').fill('Generic subject');await page.locator('[name=approach]').fill('Explain a contrast');await page.locator('[name=audience]').fill('General audience');await page.locator('#source-mode').selectOption('search');
