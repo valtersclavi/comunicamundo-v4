@@ -19,6 +19,11 @@ jobs:
           workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
           service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v3
+      - name: Read runtime cache IAM prerequisites (no cache creation)
+        run: |
+          set -euo pipefail
+          gcloud projects get-iam-policy comunicamundo-v4 --flatten='bindings[].members' --filter='bindings.members=serviceAccount:hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com' --format=json > "${RUNNER_TEMP}/runtime-cache-iam.json"
+          cat "${RUNNER_TEMP}/runtime-cache-iam.json"
       - name: Read deployment execution metadata and logs
         run: |
           set -euo pipefail
@@ -44,4 +49,5 @@ jobs:
             ${{ runner.temp }}/executions.json
             ${{ runner.temp }}/logs.json
             ${{ runner.temp }}/api-service.json
+            ${{ runner.temp }}/runtime-cache-iam.json
           retention-days: 7
