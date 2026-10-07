@@ -1,0 +1,143 @@
+# HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
+
+## CURRENT STATUS
+Last completed task: criação da branch hefesto-v8 a partir do HEAD confirmado de main.
+Last commit: base 80748b2ce2993aa8f0d28e05262abef4b1a242a7; SHA deste primeiro commit documental será registrado no próximo commit documental (um commit não pode conter seu próprio SHA).
+Current task: Fase 0 — registrar este guia canônico.
+Next task: Fase 1 — inspeção do código, histórico, componentes e invariantes.
+Known blocker: nenhum para operações GitHub; clone HTTPS local sem credencial falhou, usar connector GitHub.
+Paid validation authorized: no
+Deploy status: não executado para V8.
+Main HEAD observado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
+Testes desta sessão: não executados.
+Alterações funcionais desta sessão: nenhuma.
+
+## Autoridade e continuidade
+Este documento é o guia canônico e registro vivo da implementação na branch hefesto-v8 do repositório valtersclavi/comunicamundo-v4. Cada sessão começa lendo este documento no GitHub e verificando HEAD, branch, alterações e estado real. Não confiar na memória do chat. Atualizar tarefas, SHA, andamento, próxima tarefa exata, decisões, impedimentos e desvios justificados. Cada tarefa atômica concluída recebe commit coerente e atualização deste registro. Não desenvolver diretamente em main.
+
+O último commit conhecido no plano de origem era 80748b2, sem garantia de ser HEAD. Inspecionar main e commits posteriores, inclusive Copilot; não presumir correção, não descartar, sobrescrever ou corrigir silenciosamente. Registrar reaproveitamento, correção ou abandono com fundamento no código real. Inspeção não inclui correções funcionais.
+
+## 1–5. Objetivo e princípios
+V8 é a oitava e última arquitetura prevista: não existe V9 para resolver depois. Construir produto genérico, robusto, recuperável, financeiramente viável, suficientemente rápido, editorialmente bom e comercializável. O legado pode funcionar temporariamente; comparação A/B V4/V8 não é objetivo, pois V4 foi considerado inviável.
+
+Motivação: teste real com cerca de 3,5 milhões de tokens, pelo menos 25 minutos, três fontes, corpus estimado de 80 mil tokens e podcast de 20 minutos com resultado abaixo do esperado. O texto parecia colagem de fragmentos, em vez de obra nascida da compreensão do conjunto. Hipótese V8: fragmentação excessiva prejudicou uma atividade intelectual integrada que modelos modernos conseguem realizar.
+
+Briefing dirige; LLM interpreta, relaciona, escolhe ênfases, sintetiza, explica, confronta e organiza narrativa; fontes fornecem lastro, credibilidade e verificabilidade. Afirmações substantivas verificáveis precisam de suporte recuperável. Fontes não são o cérebro do editor. Diferencial: controle editorial humano combinado com fundamentação identificável.
+
+## 6–12. Projeto Editorial, remoque e busca
+PE é proposta editorial curta, clara e humanamente editável: ideia central, estratégia narrativa, percurso de desenvolvimento e fechamento, sem prender esses nomes em schema rígido. Estratégias possíveis: cronologia, problema/consequências/soluções, personagem/contexto/interpretação, contraste, duas temporalidades e investigação progressiva.
+
+PE não é resumo de fontes, inventário de evidências, matriz de cobertura, coleção de assuntos ou centenas de objetos. Não há interpretação única correta; usuário pode alterar tese, ênfase, pergunta, narrativa e conclusão.
+
+Remoque é nova direção editorial: reconsiderar corpus e propor nova versão, não pequena edição textual. Exemplo: mudar de acompanhar a criança da terminalidade ao pós-morte para estratégias que minimizem seu sofrimento. Não reingerir ou redigerir tudo. Reutilizar mecanismo atual do provider (sessão, contexto persistente, cache, arquivos ou equivalente), verificando documentação/API atual antes de escolher. Corpus e estado próprios sobrevivem à expiração de cache.
+
+Avaliar suporte à nova direção: suficiente → novo PE com corpus existente; insuficiente → Hermes busca, seleciona, adquire, incorpora e gera novo PE automaticamente. Remover da experiência V8 “Sugestões do LLM” e “Sugestões de fontes a serem buscadas”; mudanças entram por remoque.
+
+Busca termina semanticamente somente em sucesso ou ausência justificável de suporte confiável após busca adequada. Nunca por número arbitrário de rodadas, consultas ou páginas. Não inventar lastro, aceitar fonte irrelevante nem tratar infraestrutura (timeout, rede, 429, indisponibilidade) como conclusão editorial. Interrupções técnicas são recuperáveis. Terraplanismo pode ser objeto histórico, mas não ganhar suporte científico fictício como modelo orbital.
+
+## 13–18. Fluxos e ingestão
+Com fontes: fontes → ingestão mecânica → corpus → contexto editorial → PE → remoque(s) → aprovação → redação → verificação → produto.
+Sem fontes: briefing → Hermes (busca/seleção/aquisição) → corpus → mesmo fluxo V8. Não criar pré-PE, proposta baseada apenas em conhecimento do LLM, sugestões ou segundo pipeline.
+
+Ingestão adquire, preserva, extrai, endereça e torna recuperável. Preservar original (PDF/EPUB/HTML/TXT/imagem etc.), identidade (título, autor, publicador, URL/DOI/origem, versão), texto integral, localização (página/seção/parágrafo/posição), tokens, integridade hash/checksum e método de extração.
+
+Não antecipar compreensão: nenhuma ideia, resumo, argumento, conclusão, importância estimada, cobertura ou minidocumento editorial. Segmentos podem servir armazenamento, recuperação, embeddings e indexação; chunk é técnico, não intelectual.
+
+Inspecionar parsers e reutilizar extração confiável. Não reescrever ou melhorar partes estáveis sem requisito V8 concreto. Antes de modificar, documentar função, invariantes e dependentes. Nenhuma refatoração cosmética.
+
+## 19–25. Corpus e orçamento
+Corpus é conjunto completo das fontes do projeto; tamanho principal em tokens, não páginas, MB ou número de fontes. Consultar capacidade real do modelo/provider, não números lembrados.
+Orçamento útil = janela real − system prompt − briefing − PE/histórico necessário − instruções − output esperado − margem tecnicamente justificada.
+Contar entrada real antes de chamadas. Nunca truncar nem inventar orçamento por conveniência.
+
+Produto admite no máximo dois contextos úteis: cabe em um → direto; cabe em dois → dois grandes blocos; excede dois → pedir divisão do projeto antes de chamada paga. Não árvore ilimitada, mega-RAG ou vinte janelas.
+Dividir preferencialmente entre fontes, capítulos, grandes seções ou conjuntos coerentes; representar integralmente toda parte, sem cortes silenciosos.
+
+Uma janela: briefing + corpus integral + contrato editorial → PE, sem digestão. Prompt: não resumir fonte a fonte, não dar peso por tamanho/chunks/páginas/ocorrências; briefing define importância; perceber sustentação, qualificações, contradições e relações; construir visão narrativa.
+
+Duas janelas: cada bloco recebe briefing completo e mesma orientação e produz leitura fundamentada preservando ideias/fatos relevantes, relações, tensões, contradições, nuances, elementos indispensáveis e localizações originais. Não resumos proporcionais. Leituras A+B+briefing → PE único. Esta é a única representação editorial intermediária normal, justificada pela fronteira física de contexto.
+Uma fonte extensa pode contribuir três ideias; artigo curto pode carregar quase toda a narrativa, como no corpus de luto infantil com livro sobre cuidadores, artigo sobre crianças e material Kübler-Ross.
+
+## 26–33. Escrita, verificação e proveniência
+Após aprovação: briefing + corpus + versão aprovada do PE → obra. Uma janela usa originais novamente; PE orienta, não substitui corpus.
+Narrativa existe antes da primeira frase; fontes servem à narrativa, que não segue ordem das fontes. Quando output cabe no limite real, gerar obra inteira continuamente (por exemplo podcast de 20 minutos), sem escritores independentes por seção.
+
+Antes de gerar, calcular extensão e capacidade real de saída. Se não cabe, regra técnica explícita: divisão apenas em fronteiras narrativas aprovadas, preservando PE completo, estado narrativo, fatos introduzidos, transições e conclusão. Só construir mecanismo se formatos atuais realmente exigirem; não truncar, ocultar ou descobrir tarde.
+
+Eliminar editor narrativo corretivo automático e revisão de estilo que reescreve toda obra. Verificador detecta requisitos ausentes, afirmações sem lastro, contradições, repetição grave, duração, truncamento e inconsistência. Problema → texto existente + problema específico + PE + fontes relevantes → correção localizada, preservando restante.
+
+Proveniência interna recuperável por source_id/página/parágrafo/seção/localização, sem exigir podcast acadêmico ou longas citações intermediárias. Conhecimento geral serve raciocínio, linguagem e estrutura; fatos substantivos que exigem fundamentação devem encontrar suporte no corpus, sem fonte fantasma.
+
+## 34–42. Persistência, recuperação e telemetria
+Reutilizar Neon/PostgreSQL e armazenamento funcional. Persistir projeto, briefing, fontes, originais, texto extraído, manifesto, tokens, versões, PE e versões, remoque, aprovação, buscas Hermes, novas fontes, obra, suporte, job, checkpoints, telemetria e respostas brutas importantes. Banco preserva estado, não pensamento completo. Ligação estável registro↔original↔representação; bytes não precisam estar no relacional.
+
+Persistir raw response ANTES de parsing. JSON inválido: preservar; recuperar deterministicamente; reparar somente resposta problemática se preciso; não reler corpus nem repetir centenas de milhares de tokens nem perder progresso. Structured output não é única barreira.
+MAX_TOKENS: reconhecer, preservar parcial e continuar/reparar controladamente; nunca reiniciar tudo sem necessidade, reduzir arbitrariamente ou truncar silenciosamente.
+
+Tarefas atômicas com objetivo claro: extração, corpus, contagem, contexto, PE, remoque, aquisição, escrita, verificação. Atomicidade operacional não fragmenta pensamento: propor PE ou escrever obra inteira que cabe é tarefa atômica.
+Etapas caras retomáveis após 429, timeout, crash, conexão, parsing, JSON, restart. Identidade de operações inclui input/output e conclusão para impedir duplicação acidental e repetir somente quando necessário.
+
+Telemetria por etapa: modelo/provider, versão/prompt, tokens entrada/saída/cache, latência, custo, chamadas, erro, retries, source IDs. Saber custo total e distribuição.
+Caching/context reuse somente quando suportado e vantajoso; otimização, nunca verdade persistente. Cache perdido reconstrói sem perder corpus/PE/remoque/projeto.
+
+## 43–50. Fronteiras e disciplina genérica
+Hermes busca/seleciona/adquire; Hefesto compreende editorialmente, propõe PE, interage e escreve.
+Acquire adquire exatamente fonte escolhida; cópia institucional/PDF/versão equivalente somente do mesmo documento, sem substituir por publicação parecida.
+
+North star futuro: episódios de voiceover bíblico planejados externamente, um episódio por execução, integrando contexto histórico, formação textual, conteúdo e narrativa do livro, religião, temporalidades, controvérsias e acessibilidade. Êxodo/Levítico distinguem tempo narrado e composição numa narrativa fluida.
+“80%” significa compreensão, não reprodução de versículos: leitor entende o que há no livro, razões, ideias e passagens estranhas (sacrifício, sangue, sacerdócio, pureza, expiação, festas, santidade, Jubileu, exemplos e contexto), sem enumeração.
+Nunca condições especiais para Bíblia/luto/título/arquivo/fixture. Resolver propriedades genéricas para qualquer domínio. Testes demonstram defeitos, não definem software. Não melhorias oportunistas; mudanças só por requisito real, preservando componentes estáveis.
+
+## 51–53. Estratégia e fases atômicas
+Branch hefesto-v8; legado isolado durante transição. Não copiar sistema inteiro: reutilizar armazenamento, autenticação, infraestrutura, parsers, banco e jobs confiáveis, criando lógica editorial necessária com fronteiras explícitas.
+
+Legenda: [ ] PENDING; [~] IN PROGRESS; [x] DONE; [!] BLOCKED.
+Ordem só muda por dependência demonstrada no código e registrada com justificativa.
+
+- [~] Fase 0 — documentar/congelar: branch, plano, commit só documental, HEAD main e SHA do plano.
+- [ ] Fase 1 — inspeção: histórico pós-80748b2/Copilot, fluxo, schema, ingestão, Hermes, PE, remoque, geração, jobs, checkpoints, UI/API; atualizar plano sem correções.
+- [ ] Fase 2 — contratos mínimos Source, Corpus, EditorialProject, Remoque, GeneratedWork, SupportReference, ExecutionState; adaptar existentes.
+- [ ] Fase 3 — persistência aditiva necessária: versões, raw, checkpoints, tokens, status; preservar V4.
+- [ ] Fase 4 — ingestão mecânica contínua/endereçável, extração confiável, sem transformação editorial no V8; manter legado.
+- [ ] Fase 5 — Corpus Builder: fontes/tokens/manifesto/orçamento real/1 ou 2 contextos/rejeição, sem chamadas editoriais.
+- [ ] Fase 6 — Context Provider simples: mecanismo atual recomendado, encapsular Gemini fora do domínio.
+- [ ] Fase 7 — PE direto: briefing+corpus, raw antes de parse, sem digestão de uma janela.
+- [ ] Fase 8 — remoque com contexto existente e nova versão, preservando anteriores.
+- [ ] Fase 9 — avaliar necessidade de fonte e acionar Hermes, sem sugestão de busca.
+- [ ] Fase 10 — zero fontes via Hermes→corpus→fluxo normal, sem pré-PE.
+- [ ] Fase 11 — dois contextos: leituras fundamentadas A/B→PE único, origens preservadas, máximo dois.
+- [ ] Fase 12 — aprovação explícita da versão, obrigatória antes de escrita.
+- [ ] Fase 13 — redação contínua com briefing+corpus original+PE aprovado.
+- [ ] Fase 14 — escrita mínima em duas janelas preservando narrativa, grounding, leituras e referências; sem máquina de chunks.
+- [ ] Fase 15 — proveniência recuperável de afirmações importantes, sem poluir texto público.
+- [ ] Fase 16 — verificação limitada e correção localizada.
+- [ ] Fase 17 — recuperação genérica: malformed,429,timeout,restart,parcial,MAX_TOKENS,cache perdido sem repetir caro.
+- [ ] Fase 18 — telemetria custo/tokens/latência por etapa.
+- [ ] Fase 19 — API/UI fontes ou sem→PE→remoque→aprovar→produzir, remover sugestões/matrizes/estados obsoletos do V8.
+- [ ] Fase 20 — limpeza só após caminho funcional, remover/isolar editorial V4 sem uso; legado não contamina V8.
+- [ ] Fase 21 — validação real autorizada: três fontes existentes de luto infantil; avaliar PE, remoque, narrativa, duração, fundamentação, custo/tokens/tempo; sem A/B.
+- [ ] Fase 22 — prova editorial complexa futura compatível com projeto bíblico, após estabilidade; não bloqueia infraestrutura.
+
+## 54. Aceitação
+Não basta rodar. Ingestão preserva original/conteúdo/endereço sem compreensão antecipada. Corpus tem tamanho conhecido, cobertura integral e decisão por capacidade real. PE curto/compreensível/narrativo/editável. Remoque reutiliza corpus e preserva versões, buscando quando necessário. Zero fontes converge ao mesmo fluxo. Busca conclui por suporte ou ausência justificada, não contador. Escrita tem começo/meio/fim sem colagem ou ordem das fontes. Afirmações relevantes têm lastro. JSON/429/restart preservam progresso; MAX_TOKENS não é silencioso. Telemetria mostra tokens, latência e custo. Engenharia sem exceções de fixture, melhorias oportunistas, regressões silenciosas ou limites arbitrários.
+
+## 55–60. Commits, sessão, testes, custo e deploy
+Cada tarefa concluída: commit coerente, SHA registrado, notas, testes e status. Um SHA não pode estar no próprio commit: registrar SHA já existente na atualização seguinte; commit atual é verificável pelo histórico Git.
+Antes de terminar sessão: atualizar plano, último commit, parada exata, próximo passo, testes e deploy. Incompleto é IN PROGRESS e preservado na branch.
+
+Testes protegem contratos genéricos: sem truncamento; raw sobrevive JSON inválido; retomada não repete etapa; >duas janelas rejeita antes de cobrança; remoque versiona; referências válidas; Acquire mantém identidade. Não fixtures para “fazer passar luto”.
+
+Até infraestrutura pronta, nenhuma chamada paga para experimentar; mocks/fixtures/respostas gravadas/testes locais. Antes de primeira validação paga informar modelo, input aproximado, chamadas previstas e caminho, obtendo autorização. Autorização atual: NÃO.
+
+Commit não implica deploy. Deploy só unidade funcional validável, após confirmar migrations, configuração, secrets esperados, branch/SHA e testes sem custo; registrar SHA efetivamente implantado.
+
+Limitação real deve ser documentada/exposta/tratada. Nunca decisões silenciosas: truncamento, descarte, fonte substituta, redução de escopo, rodadas/chunks/caracteres arbitrários ou timeout como conclusão.
+
+## 61–63. Princípio final e execução
+Adicionar complexidade só por requisito real; remover somente entendendo proteção ainda necessária. Buscar menor arquitetura que cumpra integralmente produto, não menor número de linhas.
+Hefesto V8 recebe briefing e corpus fundamentado, lê conjunto, propõe interpretação editável pelo usuário e, após aprovação, produz narrativa coerente sustentada. Hermes consegue fontes; ingestão prepara; banco preserva estado/proveniência; LLM pensa/escreve; usuário dirige.
+
+Primeiro passo obrigatório: abrir repo; descobrir main HEAD; criar/usar hefesto-v8; gravar plano; commit exclusivamente documental; informar SHA; inspecionar código e commits posteriores; atualizar CURRENT STATUS; seguir fases atomicamente. Conflitos são registrados e resolvidos pelo objetivo arquitetural, sem adivinhação/correção oportunista.
+
+## Registro de execução e decisões
+2026-10-07: connector GitHub confirmou main em 80748b2ce2993aa8f0d28e05262abef4b1a242a7; busca não encontrou branch hefesto-v8; branch criada exatamente nesse SHA. Alegação de commits posteriores ainda será confrontada com comparação/histórico e branches. Nenhum código alterado. Clone local HTTPS requer credencial indisponível; acesso GitHub via connector funciona, portanto não é bloqueio da documentação/inspeção.
