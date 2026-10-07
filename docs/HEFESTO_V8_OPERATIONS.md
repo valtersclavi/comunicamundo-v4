@@ -80,3 +80,5 @@ The final editorial paid test is exclusively the user's responsibility. This
 technical delivery does not prove editorial quality or live provider availability.
 
 Offline browser smoke: install Playwright/Chromium, then run `node scripts/smoke_v8_ui.cjs`; every HTTP response is a fixture and no model call is made.
+
+Public Cloud Run health endpoint: `/health`; `/healthz` remains a local compatibility alias. Google Frontend reserves some paths ending in z, so public deployment smoke must use `/health`. See https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths.

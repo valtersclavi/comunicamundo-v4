@@ -66,7 +66,7 @@ jobs:
           container="$(docker run --detach --publish 127.0.0.1:8080:8080 --entrypoint uvicorn hefesto-v8:technical comunicamundo_v4.hefesto.api:app --host 0.0.0.0 --port 8080)"
           trap 'docker rm --force "${container}" >/dev/null' EXIT
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8080/healthz >/tmp/health.json; then break; fi
+            if curl --fail --silent http://127.0.0.1:8080/health >/tmp/health.json; then break; fi
             sleep 1
           done
           jq -e '.status == "ready"' /tmp/health.json

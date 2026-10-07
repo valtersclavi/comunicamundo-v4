@@ -474,6 +474,7 @@ def create_app(
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get("/health", include_in_schema=False)
     @app.get("/healthz")
     async def health() -> dict[str, str]:
         return {"status": "ready", "service": "hefesto-editorial-api"}

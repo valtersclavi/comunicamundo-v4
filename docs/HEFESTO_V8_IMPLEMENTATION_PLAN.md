@@ -3,9 +3,9 @@
 ## CURRENT STATUS
 Last completed task: entrega técnica V8 integrada (Fases 0–20), com CI e todos os smoke tests concluídos.
 Last commit: 39dc77942654cb0552120585bdd9d5f59284846a — identidade da submissão preservada após resposta HTTP interrompida.
-Current task: deploy de produção em execução no Actions run 37634099690, revisão 8e75454af470ddea35831d5ca6957ce15a8eadec. Testes, build, smoke da imagem e autenticação Google Cloud passaram; publicação/migration/API ainda em execução.
+Current task: corrigir rota pública de health no Cloud Run e republicar. Run 37634099690 publicou API/worker, aplicou 1008 e passou startup; smoke HTTP falhou em /healthz reservado pelo Google Frontend.
 Next task: acompanhar os steps restantes do run 37634099690; conferir migration/check PostgreSQL, revisão API/job/imagem por digest e smoke HTTP /v8; registrar os resultados e entregar URL pronta para teste.
-Known blocker: nenhum confirmado; deploy em andamento dentro do escopo explicitamente autorizado pelo usuário.
+Known blocker: /healthz é reservado no Cloud Run; correção aditiva /health em publicação. Sem impedimento de banco, IAM ou segredo confirmado.
 Paid validation authorized: no
 Deploy status: main promovida por fast-forward sem perda de commits; execução de deploy em andamento. Revisão alvo 8e75454; conclusão ainda não confirmada.
 Main HEAD observado e reconfirmado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
@@ -280,3 +280,7 @@ Correção genérica: separar build/smoke da imagem em job dependente com runner
 
 ### Diagnóstico de deploy — 2026-10-07
 Migration de produção ainda aguardando conclusão. Diagnóstico somente leitura na branch V8 foi recusado pela condição WIF (run 37636817108); manter condição IAM existente e executar diagnóstico em main. Workflow dedicado lê metadata/logs, sem secret values, SQL modificador ou modelos. Workflows exclusivamente técnicos/diagnósticos não disparam rebuild de produção; ajuste de controle de CI será promovido com skip ci, sem alterar imagem já publicada. Próxima ação exata: executar diagnóstico autorizado em main e resolver a causa real encontrada.
+
+Diagnóstico run 37637011804 concluído: WIF de main funcionou; não alterar IAM. Cloud Run levou minutos para importar/iniciar containers; não era erro SQL. Migration `hefesto-v4-rebuild-lwfsn` SUCCESS aplicou somente `1008_hefesto_v8.sql`; check `hefesto-v4-rebuild-xlwhb` SUCCESS retornou banco neondb pronto. Metadata revelou que a falha antiga `hefesto-v4-rebuild-h4pgv` era de **check-postgres**, após migration antiga bem-sucedida, corrigindo interpretação anterior do nome do step. Nenhum checksum histórico foi alterado. Startup sem modelo `hefesto-v4-rebuild-dh28d` em andamento. Próxima tarefa: confirmar startup/live HTTP e registrar recibo final.
+
+Correção necessária para entrega: diagnóstico run 37637438138 confirma /v8 e JS 200 e API privada 401 em ambas as URLs; somente /healthz retorna Google 404. Documentação oficial Cloud Run known-issues identifica reserva de paths terminados em z. Adicionar alias `/health`, preservar legacy `/healthz`, smoke público usar alias permitido. Nenhuma alteração editorial/parser/banco. Teste existente de health sem cloud clients adaptado à rota pública. Próxima ação: commit, promoção autorizada, novo deploy e smoke público.

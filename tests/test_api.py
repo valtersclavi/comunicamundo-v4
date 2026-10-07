@@ -384,7 +384,7 @@ def test_api_health_does_not_initialize_cloud_clients() -> None:
         return None
 
     api = TestClient(create_app(receipt_reader=no_receipt))
-    assert api.get("/healthz").json() == {
+    assert api.get("/health").json() == {
         "status": "ready", "service": "hefesto-editorial-api"
     }
 
