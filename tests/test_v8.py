@@ -429,7 +429,86 @@ async def test_retired_or_unknown_model_is_a_configuration_pause_not_corpus_size
     monkeypatch.delenv("HEFESTO_V8_MODEL_PROFILE",raising=False)
     with pytest.raises(Recoverable,match="verified"):await provider.capacity()
     profile=Provider().cap.__dict__.copy();profile.pop("model");profile["retirement_date"]="2000-01-01"
+    profile.update(thinking_budget_max=1,thinking_source="fixture")
     monkeypatch.setenv("HEFESTO_V8_MODEL_PROFILE",json.dumps(profile))
     for _ in range(2):
         with pytest.raises(Recoverable,match="retired"):await provider.capacity()
     assert provider._capacity is None
+
+
+def vertex_fixture(model="gemini-2.5-flash"):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from google.genai import types
+    from comunicamundo_v4.hefesto.v8.provider import Vertex
+    response=types.GenerateContentResponse(
+        candidates=[types.Candidate(content=types.Content(parts=[
+            types.Part(text="Reasoning summary",thought=True),
+            types.Part(text='{"document":"A coherent editorial interpretation."}')]),
+            finish_reason="STOP")],
+        usage_metadata=types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=1000,cached_content_token_count=400,
+            candidates_token_count=80,thoughts_token_count=2048))
+    models=SimpleNamespace(generate_content=AsyncMock(return_value=response),
+        count_tokens=AsyncMock(return_value=types.CountTokensResponse(total_tokens=1000)))
+    provider=object.__new__(Vertex)
+    provider.model=model;provider._capacity=None
+    provider.client=SimpleNamespace(aio=SimpleNamespace(models=models))
+    return provider,models
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,maximum",[("gemini-2.5-flash",24576),("verified-fixture",32768)])
+async def test_vertex_uses_verified_maximum_thinking_and_native_temperature(monkeypatch,model,maximum):
+    from comunicamundo_v4.hefesto.v8.provider import VERIFIED_PROFILES
+    monkeypatch.delenv("HEFESTO_V8_MODEL_PROFILE",raising=False)
+    if model=="verified-fixture":
+        profile=dict(VERIFIED_PROFILES["gemini-2.5-flash"],thinking_budget_max=maximum,
+            source="fixture",thinking_source="fixture",retirement_date=None)
+        monkeypatch.setenv("HEFESTO_V8_MODEL_PROFILE",json.dumps(profile))
+    provider,models=vertex_fixture(model)
+    cap=await provider.capacity()
+    assert cap.thinking_budget_max==maximum
+    await provider.generate("corpus","editorial contract",cap.output_tokens)
+    config=models.generate_content.await_args.kwargs["config"]
+    assert config.thinking_config.thinking_budget==cap.thinking_budget_max>0
+    assert config.temperature==1.0
+    assert config.max_output_tokens==cap.output_tokens
+    assert config.top_p is None and config.top_k is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget,source",[(None,"fixture"),(0,"fixture"),(-1,"fixture"),
+    (True,"fixture"),("24576","fixture"),(24576,None)])
+async def test_vertex_missing_or_invalid_cognitive_profile_pauses_before_generation(monkeypatch,budget,source):
+    from comunicamundo_v4.hefesto.v8.provider import VERIFIED_PROFILES
+    profile=dict(VERIFIED_PROFILES["gemini-2.5-flash"],thinking_budget_max=budget,
+        thinking_source=source,retirement_date=None)
+    if budget is None:profile.pop("thinking_budget_max")
+    monkeypatch.setenv("HEFESTO_V8_MODEL_PROFILE",json.dumps(profile))
+    provider,models=vertex_fixture("unverified-fixture")
+    with pytest.raises(Recoverable,match="verified.*thinking_budget_max"):
+        await provider.generate("corpus","editorial contract",65536)
+    models.generate_content.assert_not_awaited()
+    assert provider._capacity is None
+
+
+@pytest.mark.asyncio
+async def test_vertex_actual_thought_tokens_are_journaled_and_priced(monkeypatch):
+    from decimal import Decimal
+    monkeypatch.delenv("HEFESTO_V8_MODEL_PROFILE",raising=False)
+    provider,models=vertex_fixture();repo=Memory();st=state()
+    await repo.create(st)
+    result=await Calls(repo,provider,st).structured("proposal","corpus",Proposal)
+    assert result.document=="A coherent editorial interpretation."
+    usage=(await repo.get(st.execution_id)).telemetry[0]
+    assert usage["model"]=="gemini-2.5-flash" and usage["provider"]=="vertex"
+    assert usage["input_tokens"]==1000 and usage["cached_tokens"]==400
+    assert usage["output_tokens"]==80 and usage["reasoning_tokens"]==2048
+    assert Decimal(usage["cost_usd"])==Decimal("0.005512")
+    journal=next(iter(repo.ops.values()))
+    assert journal["attempts"][0]["raw"]["usage_metadata"]["thoughts_token_count"]==2048
+    calls_before=models.generate_content.await_count
+    await Calls(repo,provider,st).structured("proposal","corpus",Proposal)
+    assert models.generate_content.await_count==calls_before
+    assert len(st.telemetry)==1

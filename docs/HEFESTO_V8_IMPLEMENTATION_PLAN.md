@@ -3,8 +3,8 @@
 ## CURRENT STATUS
 Last completed task: entrega técnica integrada e deploy de produção do Hefesto V8, com smoke público SUCCESS.
 Last commit: e372045fad460f304b3a5e96a7945db40a52b27e — último commit funcional efetivamente implantado. Checkpoint documental anterior: a62d07b19851f3ee80faff387168bcc0710e7b32; este recibo é persistido no HEAD documental da branch.
-Current task: implementação e deploy concluídos; aguardando teste editorial real executado pelo usuário.
-Next task: usuário abre https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8, entra com o login existente e testa PE/remoque/aprovação/produção. Em futura sessão, ler este plano no GitHub, verificar HEAD de main/hefesto-v8 e o resultado real do teste antes de alterar código. Não gerar conteúdo pago autonomamente.
+Current task: correção mínima autorizada do provider antes do primeiro teste editorial: thinking máximo por perfil e temperatura 1.0; testes e deploy corretivo em andamento.
+Next task: concluir suíte/smokes técnicos, commit da correção isolada, deploy e registrar SHA/imagem efetivamente implantados; depois usuário realiza primeiro teste editorial. Não executar geração paga.
 Known blocker: nenhum impedimento técnico observado na entrega. Qualidade editorial e disponibilidade da geração real serão verificadas pelo usuário; nenhuma geração paga foi executada pelo assistente.
 Paid validation authorized: no
 Deploy status: DONE — API hefesto-v4-api-00086-rnx e job hefesto-v4-rebuild publicados com a mesma imagem por digest; migration, check PostgreSQL, startup sem modelo e smoke HTTP público passaram.
@@ -308,3 +308,11 @@ Correção necessária para entrega: diagnóstico run 37637438138 confirma /v8 e
 - Próximo passo exato: usuário testa o produto pelo link acima. Fases 21–22 permanecem validações editoriais futuras sob responsabilidade/solicitação do usuário conforme adendo; não há tarefa de implementação interrompida nesta entrega.
 
 Fim de sessão: todos os arquivos funcionais commitados; registro final documental é commitado nas duas branches, sem rebuild por alteração apenas em docs. Estado de produção corresponde ao commit funcional e digest registrados acima. Não confundir HEAD documental com revisão da imagem. Configuração/modelo e prazo de disponibilidade estão em HEFESTO_V8_PROVIDER.md; verificar novamente em sessões futuras.
+
+## Correção isolada do provider — maximum thinking (2026-10-07)
+
+[~] Provider V8: usar thinking_budget_max=24576 do perfil verificado Gemini 2.5 Flash e temperature=1.0. Consulta oficial refeita hoje: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking e https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/2-5-flash. Fonte/prices: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing.
+
+Escopo: somente provider.py, testes técnicos e documentação deste provider/registro. Nenhuma alteração em ingestão/corpus/PE/remoque/Hermes/busca/banco/schemas editoriais/redação/verificação/proveniência/UI/zero-fontes/caching ou workflows. Limite cognitivo e fonte pertencem ao perfil por modelo; perfil ausente/inválido pausa antes de chamada, sem fallback. max_output_tokens existente (65536) mantido; telemetria/custo de reasoning já existente mantida e protegida por teste do journal/reuso. topP/topK intactos. Sem chamadas de geração pagas.
+
+Testes locais desta correção: 177 passaram, 1 integração PostgreSQL externa pulada; 33 testes V8 passaram, incluindo 9 novos casos parametrizados. pip check, compileall, Node syntax, git diff --check passaram. Scan do caminho src/comunicamundo_v4/hefesto/v8 não encontrou thinking_budget=0 ou temperature=0.3. Smoke navegador/PostgreSQL/imagem serão executados pelo workflow técnico existente na branch antes da promoção para deploy.

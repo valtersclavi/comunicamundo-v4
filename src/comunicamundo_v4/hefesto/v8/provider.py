@@ -19,6 +19,7 @@ from .contracts import identity
 
 CAPACITY_URL = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/2-5-flash"
 PRICE_URL = "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing"
+THINKING_URL = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking"
 # Vendor documentation retrieved 2026-10-07, not recalled capacities. Deployment
 # may supply a different verified model profile; never inherit this for an alias.
 VERIFIED_PROFILES = {
@@ -27,6 +28,7 @@ VERIFIED_PROFILES = {
         "source": CAPACITY_URL, "verified_at": "2026-10-07",
         "input_price": "0.30", "cached_price": "0.03", "output_price": "2.50",
         "price_source": PRICE_URL, "retirement_date": "2026-10-20",
+        "thinking_budget_max": 24576, "thinking_source": THINKING_URL,
     }
 }
 
@@ -55,6 +57,8 @@ class Capacity:
     output_price: str
     price_source: str
     retirement_date: str | None = None
+    thinking_budget_max: int | None = None
+    thinking_source: str | None = None
 
     def __post_init__(self):
         if min(self.input_tokens, self.output_tokens) <= 0:
@@ -83,6 +87,10 @@ class Vertex:
         profile = profiles.get(self.model)
         if not profile:
             raise Recoverable("model requires a verified limits/pricing profile")
+        thinking_max = profile.get("thinking_budget_max")
+        if (type(thinking_max) is not int or thinking_max <= 0
+                or not profile.get("thinking_source")):
+            raise Recoverable("model requires a verified positive thinking_budget_max and thinking_source; no cognitive fallback is permitted")
         # Publisher models on Vertex do not consistently expose token limits via
         # models.get. Use explicit vendor-backed profile rather than a remembered
         # constant or a silent fallback to another model.
@@ -105,13 +113,14 @@ class Vertex:
         return int(result.total_tokens)
 
     async def generate(self, prompt: str, system: str, output_tokens: int) -> dict:
+        cap = await self.capacity()
         started = perf_counter()
         r = await self.client.aio.models.generate_content(
             model=self.model, contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system, response_mime_type="application/json",
-                max_output_tokens=output_tokens, temperature=0.3,
-                thinking_config=types.ThinkingConfig(thinking_budget=0)))
+                max_output_tokens=output_tokens, temperature=1.0,
+                thinking_config=types.ThinkingConfig(thinking_budget=cap.thinking_budget_max)))
         # Accessing response.text does not parse JSON; also keep the complete SDK
         # response for diagnostics including candidate safety/finish metadata.
         raw = r.model_dump(mode="json")
@@ -124,7 +133,6 @@ class Vertex:
         cached = int(getattr(meta, "cached_content_token_count", 0) or 0)
         output = int(getattr(meta, "candidates_token_count", 0) or 0)
         reasoning = int(getattr(meta, "thoughts_token_count", 0) or 0)
-        cap = await self.capacity()
         cost = (Decimal(max(0, prompt_tokens-cached))*Decimal(cap.input_price)
                 + Decimal(cached)*Decimal(cap.cached_price)
                 + Decimal(output+reasoning)*Decimal(cap.output_price))/Decimal(1000000)
