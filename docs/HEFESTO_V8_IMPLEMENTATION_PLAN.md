@@ -1,16 +1,17 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: núcleo V8 integrado; 166 testes locais passaram.
-Last commit: 3432be9812b128d81e126e9448d1a0ef5b50ce50 — retomada de jobs interrompidos na UI.
-Current task: validação técnica e commits da implementação integrada; núcleo e API/UI montados localmente.
-Next task: concluir CI da imagem de produção, corrigir eventual falha e registrar entrega técnica; teste editorial final pertence ao usuário.
-Known blocker: Chromium indisponível localmente (download retornou arquivo inválido); smoke visual e imagem Docker executados no CI. Deploy e validação paga não executados.
+Last completed task: implementação integrada V8 (Fases 0–20), testes técnicos, PostgreSQL real, migrations e smoke navegador do commit final passaram no CI.
+Last commit: 39dc77942654cb0552120585bdd9d5f59284846a — identidade da submissão preservada após resposta HTTP interrompida.
+Current task: acompanhar build e smoke da imagem de produção no CI, run 37630267314.
+Next task: ler resultado/logs desse CI; corrigir somente falhas reais se houver; registrar entrega técnica concluída quando imagem/smoke passarem. Teste editorial final pertence ao usuário.
+Known blocker: nenhum defeito técnico confirmado aberto; build da imagem ainda em execução. Deploy/configuração de produção não executados.
 Paid validation authorized: no
-Deploy status: não executado para V8.
-Main HEAD observado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
-Testes desta sessão: 144 testes legados iniciais; 22 testes V8 locais; migration SQL 1008 e histórico aplicados em PostgreSQL WASM; wheel construído. Validação final integrada em andamento.
-Alterações funcionais desta sessão: domínio V8, persistência, corpus/contexto, editor/Hermes/recuperação, runtime/API/UI; parsers preservados.
+Deploy status: V8 não deployado; nenhum merge em main e nenhuma migration executada em produção.
+Main HEAD observado e reconfirmado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
+CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37630267314.
+Testes locais: 168 passaram; integração PostgreSQL externo foi pulada localmente, mas executou no serviço isolado PostgreSQL 17 do CI. SQL histórico + 1008 validado também em PostgreSQL WASM. Wheel, compile, Node syntax e dependências passaram.
+Alterações: V8 completo em domínio/persistência/corpus/editor/Hermes/runtime/API/UI; parsers preservados. Checkout local raso foi reconstruído e validado contra SHA/tree/blobs exatos do GitHub; GitHub permanece memória canônica e fonte do histórico completo.
 
 ## Autoridade e continuidade
 Este documento é o guia canônico e registro vivo da implementação na branch hefesto-v8 do repositório valtersclavi/comunicamundo-v4. Cada sessão começa lendo este documento no GitHub e verificando HEAD, branch, alterações e estado real. Não confiar na memória do chat. Atualizar tarefas, SHA, andamento, próxima tarefa exata, decisões, impedimentos e desvios justificados. Cada tarefa atômica concluída recebe commit coerente e atualização deste registro. Não desenvolver diretamente em main.
