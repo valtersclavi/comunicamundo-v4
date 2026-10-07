@@ -3,7 +3,7 @@
 ## CURRENT STATUS
 Last completed task: entrega técnica integrada e deploy de produção do Hefesto V8, com smoke público SUCCESS.
 Last commit: e372045fad460f304b3a5e96a7945db40a52b27e — último commit funcional efetivamente implantado. Checkpoint documental anterior: a62d07b19851f3ee80faff387168bcc0710e7b32; este recibo é persistido no HEAD documental da branch.
-Current task: correção mínima autorizada do provider antes do primeiro teste editorial: thinking máximo por perfil e temperatura 1.0; testes e deploy corretivo em andamento.
+Current task: correção isolada commitada em 96adcf86545ae103dd528678aceba7512e3465ae; CI técnico 37650271569 em execução na branch hefesto-v8. Produção anterior permanece até o CI concluir.
 Next task: concluir suíte/smokes técnicos, commit da correção isolada, deploy e registrar SHA/imagem efetivamente implantados; depois usuário realiza primeiro teste editorial. Não executar geração paga.
 Known blocker: nenhum impedimento técnico observado na entrega. Qualidade editorial e disponibilidade da geração real serão verificadas pelo usuário; nenhuma geração paga foi executada pelo assistente.
 Paid validation authorized: no
@@ -316,3 +316,5 @@ Fim de sessão: todos os arquivos funcionais commitados; registro final document
 Escopo: somente provider.py, testes técnicos e documentação deste provider/registro. Nenhuma alteração em ingestão/corpus/PE/remoque/Hermes/busca/banco/schemas editoriais/redação/verificação/proveniência/UI/zero-fontes/caching ou workflows. Limite cognitivo e fonte pertencem ao perfil por modelo; perfil ausente/inválido pausa antes de chamada, sem fallback. max_output_tokens existente (65536) mantido; telemetria/custo de reasoning já existente mantida e protegida por teste do journal/reuso. topP/topK intactos. Sem chamadas de geração pagas.
 
 Testes locais desta correção: 177 passaram, 1 integração PostgreSQL externa pulada; 33 testes V8 passaram, incluindo 9 novos casos parametrizados. pip check, compileall, Node syntax, git diff --check passaram. Scan do caminho src/comunicamundo_v4/hefesto/v8 não encontrou thinking_budget=0 ou temperature=0.3. Smoke navegador/PostgreSQL/imagem serão executados pelo workflow técnico existente na branch antes da promoção para deploy.
+
+[x] Código da correção mínima do provider — commit 96adcf86545ae103dd528678aceba7512e3465ae. [~] CI técnico 37650271569; após SUCCESS promover fast-forward para main, executar deploy/smokes não editoriais e registrar SHA/imagem. Não há alteração de workflows ou de outros componentes funcionais.
