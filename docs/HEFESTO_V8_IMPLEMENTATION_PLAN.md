@@ -273,3 +273,7 @@ Preparação adiciona smoke HTTP publicado (/healthz, /v8, asset JS, projetos se
 Commit de release: 8e75454af470ddea35831d5ca6957ce15a8eadec. Promoção main: fast-forward de 80748b2, expected SHA conferido, sem overwrite ou force. Branch de desenvolvimento permanece hefesto-v8.
 Run produção: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37634099690. Job 112835638798. CI técnico concomitante: run 37634067634.
 Histórico real: deploy anterior de main80748b2 (37157270246) falhou na execução de migration hefesto-v4-rebuild-h4pgv. A última versão deployada com sucesso antes dele era fd3f3fa (37144909653). O diff dessa versão para80748b2 não modifica nenhuma migration; a causa da falha anterior não está identificada nos logs de Actions. Não presumir conflito de checksum ou modificar migrations antigas por hipótese. A migration atual será avaliada pelo resultado real.
+
+## Correção de infraestrutura do CI durante deploy
+Run técnico 37634067634: testes 169/PostgreSQL/migrations/navegador passaram, mas Docker falhou com OSError errno28 (No space left on device), após coexistirem PostgreSQL e dependências Playwright no runner. Run de produção 37634099690 construiu e passou smoke da mesma imagem em runner sem esses recursos.
+Correção genérica: separar build/smoke da imagem em job dependente com runner limpo; primeiro job mantém PostgreSQL/navegador/testes. Dockerfile/parsers/software V8 não mudam. Validar novo CI antes de fechar entrega. Não interpretar falha de infraestrutura como falha editorial.

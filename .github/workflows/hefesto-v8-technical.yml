@@ -51,6 +51,12 @@ jobs:
           npm install --no-save playwright
           npx playwright install --with-deps chromium
           node scripts/smoke_v8_ui.cjs
+  production-image-smoke:
+    needs: contracts-build-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
       - name: Build existing production image
         run: docker build --tag hefesto-v8:technical .
       - name: Image startup and V8 route smoke (no model calls)
