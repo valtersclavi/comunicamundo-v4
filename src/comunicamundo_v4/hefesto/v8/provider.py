@@ -1,7 +1,7 @@
 """Provider transport, verified capacities and durable generation journal.
 
-The corpus is a stable prefix for Vertex implicit caching (no cache storage
-charges or cache object as project truth). No SDK response_schema: the SDK must
+The persistent corpus is reused through explicit, expendable context caches.
+No SDK response_schema: the SDK must
 not parse a generated response before our durable raw-response journal.
 """
 from dataclasses import dataclass
@@ -20,6 +20,7 @@ from .contracts import identity
 CAPACITY_URL = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/2-5-flash"
 PRICE_URL = "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing"
 THINKING_URL = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking"
+CACHE_URL = "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-overview"
 # Vendor documentation retrieved 2026-10-07, not recalled capacities. Deployment
 # may supply a different verified model profile; never inherit this for an alias.
 VERIFIED_PROFILES = {
@@ -29,6 +30,9 @@ VERIFIED_PROFILES = {
         "input_price": "0.30", "cached_price": "0.03", "output_price": "2.50",
         "price_source": PRICE_URL, "retirement_date": "2026-10-20",
         "thinking_budget_max": 24576, "thinking_source": THINKING_URL,
+        "cache_min_tokens": 2048, "cache_inline_max_bytes": 10000000,
+        "cache_ttl_seconds": 3600, "cache_storage_price": "1.00",
+        "cache_source": CACHE_URL,
     }
 }
 
@@ -59,6 +63,11 @@ class Capacity:
     retirement_date: str | None = None
     thinking_budget_max: int | None = None
     thinking_source: str | None = None
+    cache_min_tokens: int | None = None
+    cache_inline_max_bytes: int | None = None
+    cache_ttl_seconds: int | None = None
+    cache_storage_price: str | None = None
+    cache_source: str | None = None
 
     def __post_init__(self):
         if min(self.input_tokens, self.output_tokens) <= 0:
@@ -73,6 +82,7 @@ class Vertex:
 
     def __init__(self, project: str, location: str, model: str):
         self.model = model
+        self.project, self.location = project, location
         self.client = genai.Client(vertexai=True, project=project, location=location,
                                    http_options=types.HttpOptions(timeout=240000,
                                       retry_options=types.HttpRetryOptions(attempts=1)))
@@ -112,13 +122,69 @@ class Vertex:
         if result.total_tokens is None:raise Recoverable("provider returned no token count")
         return int(result.total_tokens)
 
-    async def generate(self, prompt: str, system: str, output_tokens: int) -> dict:
+    async def cache_create(self, text, display_name, cap):
+        contents = text
+        if len(text.encode("utf-8")) > cap.cache_inline_max_bytes:
+            # The documented >10 MB path is an immutable GCS object, using the
+            # existing project bucket. This is transport, never re-ingestion.
+            from google.cloud import storage
+            bucket = os.environ.get("HEFESTO_GCS_BUCKET") or os.environ.get("HEFESTO_BUCKET")
+            if not bucket:
+                raise Recoverable("explicit cache over inline limit requires HEFESTO_GCS_BUCKET")
+            path = "hefesto-v8/context/" + display_name + ".txt"
+            def upload():
+                blob = storage.Client(project=self.project).bucket(bucket).blob(path)
+                try:
+                    blob.upload_from_string(text, content_type="text/plain", if_generation_match=0)
+                except Exception as error:
+                    if getattr(error, "code", None) != 412: raise
+                    if blob.download_as_bytes() != text.encode("utf-8"): raise Recoverable("immutable context object mismatch")
+            await asyncio.to_thread(upload)
+            contents = [types.Content(role="user", parts=[types.Part.from_uri(
+                file_uri=f"gs://{bucket}/{path}", mime_type="text/plain")])]
+        r = await self.client.aio.caches.create(model=self.model,
+            config=types.CreateCachedContentConfig(contents=contents, display_name=display_name,
+                ttl=f"{cap.cache_ttl_seconds}s"))
+        return self.cache_metadata(r)
+
+    @staticmethod
+    def cache_metadata(r):
+        return dict(resource=r.name, model=r.model, created_at=r.create_time.isoformat(),
+                    expire_at=r.expire_time.isoformat(),
+                    token_count=int(r.usage_metadata.total_token_count))
+
+    async def cache_get(self, resource):
+        return self.cache_metadata(await self.client.aio.caches.get(name=resource))
+
+    async def cache_renew(self, resource, ttl):
+        return self.cache_metadata(await self.client.aio.caches.update(name=resource,
+            config=types.UpdateCachedContentConfig(ttl=f"{ttl}s")))
+
+    async def cache_delete(self, resource):
+        await self.client.aio.caches.delete(name=resource)
+
+    async def cache_find(self, display_name):
+        # Recover a create response lost to timeout/restart without buying a
+        # second cache. List every page; no arbitrary search-attempt ceiling.
+        pager = await self.client.aio.caches.list()
+        async for r in pager:
+            if r.display_name == display_name and r.expire_time > datetime.now(UTC):
+                return self.cache_metadata(r)
+        return None
+
+    async def generate(self, prompt: str, system: str, output_tokens: int, *, cached_context=None) -> dict:
         cap = await self.capacity()
         started = perf_counter()
+        # Cached requests cannot set system_instruction. The unchanged operation
+        # contract/schema travels dynamically; only documentary text is cached.
+        if cached_context:
+            prompt = "OPERATION INSTRUCTIONS:\n" + system + "\nDYNAMIC INPUT:\n" + prompt
         r = await self.client.aio.models.generate_content(
             model=self.model, contents=prompt,
             config=types.GenerateContentConfig(
-                system_instruction=system, response_mime_type="application/json",
+                system_instruction=None if cached_context else system,
+                cached_content=cached_context["resource"] if cached_context else None,
+                response_mime_type="application/json",
                 max_output_tokens=output_tokens, temperature=1.0,
                 thinking_config=types.ThinkingConfig(thinking_budget=cap.thinking_budget_max)))
         # Accessing response.text does not parse JSON; also keep the complete SDK
@@ -139,6 +205,7 @@ class Vertex:
         return dict(text=text, finish=finish, raw=raw,
                     usage=dict(provider=self.provider, model=self.model,
                         input_tokens=prompt_tokens, cached_tokens=cached,
+                        uncached_input_tokens=max(0,prompt_tokens-cached),
                         output_tokens=output, reasoning_tokens=reasoning,
                         latency_ms=int((perf_counter()-started)*1000),
                         cost_usd=str(cost), price_source=cap.price_source))
@@ -168,6 +235,8 @@ def parse(text: str, schema):
 class Calls:
     def __init__(self, repository, provider, state):
         self.repository, self.provider, self.state = repository, provider, state
+        from .context import Contexts
+        self.contexts = Contexts(repository, provider, state)
 
     async def measured(self,prompt,system):
         measure=getattr(self.provider,"count_envelope",None)
@@ -190,7 +259,7 @@ class Calls:
                 if self.state.work.body.count(issue.target)!=1:
                     raise ValueError("verification target must be an exact unique body passage")
 
-    async def structured(self, stage: str, prompt: str, schema, source_ids=(), system=""):
+    async def structured(self, stage: str, prompt: str, schema, source_ids=(), system="", *, corpus_block=None):
         cap = await self.provider.capacity()
         schema_text = json.dumps(schema.model_json_schema(), ensure_ascii=False)
         system = (system + "\nReturn exactly one complete JSON object according to this schema. "
@@ -256,14 +325,23 @@ class Calls:
                 current_system="Repair only this response's syntax/schema/references. Preserve substantive content. Return complete JSON. Schema:\n"+schema_text
                 addresses={str(s.source_id):[l.location_id for l in s.locations] for s in self.state.sources}
                 current=assembled+"\nVALIDATION ERROR:\n"+journal.get("parse_error","")+"\nVALID ADDRESSES:\n"+json.dumps(addresses)
-            count=await self.measured(current,current_system)
+            context, dynamic, cache_usage = await self.contexts.prepare(
+                current, stage, corpus_block if mode != "repair" else None, use_prefix=mode != "repair")
+            if context:
+                count=context["token_count"]+await self.provider.count(
+                    "OPERATION INSTRUCTIONS:\n"+current_system+"\nDYNAMIC INPUT:\n"+dynamic)
+            else:
+                count=await self.measured(current,current_system)
             if count+cap.output_tokens>cap.input_tokens:
                 raise CapacityError("operation including full output exceeds model context; divide the project")
             journal["in_flight"]=True
             await self.repository.save_operation(self.state.execution_id,key,journal)
             started=perf_counter()
             try:
-                response=await self.provider.generate(current,current_system,cap.output_tokens)
+                if context:
+                    response=await self.provider.generate(dynamic,current_system,cap.output_tokens,cached_context=context)
+                else:
+                    response=await self.provider.generate(current,current_system,cap.output_tokens)
             except Exception as error:
                 journal["in_flight"]=False
                 journal.setdefault("errors",[]).append(dict(type=type(error).__name__,message=str(error),latency_ms=int((perf_counter()-started)*1000)))
@@ -271,6 +349,7 @@ class Calls:
                 self.state.telemetry.append(dict(stage=stage,operation=key,physical_call="error-"+str(len(journal["errors"])),status="failed",error=str(error),cost_unknown=True,model=cap.model,provider=getattr(self.provider,"provider","unknown"),source_ids=journal["source_ids"],prompt_version="v8-prompt-1",latency_ms=int((perf_counter()-started)*1000)))
                 await self.repository.save(self.state)
                 raise Recoverable(str(error)) from error
+            response.setdefault("usage",{}).update(cache_usage)
             response.update(mode=mode,input_count=count,stage=stage,source_ids=journal["source_ids"],prompt_version="v8-prompt-1")
             journal["attempts"].append(response)
             journal.update(in_flight=False,pending=True,

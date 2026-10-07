@@ -24,13 +24,58 @@ count prompts, schema, instructions and history. No arbitrary corpus margin.
 Structured responses are requested as JSON without an SDK parsing schema so raw
 candidate output and metadata can be durably journaled before parsing.
 
-Context provider uses inline text with a stable, addressed corpus prefix and
-implicit Vertex caching. No explicit-cache storage charges or cache lifetime
-assumptions; cache misses simply send the same persistent corpus. Cached token
-usage is captured from provider metadata. The SDK's current cached_content API
-was verified but explicit caches are not needed for this initial strategy:
+Context provider uses explicit Vertex caches for eligible stable addressed corpus
+blocks. Only corpus text is cached; briefing, PE, remoque, operation contract and
+schema remain dynamic. `aio.caches.create/get/update/list/delete` and
+`GenerateContentConfig(cached_content=resource)` are the Google Gen AI SDK APIs.
+The cache has no system instruction. Google forbids setting system_instruction
+on cached generation requests, so the unchanged operation instructions/schema
+are placed in the dynamic contents; no system/tool configuration is duplicated.
+Official documentation reverified 2026-10-07:
 https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-overview
-https://googleapis.github.io/python-genai/index.html
+https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-create
+https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-use
+https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/context-cache/context-cache-update
+https://googleapis.github.io/python-genai/
+
+Verified Flash profile: minimum 2,048 tokens; inline text/blob ceiling 10 MB
+(conservative decimal MB interpretation), with larger content uploaded unchanged
+to a content-identified immutable text/plain object in the existing project GCS
+bucket. Conditional creation prevents overwrite; an existing object must match
+byte-for-byte. Cache TTL is 3,600 seconds, renewed on reuse; inactivity simply
+expires it. Global endpoint is supported. Cache creation input is USD 0.30 per
+million tokens; reads USD 0.03 (90% discount); storage USD 1.00 per million
+token-hours, according to the pricing source above. Every model must provide its
+own verified minimum, inline limit, TTL, storage price and cache source; no
+invented profile fallback.
+
+Resource identity includes execution/project ownership, provider, exact model,
+provider project, location, corpus manifest, block content identity/index and
+addressed-corpus-v1 format. PE/remoque/stage/instructions are absent from that
+identity. Metadata/events live in the existing v8_operations journal; no schema
+or migration change. Completed editorial operation identity excludes the cache
+resource and can resume even if the resource disappeared. Raw output journal
+still precedes parsing. Failed eligible cache creation/reuse pauses recoverably,
+without inline fallback. A lost create response is reconciled by exact display
+identity via caches.list before creation is repeated. Expired/deleted caches are
+rebuilt solely from persistent corpus blocks, never extraction. Superseded
+manifest/model/block resources are deleted after replacement exists; idle caches
+expire without background renewal.
+
+One-block PE/support/revised PE/write/verify/localized correction share one cache.
+Two-block readings use exactly their respective two caches. The existing final
+combination of grounded readings and necessary original support stays inline;
+there is no third cache/context and no change to editorial compression. Response
+syntax repair does not consult the corpus and therefore does not read its cache.
+Preflight uses cache metadata token count + counted dynamic contents + full
+output reservation, without counting cache tokens twice. Actual provider read
+counts, uncached input, output, reasoning and generation costs remain recorded.
+Cache creation/reuse/recreation/expiration/deletion and latencies are durable
+receipts. API usage adds creations/reuses, reasoning, uncached input, creation
+input and storage estimates: accrued receipts through activity, and total lease
+estimate through the last expiration (remaining liability included). Catalog-rate
+estimates are not a Cloud Billing invoice; generation/creation costs and estimated
+storage are shown separately. No UI/product/editorial schema changes.
 
 The output feasibility estimate uses 150 narrated words/minute and 4 tokens per
 word including multilingual/tokenization variation and support JSON. This is an

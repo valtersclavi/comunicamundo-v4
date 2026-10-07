@@ -223,7 +223,8 @@ class Editor:
                 patch=await calls.structured("localized-correction",relevant+common+
                     "\nEXISTING TEXT:\n"+state.work.body+"\nSPECIFIC ISSUE:\n"+issue.model_dump_json()+
                     "\nReturn ONLY a replacement for the exact target passage, plus support for replacement claims. Preserve everything outside the target. No whole-work rewrite.",
-                    Patch,[r.source_id for r in issue.references],EDITOR)
+                    Patch,[r.source_id for r in issue.references],EDITOR,
+                    corpus_block=0 if len(state.corpus.blocks)==1 else None)
                 for support in patch.support:
                     if support.claim not in patch.replacement:
                         raise Recoverable("patch support absent from replacement")

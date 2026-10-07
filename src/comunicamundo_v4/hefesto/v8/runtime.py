@@ -39,11 +39,30 @@ def public(state):
     if data["corpus"]: data["corpus"].pop("blocks",None)
     data["research"]={k:{field:value for field,value in v.items() if field!="acquired"}
                       for k,v in state.research.items()}
-    calls=state.telemetry
+    cache_events=[v for v in state.telemetry if v.get("kind")=="cache"]
+    calls=[v for v in state.telemetry if v.get("kind")!="cache"]
     data["usage"]=dict(call_count=len(calls),input_tokens=sum(v.get("input_tokens",0) for v in calls),
         output_tokens=sum(v.get("output_tokens",0) for v in calls),cached_tokens=sum(v.get("cached_tokens",0) for v in calls),
         latency_ms=sum(v.get("latency_ms",0) for v in calls), cost_unknown_calls=sum(bool(v.get("cost_unknown")) for v in calls),
-        cost_usd=str(sum(__import__('decimal').Decimal(v.get("cost_usd","0")) for v in calls)))
+        reasoning_tokens=sum(v.get("reasoning_tokens",0) for v in calls),
+        uncached_input_tokens=sum(v.get("uncached_input_tokens",max(0,v.get("input_tokens",0)-v.get("cached_tokens",0))) for v in calls),
+        cache_creations=sum(v.get("cache_status") in {"created","recreated"} for v in cache_events),
+        cache_reuses=sum(v.get("cache_status")=="reused" for v in cache_events),
+        cache_recreations=sum(v.get("cache_status")=="recreated" for v in cache_events),
+        cache_creation_input_tokens=sum(v.get("input_tokens",0) for v in cache_events),
+        cache_storage_cost_estimate_usd=str(sum(__import__('decimal').Decimal(v.get("cache_storage_cost_estimate_usd","0")) for v in cache_events)),
+        cost_usd=str(sum(__import__('decimal').Decimal(v.get("cost_usd","0")) for v in state.telemetry)))
+    # Storage receipts are accrued through activity; the lease estimate also
+    # exposes remaining TTL liability, including caches left idle to expire.
+    from datetime import datetime
+    from decimal import Decimal
+    resources={v["resource"]:v for v in cache_events if v.get("resource")}
+    storage_lease=sum((Decimal(v["token_count"])*Decimal(v["cache_storage_price"])*
+        Decimal(str(max(0,(datetime.fromisoformat(v["expire_at"])-datetime.fromisoformat(v["created_at"])).total_seconds())))/Decimal(3600*1000000)
+        for v in resources.values() if v.get("created_at") and v.get("expire_at")),Decimal(0))
+    data["usage"]["cache_storage_lease_estimate_usd"]=str(storage_lease)
+    data["usage"]["total_with_cache_storage_estimate_usd"]=str(Decimal(data["usage"]["cost_usd"])+storage_lease)
+    data["usage"]["cache_resources"]=list(resources.values())
     if state.work:
         data["word_count"]=len(state.work.body.split())
         data["estimated_duration_minutes"]=data["word_count"]/150

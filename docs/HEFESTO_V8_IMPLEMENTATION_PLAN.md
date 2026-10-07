@@ -1,13 +1,13 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: correção mínima do provider: thinking máximo por perfil, temperatura nativa 1.0, testes e deploy corretivo SUCCESS.
-Last commit: 96adcf86545ae103dd528678aceba7512e3465ae — commit funcional efetivamente implantado desta correção. Checkpoint documental anterior: 4d45ebc4d2bcb5174a0c2ac0c5488d8eee04d76d; registro final é o HEAD documental.
-Current task: correção concluída e implantada; aguardando primeiro teste editorial real pelo usuário.
-Next task: usuário executa primeiro teste editorial pelo link /v8 abaixo. O assistente não inicia geração paga. Futuras sessões leem este plano no GitHub e verificam HEAD/produção antes de modificar código.
-Known blocker: nenhum impedimento técnico observado na entrega. Qualidade editorial e disponibilidade da geração real serão verificadas pelo usuário; nenhuma geração paga foi executada pelo assistente.
+Last completed task: correção anterior de thinking máximo implantada em 96adcf86545ae103dd528678aceba7512e3465ae.
+Last commit: f34e5e939d1ab953cadd0cc9c848cd6b1c8e1258 — HEAD main/hefesto-v8 verificado no GitHub antes desta correção.
+Current task: [~] explicit context caching no provider/context layer; testes offline e preparação de commit/CI.
+Next task: concluir suíte técnica e CI com PostgreSQL/build/navegador/imagem, promover o commit funcional para deploy e registrar SHA/digest/revisão após smokes SUCCESS.
+Known blocker: nenhum impedimento encontrado; geração/cache reais não foram exercitados por serem pagos. Falhas do provider pausam sem fallback integral.
 Paid validation authorized: no
-Deploy status: DONE — correção publicada na API hefesto-v4-api-00087-p5p e job hefesto-v4-rebuild com a mesma imagem por digest; migration/check/startup/smoke público SUCCESS.
+Deploy status: correção de cache ainda não implantada; produção anterior preservada até CI e deploy técnico.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
 Deployment commit: 96adcf86545ae103dd528678aceba7512e3465ae
 Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:c60e9c2783ee1bffe988698811c44699166b957749338aefa74908636973e7c2
@@ -335,3 +335,19 @@ Testes locais desta correção: 177 passaram, 1 integração PostgreSQL externa 
 - Nenhuma geração editorial paga e nenhum teste de luto infantil. Próxima tarefa exata: usuário realiza o primeiro teste editorial.
 
 Fim desta sessão: correção commitada e implantada; branches main/hefesto-v8 sincronizadas por fast-forward; registro documental posterior não altera a imagem. Não há mudança funcional incompleta nesta correção. Consultar o SHA funcional/digest acima para identificar produção, e HEAD para documentação atual.
+
+### Correção obrigatória de Explicit Context Caching — 2026-10-07
+
+[~] Implementação isolada do reutilizador econômico de corpus. SHA funcional será registrado após criação do commit; sem alteração editorial.
+
+Documentação oficial Google Cloud/Google Gen AI SDK consultada antes do código, URLs em HEFESTO_V8_PROVIDER.md: caches.create/get/update/list/delete; cached_content; mínimo Gemini 2 = 2048 tokens; TTL padrão 60 minutos; global suportado; 10 MB inline, acima via GCS; criação como input normal, leitura com desconto 90% e storage Flash USD 1/M tokens/h. Limites e preços pertencem ao perfil verificado por modelo.
+
+Decisões: cache apenas corpus endereçado imutável; identidade por execução/provider/modelo/projeto/localização/manifesto/bloco/formato; PE/remoque/schema/operação dinâmicos. Cache sem system instruction e request cached sem system_instruction (restrição real); contrato/schema preservados em conteúdo dinâmico. Persistir metadados/eventos no v8_operations existente; nenhuma migration/schema editorial. TTL 3600s renovado ao reutilizar; inatividade expira; reconstrução do corpus persistido. Recurso substituído é descartado depois de existir o novo. Erro elegível pausa recuperavelmente, sem reenviar corpus inline. Listagem reconciliada recupera criação cuja resposta se perdeu. Journal editorial não inclui resource name na identidade.
+
+Uma janela usa um cache para PE/suporte/remoque/redação/verificação/correção localizada; duas janelas usam seus dois caches nas leituras. A síntese existente de leituras + suporte necessário permanece inline, sem terceira janela/cache. Reparo sintático usa apenas resposta problemática. Preflight soma cache + input dinâmico + output uma vez. Telemetria separa input lógico/cacheado/novo/output/reasoning, criação/reuso/recriação/expiração/descarte, custo de geração/criação e estimativa de storage/lease. Thinking 24576 e temperatura 1.0 preservados.
+
+Escopo funcional: context.py novo, provider.py transport/journal, runtime.py apenas projeção de telemetria e engine.py apenas indicação neutra de bloco para transporte da correção localizada. Ingestão/corpus builder/Hermes/PE/remoque/redação/verificador/proveniência/UI/schema/migrations/workflows intactos em sua lógica. Testes novos inteiramente mocks; integração PostgreSQL persiste cache e retoma em conexão independente. Nenhuma geração editorial ou cache pago criado; nenhum teste com luto infantil.
+
+Testes locais da correção de cache: 195 passaram, 2 integrações PostgreSQL externas puladas (CI usa PostgreSQL 17 real). pip check, compileall, sintaxe Node e git diff --check passaram. Build wheel em validação; CI completo será obrigatório antes da promoção. O teste de correção localizada inicialmente tinha um mock sem o campo obrigatório kind; o mock foi corrigido, sem mudança no contrato/software editorial.
+
+[x] Build wheel local SUCCESS; SDK/python imports/sintaxe/dependências validados. Testes do CI permanecem pendentes.
