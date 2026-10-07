@@ -2,12 +2,12 @@
 
 ## CURRENT STATUS
 Last completed task: correção anterior de thinking máximo implantada em 96adcf86545ae103dd528678aceba7512e3465ae.
-Last commit: f34e5e939d1ab953cadd0cc9c848cd6b1c8e1258 — HEAD main/hefesto-v8 verificado no GitHub antes desta correção.
-Current task: [~] explicit context caching no provider/context layer; testes offline e preparação de commit/CI.
-Next task: concluir suíte técnica e CI com PostgreSQL/build/navegador/imagem, promover o commit funcional para deploy e registrar SHA/digest/revisão após smokes SUCCESS.
+Last commit: 94aed16210ded9d327bb0695a73d50aa0c4633c5 — correção funcional de cache explícito; base main verificada f34e5e939d1ab953cadd0cc9c848cd6b1c8e1258.
+Current task: [~] deploy do commit 94aed16210ded9d327bb0695a73d50aa0c4633c5; CI técnico completo SUCCESS.
+Next task: acompanhar deploy do SHA funcional 94aed162, confirmar migrations/check/startup/smoke HTTP e registrar digest/revisão. Nenhuma geração editorial paga.
 Known blocker: nenhum impedimento encontrado; geração/cache reais não foram exercitados por serem pagos. Falhas do provider pausam sem fallback integral.
 Paid validation authorized: no
-Deploy status: correção de cache ainda não implantada; produção anterior preservada até CI e deploy técnico.
+Deploy status: IN PROGRESS — promoção fast-forward autorizada para main após CI completo SUCCESS; registrar recibo real ao concluir.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
 Deployment commit: 96adcf86545ae103dd528678aceba7512e3465ae
 Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:c60e9c2783ee1bffe988698811c44699166b957749338aefa74908636973e7c2
@@ -351,3 +351,5 @@ Escopo funcional: context.py novo, provider.py transport/journal, runtime.py ape
 Testes locais da correção de cache: 195 passaram, 2 integrações PostgreSQL externas puladas (CI usa PostgreSQL 17 real). pip check, compileall, sintaxe Node e git diff --check passaram. Build wheel em validação; CI completo será obrigatório antes da promoção. O teste de correção localizada inicialmente tinha um mock sem o campo obrigatório kind; o mock foi corrigido, sem mudança no contrato/software editorial.
 
 [x] Build wheel local SUCCESS; SDK/python imports/sintaxe/dependências validados. Testes do CI permanecem pendentes.
+
+[x] Correção de explicit caching commitada — 94aed16210ded9d327bb0695a73d50aa0c4633c5. [x] CI técnico run 37657414964 SUCCESS: 197 testes sem skip, PostgreSQL 17 real (inclusive retomada de cache em conexão independente), migrations, build wheel, dependências, navegador e imagem/startup/rotas sem modelo. Jobs 112915937454 e 112916611494 SUCCESS. [~] Deploy iniciado por fast-forward de main para SHA funcional; acompanhar workflow existente. Nenhum cache real pago criado e nenhuma geração editorial paga.
