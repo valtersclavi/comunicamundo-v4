@@ -1,17 +1,21 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: entrega técnica V8 integrada (Fases 0–20), com CI e todos os smoke tests concluídos.
-Last commit: e372045fad460f304b3a5e96a7945db40a52b27e — alias /health compatível com Cloud Run e smoke atualizado.
-Current task: deploy corretivo e372045 em execução no run 37637702188; CI técnico separado 37637700213. Publicação anterior já aplicou 1008, passou check e startup e serviu /v8/JS/API privada; somente health público reservado causou falha no smoke.
-Next task: acompanhar run 37637702188 até smoke /health + /v8 + assets + private API e recibo SUCCESS; conferir CI 37637700213; registrar digest/revisão/execuções, sincronizar commits e entregar URL.
-Known blocker: /healthz é reservado no Cloud Run; correção aditiva /health em publicação. Sem impedimento de banco, IAM ou segredo confirmado.
+Last completed task: entrega técnica integrada e deploy de produção do Hefesto V8, com smoke público SUCCESS.
+Last commit: e372045fad460f304b3a5e96a7945db40a52b27e — último commit funcional efetivamente implantado. Checkpoint documental anterior: a62d07b19851f3ee80faff387168bcc0710e7b32; este recibo é persistido no HEAD documental da branch.
+Current task: implementação e deploy concluídos; aguardando teste editorial real executado pelo usuário.
+Next task: usuário abre https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8, entra com o login existente e testa PE/remoque/aprovação/produção. Em futura sessão, ler este plano no GitHub, verificar HEAD de main/hefesto-v8 e o resultado real do teste antes de alterar código. Não gerar conteúdo pago autonomamente.
+Known blocker: nenhum impedimento técnico observado na entrega. Qualidade editorial e disponibilidade da geração real serão verificadas pelo usuário; nenhuma geração paga foi executada pelo assistente.
 Paid validation authorized: no
-Deploy status: main/hefesto-v8 promovidas por fast-forward para e372045. Novo deploy em andamento. Revisão anterior API hefesto-v4-api-00085-8v6 e imagem 8414a989... publicadas; nova revisão ainda não confirmada.
-Main HEAD observado e reconfirmado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
-CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37630267314.
-Testes: CI final SUCCESS, 169 testes passaram (inclui PostgreSQL 17 real); migrations histórico+1008, smoke navegador e smoke imagem passaram. Local: 168 passaram e 1 integração sem banco externo pulada; SQL também passou em PostgreSQL WASM. Wheel, compile, Node syntax e dependências passaram.
-Alterações: V8 completo em domínio/persistência/corpus/editor/Hermes/runtime/API/UI; parsers preservados. Checkout local raso foi reconstruído e validado contra SHA/tree/blobs exatos do GitHub; GitHub permanece memória canônica e fonte do histórico completo.
+Deploy status: DONE — API hefesto-v4-api-00086-rnx e job hefesto-v4-rebuild publicados com a mesma imagem por digest; migration, check PostgreSQL, startup sem modelo e smoke HTTP público passaram.
+Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
+Deployment commit: e372045fad460f304b3a5e96a7945db40a52b27e
+Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:2ed432caf417ab81aeb1dd07afb4272cd02988d1cf22e9fd6e1cf81bb761d71f
+Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37637702188 — SUCCESS em 2026-10-07 15:02 UTC.
+CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37637700213 — SUCCESS; 169 testes, PostgreSQL 17 real, migrations, navegador, wheel/build/dependências e imagem de produção.
+Testes locais: 168 passaram, 1 integração com banco externo pulada; 25 testes API e compile passaram após alias /health. CI executou também a integração PostgreSQL sem skip. Smoke público: /health ready, /v8 HTML, assets/v8.js e API privada 401. Sem chamadas de geração.
+Main HEAD na inspeção inicial de 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7. Branches main e hefesto-v8 sincronizadas por fast-forward após desenvolvimento na branch V8; commits documentais posteriores não mudam a imagem implantada.
+Alterações: V8 completo em domínio/persistência/corpus/editor/Hermes/runtime/API/UI; parsers preservados. Checkout local raso validado contra SHA/tree/blobs exatos do GitHub. GitHub permanece memória canônica e fonte do histórico completo.
 
 ## Autoridade e continuidade
 Este documento é o guia canônico e registro vivo da implementação na branch hefesto-v8 do repositório valtersclavi/comunicamundo-v4. Cada sessão começa lendo este documento no GitHub e verificando HEAD, branch, alterações e estado real. Não confiar na memória do chat. Atualizar tarefas, SHA, andamento, próxima tarefa exata, decisões, impedimentos e desvios justificados. Cada tarefa atômica concluída recebe commit coerente e atualização deste registro. Não desenvolver diretamente em main.
@@ -286,3 +290,21 @@ Diagnóstico run 37637011804 concluído: WIF de main funcionou; não alterar IAM
 Correção necessária para entrega: diagnóstico run 37637438138 confirma /v8 e JS 200 e API privada 401 em ambas as URLs; somente /healthz retorna Google 404. Documentação oficial Cloud Run known-issues identifica reserva de paths terminados em z. Adicionar alias `/health`, preservar legacy `/healthz`, smoke público usar alias permitido. Nenhuma alteração editorial/parser/banco. Teste existente de health sem cloud clients adaptado à rota pública. Próxima ação: commit, promoção autorizada, novo deploy e smoke público.
 
 [x] Rota pública de health corrigida — commit e372045fad460f304b3a5e96a7945db40a52b27e. 25 testes API e compile local passaram; suíte geral em execução. Migração 1008 já está aplicada na produção. Runs cancelados de CI auxiliar resultam da política cancel-in-progress enquanto commits diagnósticos eram publicados; não correspondem a falha de testes. Não repetir mudança funcional nem parar após esta tarefa: seguir até deploy/smokes finais SUCCESS.
+
+## Recibo final de entrega técnica — 2026-10-07
+
+[x] Deploy autorizado e concluído — commit e372045fad460f304b3a5e96a7945db40a52b27e.
+- API revision: `hefesto-v4-api-00086-rnx`.
+- API/job image: `us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:2ed432caf417ab81aeb1dd07afb4272cd02988d1cf22e9fd6e1cf81bb761d71f`.
+- Migration execution: `hefesto-v4-rebuild-prb44` — SUCCESS; migration 1008 já aplicada na primeira publicação, preservada na reexecução.
+- Database check execution: `hefesto-v4-rebuild-hsz4j` — SUCCESS.
+- No-model job startup execution: `hefesto-v4-rebuild-7v2rr` — SUCCESS.
+- Public HTTP smoke: `/health` ready; `/v8` e JS disponíveis; `/v8/projects` sem sessão retorna 401.
+- Production Actions run: 37637702188 — SUCCESS.
+- Technical Actions run: 37637700213 — SUCCESS; 169 testes + migrations + navegador + imagem. Falha de espaço anterior no runner foi resolvida separando build da imagem do runner PostgreSQL/Playwright; não alterar parsers/Dockerfile.
+- Rota `/healthz` preservada como alias local; usar `/health` no Cloud Run, conforme documentação de paths reservados. Diagnósticos de produção foram somente leitura e WIF permanece restrito a main.
+- Migrations, configuração, secrets referenciados, branch/commit e testes técnicos conferidos antes e durante deploy; nenhuma credencial secreta registrada neste documento.
+- Nenhum teste editorial real, geração paga de PE/podcast ou A/B foi executado.
+- Próximo passo exato: usuário testa o produto pelo link acima. Fases 21–22 permanecem validações editoriais futuras sob responsabilidade/solicitação do usuário conforme adendo; não há tarefa de implementação interrompida nesta entrega.
+
+Fim de sessão: todos os arquivos funcionais commitados; registro final documental é commitado nas duas branches, sem rebuild por alteração apenas em docs. Estado de produção corresponde ao commit funcional e digest registrados acima. Não confundir HEAD documental com revisão da imagem. Configuração/modelo e prazo de disponibilidade estão em HEFESTO_V8_PROVIDER.md; verificar novamente em sessões futuras.

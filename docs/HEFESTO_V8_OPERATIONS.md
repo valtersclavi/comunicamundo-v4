@@ -82,3 +82,12 @@ technical delivery does not prove editorial quality or live provider availabilit
 Offline browser smoke: install Playwright/Chromium, then run `node scripts/smoke_v8_ui.cjs`; every HTTP response is a fixture and no model call is made.
 
 Public Cloud Run health endpoint: `/health`; `/healthz` remains a local compatibility alias. Google Frontend reserves some paths ending in z, so public deployment smoke must use `/health`. See https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths.
+
+## Published technical delivery (2026-10-07)
+
+URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
+API revision: `hefesto-v4-api-00086-rnx`; code commit `e372045fad460f304b3a5e96a7945db40a52b27e`.
+API and worker use `us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:2ed432caf417ab81aeb1dd07afb4272cd02988d1cf22e9fd6e1cf81bb761d71f`.
+Production run 37637702188 and technical validation run 37637700213 succeeded.
+The existing login is preserved. The user performs the real editorial test; no paid generation was run during implementation/deployment.
+Full execution IDs and continuation instructions are in HEFESTO_V8_IMPLEMENTATION_PLAN.md.
