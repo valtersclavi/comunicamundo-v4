@@ -20,7 +20,11 @@ def required(name):
 
 @asynccontextmanager
 async def repository():
-    product=ProductRepository(required("HEFESTO_POSTGRES_URL"))
+    url=required("HEFESTO_POSTGRES_DIRECT_URL")
+    from psycopg.conninfo import conninfo_to_dict
+    if "-pooler" in conninfo_to_dict(url).get("host", ""):
+        raise RuntimeError("V8 requires a direct PostgreSQL connection for session advisory locks")
+    product=ProductRepository(url)
     await product.open()
     try: yield Repository(product)
     finally: await product.close()

@@ -19,7 +19,7 @@ PE/history/work/grounding and telemetry. Full state is in PostgreSQL.
 ## Configuration and deployment
 
 Required existing configuration: GOOGLE_CLOUD_PROJECT, HEFESTO_POSTGRES_URL,
-HEFESTO_POSTGRES_DIRECT_URL for migrations, HEFESTO_GCS_BUCKET,
+HEFESTO_POSTGRES_DIRECT_URL for V8 session locks and migrations, HEFESTO_GCS_BUCKET,
 HEFESTO_JOB_NAME, GOOGLE_CLOUD_LOCATION for Cloud Run jobs.
 V8 generation uses HEFESTO_VERTEX_LOCATION (default global),
 HEFESTO_V8_MODEL (default gemini-2.5-flash) and an optional verified
@@ -32,6 +32,11 @@ request for the account plan. Without a known tariff, telemetry explicitly marks
 external API costs unknown instead of pretending their cost was zero. Token
 model costs are priced from the verified profile; infrastructure/storage costs
 are not included in this provider-usage estimate.
+
+Bind HEFESTO_POSTGRES_DIRECT_URL to both API and job. V8 uses a direct
+PostgreSQL pool because Neon transaction pooling cannot retain session advisory
+locks. The legacy query pool remains unchanged. A Neon -pooler host supplied as
+the direct URL is rejected explicitly. See https://neon.com/docs/connect/connection-pooling.
 
 Apply additive migration 1008 with the existing migration runner. It adds only
 v8_projects and v8_operations; it does not migrate or delete legacy project data.

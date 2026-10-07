@@ -2,7 +2,7 @@
 
 ## CURRENT STATUS
 Last completed task: núcleo V8 integrado; 166 testes locais passaram.
-Last commit: e9777d67af9113ad4c153172d3d9a74a49196d81 — pausa de inicialização e correção do build CI.
+Last commit: 3432be9812b128d81e126e9448d1a0ef5b50ce50 — retomada de jobs interrompidos na UI.
 Current task: validação técnica e commits da implementação integrada; núcleo e API/UI montados localmente.
 Next task: concluir CI da imagem de produção, corrigir eventual falha e registrar entrega técnica; teste editorial final pertence ao usuário.
 Known blocker: Chromium indisponível localmente (download retornou arquivo inválido); smoke visual e imagem Docker executados no CI. Deploy e validação paga não executados.
@@ -245,3 +245,7 @@ Commits somente docs não repetem o CI caro sem mudanças de código. A validaç
 ## Recuperação de processo interrompido na UI
 A API já permite retomar estados ativos preservados após crash; a UI agora também oferece Retomar nesses estados. Uma execução ainda ativa é protegida pelo advisory lock (409), enquanto o processo morto libera o lock e reaproveita o journal. Smoke de navegador inclui a retomada. CI sem deploy cancela revisões anteriores quando chega nova correção para validar apenas a versão atual.
 Commit anterior: b75e92d0a0b29cea2af450cf5c225c5718981972 (falhas de configuração do provider; 168 testes locais passaram).
+
+## Persistência concorrente em Neon
+Invariante: pg_try_advisory_lock é de sessão; Neon/PgBouncer em transaction pooling não preserva essa sessão. Documentação primária consultada em 2026-10-07: https://neon.com/docs/connect/connection-pooling e https://github.com/neondatabase/website/blob/main/content/docs/get-started/connect-neon.md. V8 exige HEFESTO_POSTGRES_DIRECT_URL (rejeita hostname Neon -pooler), mantendo o pool legado. Deploy existente recebe a vinculação adicional desse secret na API; job já possuía o secret. Nenhum deploy realizado.
+Teste de integração independente em PostgreSQL 17 no CI verifica dois pools/sessões, exclusão de worker concorrente, revisão stale, fechamento/reabertura e preservação de PE/action/raw malformado. Local: 168 passaram, 1 integração foi pulada por falta de PostgreSQL externo; SQL completo já verificado em PostgreSQL WASM. O teste real será executado automaticamente no CI isolado, sem Neon de produção, sem LLM.

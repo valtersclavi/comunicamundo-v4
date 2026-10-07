@@ -13,6 +13,18 @@ jobs:
   contracts-build-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: v8_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v8_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      V8_TEST_POSTGRES_URL: postgresql://postgres:fixture@localhost:5432/v8_test
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

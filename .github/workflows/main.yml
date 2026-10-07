@@ -107,7 +107,7 @@ jobs:
             --cpu=1 --memory=1Gi --min=0 --max=10 --concurrency=40 --timeout=60 \
             --allow-unauthenticated --no-iap \
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},HEFESTO_JOB_NAME=${JOB_NAME}" \
-            --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest" \
+            --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" \
             --quiet
           api_url="$(gcloud run services describe "${API_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
@@ -147,3 +147,4 @@ jobs:
           - Actions run: \`${GITHUB_RUN_ID}\`
           EOF
           gh issue comment 119 --repo "${GITHUB_REPOSITORY}" --body-file /tmp/deploy-receipt.md
+
