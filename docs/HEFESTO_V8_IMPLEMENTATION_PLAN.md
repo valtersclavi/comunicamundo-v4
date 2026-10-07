@@ -1,16 +1,16 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: Fase 0 — branch dedicada e guia canônico commitado exclusivamente como documentação.
-Last commit: 709fe69dada988ff3100531870eca20537a149c6 — inspeção inicial; esta atualização registra o adendo obrigatório.
-Current task: implementação integrada V8 — concluir inspeção, montar caminho completo e validar tecnicamente sem chamadas pagas.
-Next task: concluir inspeção pendente e seguir autonomamente contratos, persistência, contexto, Hermes, editor, recuperação e API/UI até entrega técnica integrada.
+Last completed task: inspeção real concluída; contratos e persistência aditiva V8 implementados.
+Last commit: 8b3bb9b4e536a285808086acc244c0d13f06a1a3 — adendo integrado; commits técnicos desta sessão serão encadeados no histórico.
+Current task: validação técnica e commits da implementação integrada; núcleo e API/UI montados localmente.
+Next task: concluir smoke da interface, registrar commits do núcleo e runtime, verificar pacote/CI e finalizar registro de entrega.
 Known blocker: nenhum para operações GitHub; clone HTTPS local sem credencial falhou, usar connector GitHub.
 Paid validation authorized: no
 Deploy status: não executado para V8.
 Main HEAD observado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
-Testes desta sessão: não executados.
-Alterações funcionais desta sessão: nenhuma.
+Testes desta sessão: 144 testes legados iniciais; 22 testes V8 locais; migration SQL 1008 e histórico aplicados em PostgreSQL WASM; wheel construído. Validação final integrada em andamento.
+Alterações funcionais desta sessão: domínio V8, persistência, corpus/contexto, editor/Hermes/recuperação, runtime/API/UI; parsers preservados.
 
 ## Autoridade e continuidade
 Este documento é o guia canônico e registro vivo da implementação na branch hefesto-v8 do repositório valtersclavi/comunicamundo-v4. Cada sessão começa lendo este documento no GitHub e verificando HEAD, branch, alterações e estado real. Não confiar na memória do chat. Atualizar tarefas, SHA, andamento, próxima tarefa exata, decisões, impedimentos e desvios justificados. Cada tarefa atômica concluída recebe commit coerente e atualização deste registro. Não desenvolver diretamente em main.
@@ -95,9 +95,9 @@ Legenda: [ ] PENDING; [~] IN PROGRESS; [x] DONE; [!] BLOCKED.
 Ordem só muda por dependência demonstrada no código e registrada com justificativa.
 
 - [x] Fase 0 — documentar/congelar: branch, plano, commit só documental, HEAD main e SHA do plano.
-- [~] Fase 1 — inspeção: histórico pós-80748b2/Copilot, fluxo, schema, ingestão, Hermes, PE, remoque, geração, jobs, checkpoints, UI/API; atualizar plano sem correções.
-- [ ] Fase 2 — contratos mínimos Source, Corpus, EditorialProject, Remoque, GeneratedWork, SupportReference, ExecutionState; adaptar existentes.
-- [ ] Fase 3 — persistência aditiva necessária: versões, raw, checkpoints, tokens, status; preservar V4.
+- [x] Fase 1 — inspeção: histórico pós-80748b2/Copilot, fluxo, schema, ingestão, Hermes, PE, remoque, geração, jobs, checkpoints, UI/API; atualizar plano sem correções.
+- [x] Fase 2 — contratos mínimos Source, Corpus, EditorialProject, Remoque, GeneratedWork, SupportReference, ExecutionState; adaptar existentes.
+- [x] Fase 3 — persistência aditiva necessária: versões, raw, checkpoints, tokens, status; preservar V4.
 - [ ] Fase 4 — ingestão mecânica contínua/endereçável, extração confiável, sem transformação editorial no V8; manter legado.
 - [ ] Fase 5 — Corpus Builder: fontes/tokens/manifesto/orçamento real/1 ou 2 contextos/rejeição, sem chamadas editoriais.
 - [ ] Fase 6 — Context Provider simples: mecanismo atual recomendado, encapsular Gemini fora do domínio.
@@ -198,3 +198,15 @@ Este adendo prevalece sobre qualquer interpretação que transforme V8 em pequen
 5. Não fazer A/B, V4 não é baseline. Legado pode permanecer isolado, sem infraestrutura de comparação.
 6. Caminho exigido: fontes ou zero fontes→corpus→PE→remoque→eventual busca adicional→aprovação→redação→verificação→persistência/retomada. Incluir contexto, orçamento tokens, máximo dois blocos, erros, proveniência e telemetria.
 7. Não parar por microfase. Fases 0–20 são checklist interno de uma entrega; fases editoriais 21/22 ficam para usuário após entrega técnica.
+
+
+## Inspeção encerrada e implementação integrada (2026-10-07)
+- Branch pdf-caption-assets comparada integralmente: blob document_normalization.py d29ad7f e teste ingestion 5195742 já iguais a main. Não mesclar branches antigas.
+- Migrations 1000–1007/999 e testes existentes lidos. 144 testes legados passaram antes da implementação.
+- Contratos V8 mínimos reutilizam EditorialBrief/SourceInput; PE é documento livre versionado, não assunto/matriz.
+- Migration 1008 é estritamente aditiva: v8_projects e v8_operations. Reutiliza pool PostgreSQL, autenticação/uploads/GCS/jobs. Casos de perda de resposta externa são explicitamente incertos, sem promessa impossível de exactly-once em rede.
+- Teto calcula capacidade documentada/datada do provider, sistema/schema/histórico e reserva máxima real de output mais próximo artefato PE/obra para verificação. Inline com prefixo estável e cache implícito; cache não faz parte da verdade.
+- Dois blocos somente quando necessário; preferência por fontes/parágrafos, corte técnico apenas se unidade indivisível não cabe. Leituras fundamentadas e originais referenciados chegam à redação/verificação. Não árvore de chunks.
+- Gateways legados/editor narrativo/sugestões/pré-PE não são utilizados pelo V8. Sem refatoração cosmética de duplicações legadas.
+- Única extensão de transporte compartilhado: SourceAcquirer recebe predicado de aceitabilidade opcional, mantendo default legado. V8 não rejeita fonte por 800 caracteres/100 palavras; verifica identidade/completude/lastro semanticamente.
+- Não iniciado teste editorial nem chamada paga, deploy ou merge.
