@@ -1,0 +1,33 @@
+name: Hefesto V8 deployment diagnostic
+on:
+  push:
+    branches: [hefesto-v8]
+    paths: [.github/workflows/hefesto-v8-deploy-diagnostic.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: comunicamundo-v4
+          workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+          service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Read deployment execution metadata and logs
+        run: |
+          set -euo pipefail
+          gcloud run jobs executions list --job=hefesto-v4-rebuild --project=comunicamundo-v4 --region=us-central1 --limit=5 --format=json > "${RUNNER_TEMP}/executions.json"
+          gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="hefesto-v4-rebuild" AND timestamp>="2026-10-07T14:07:00Z"' --project=comunicamundo-v4 --limit=1000 --format=json > "${RUNNER_TEMP}/logs.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hefesto-v8-deploy-diagnostic-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/executions.json
+            ${{ runner.temp }}/logs.json
+          retention-days: 7
