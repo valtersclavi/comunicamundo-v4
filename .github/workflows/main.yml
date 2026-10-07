@@ -1,12 +1,12 @@
-name: main
+name: Hefesto production
 on:
   push:
     branches: [main]
+    paths-ignore: ["docs/**"]
   workflow_dispatch:
 permissions:
   contents: read
   id-token: write
-  issues: write
 concurrency:
   group: comunicamundo-v4-main
   cancel-in-progress: false
@@ -81,7 +81,7 @@ jobs:
             --image="${PINNED_IMAGE}" --service-account="${RUNTIME_SA}" \
             --args=--help \
             --cpu=4 --memory=8Gi --task-timeout=7200s --max-retries=0 \
-            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET}" \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},HEFESTO_V8_MODEL=gemini-2.5-flash,HEFESTO_VERTEX_LOCATION=global" \
             --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest,YOU_API_KEY=you-api-key:latest,OPENALEX_API_KEY=openalex-api-key:latest,JINA_API_KEY=jina-api-key:latest,BROWSER_USE_API_KEY=browser-use-api-key:latest" \
             --quiet
       - name: Migrate PostgreSQL
@@ -106,7 +106,7 @@ jobs:
             --args="comunicamundo_v4.hefesto.api:app,--host,0.0.0.0,--port,8080" \
             --cpu=1 --memory=1Gi --min=0 --max=10 --concurrency=40 --timeout=60 \
             --allow-unauthenticated --no-iap \
-            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},HEFESTO_JOB_NAME=${JOB_NAME}" \
+            --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},HEFESTO_JOB_NAME=${JOB_NAME},HEFESTO_V8_MODEL=gemini-2.5-flash,HEFESTO_VERTEX_LOCATION=global" \
             --set-secrets="HEFESTO_POSTGRES_URL=hefesto-postgres-pooler-url:latest,HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" \
             --quiet
           api_url="$(gcloud run services describe "${API_NAME}" \
@@ -125,26 +125,37 @@ jobs:
           smoke="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --wait --format='value(metadata.name)')"
           test -n "${smoke}"
           echo "JOB_SMOKE_EXECUTION=${smoke}" >> "${GITHUB_ENV}"
+      - name: Published V8 HTTP smoke (no model calls)
+        run: |
+          set -euo pipefail
+          curl --retry 3 --retry-all-errors --fail --silent "${HEFESTO_API_URL}/healthz" >/tmp/live-health.json
+          jq -e '.status == "ready" and .service == "hefesto-editorial-api"' /tmp/live-health.json
+          curl --retry 3 --retry-all-errors --fail --silent "${HEFESTO_API_URL}/v8" >/tmp/live-v8.html
+          grep -q 'Hefesto V8' /tmp/live-v8.html
+          curl --fail --silent "${HEFESTO_API_URL}/assets/v8.js" >/tmp/live-v8.js
+          grep -q 'project_proposed' /tmp/live-v8.js
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "${HEFESTO_API_URL}/v8/projects")" = 401
+          echo "V8_URL=${HEFESTO_API_URL}/v8" >> "${GITHUB_ENV}"
       - name: Publish deployment receipt
         if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
           JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
           cat > /tmp/deploy-receipt.md <<EOF
-          ## Deploy Hefesto V4 — ${JOB_STATUS}
+          ## Deploy Hefesto V8 — ${JOB_STATUS}
 
           - Commit: \`${GITHUB_SHA}\`
           - Job: \`${JOB_NAME}\`
           - API: \`${API_NAME}\`
           - API revision: \`${API_REVISION:-not-deployed}\`
-          - Product URL: ${HEFESTO_API_URL:-not-deployed}
+          - Product URL: ${V8_URL:-not-verified}
           - Image: \`${PINNED_IMAGE:-not-built}\`
           - PostgreSQL migration: \`${MIGRATION_EXECUTION:-not-run}\`
           - PostgreSQL check: \`${DATABASE_CHECK_EXECUTION:-not-run}\`
           - Job smoke: \`${JOB_SMOKE_EXECUTION:-not-run}\`
           - Actions run: \`${GITHUB_RUN_ID}\`
           EOF
-          gh issue comment 119 --repo "${GITHUB_REPOSITORY}" --body-file /tmp/deploy-receipt.md
+          cat /tmp/deploy-receipt.md >> "${GITHUB_STEP_SUMMARY}"
+          cat /tmp/deploy-receipt.md
 
