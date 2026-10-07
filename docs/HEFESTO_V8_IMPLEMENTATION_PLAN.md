@@ -2,12 +2,12 @@
 
 ## CURRENT STATUS
 Last completed task: entrega técnica V8 integrada (Fases 0–20), com CI e todos os smoke tests concluídos.
-Last commit: 39dc77942654cb0552120585bdd9d5f59284846a — identidade da submissão preservada após resposta HTTP interrompida.
-Current task: corrigir rota pública de health no Cloud Run e republicar. Run 37634099690 publicou API/worker, aplicou 1008 e passou startup; smoke HTTP falhou em /healthz reservado pelo Google Frontend.
-Next task: acompanhar os steps restantes do run 37634099690; conferir migration/check PostgreSQL, revisão API/job/imagem por digest e smoke HTTP /v8; registrar os resultados e entregar URL pronta para teste.
+Last commit: e372045fad460f304b3a5e96a7945db40a52b27e — alias /health compatível com Cloud Run e smoke atualizado.
+Current task: deploy corretivo e372045 em execução no run 37637702188; CI técnico separado 37637700213. Publicação anterior já aplicou 1008, passou check e startup e serviu /v8/JS/API privada; somente health público reservado causou falha no smoke.
+Next task: acompanhar run 37637702188 até smoke /health + /v8 + assets + private API e recibo SUCCESS; conferir CI 37637700213; registrar digest/revisão/execuções, sincronizar commits e entregar URL.
 Known blocker: /healthz é reservado no Cloud Run; correção aditiva /health em publicação. Sem impedimento de banco, IAM ou segredo confirmado.
 Paid validation authorized: no
-Deploy status: main promovida por fast-forward sem perda de commits; execução de deploy em andamento. Revisão alvo 8e75454; conclusão ainda não confirmada.
+Deploy status: main/hefesto-v8 promovidas por fast-forward para e372045. Novo deploy em andamento. Revisão anterior API hefesto-v4-api-00085-8v6 e imagem 8414a989... publicadas; nova revisão ainda não confirmada.
 Main HEAD observado e reconfirmado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
 CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37630267314.
 Testes: CI final SUCCESS, 169 testes passaram (inclui PostgreSQL 17 real); migrations histórico+1008, smoke navegador e smoke imagem passaram. Local: 168 passaram e 1 integração sem banco externo pulada; SQL também passou em PostgreSQL WASM. Wheel, compile, Node syntax e dependências passaram.
@@ -284,3 +284,5 @@ Migration de produção ainda aguardando conclusão. Diagnóstico somente leitur
 Diagnóstico run 37637011804 concluído: WIF de main funcionou; não alterar IAM. Cloud Run levou minutos para importar/iniciar containers; não era erro SQL. Migration `hefesto-v4-rebuild-lwfsn` SUCCESS aplicou somente `1008_hefesto_v8.sql`; check `hefesto-v4-rebuild-xlwhb` SUCCESS retornou banco neondb pronto. Metadata revelou que a falha antiga `hefesto-v4-rebuild-h4pgv` era de **check-postgres**, após migration antiga bem-sucedida, corrigindo interpretação anterior do nome do step. Nenhum checksum histórico foi alterado. Startup sem modelo `hefesto-v4-rebuild-dh28d` em andamento. Próxima tarefa: confirmar startup/live HTTP e registrar recibo final.
 
 Correção necessária para entrega: diagnóstico run 37637438138 confirma /v8 e JS 200 e API privada 401 em ambas as URLs; somente /healthz retorna Google 404. Documentação oficial Cloud Run known-issues identifica reserva de paths terminados em z. Adicionar alias `/health`, preservar legacy `/healthz`, smoke público usar alias permitido. Nenhuma alteração editorial/parser/banco. Teste existente de health sem cloud clients adaptado à rota pública. Próxima ação: commit, promoção autorizada, novo deploy e smoke público.
+
+[x] Rota pública de health corrigida — commit e372045fad460f304b3a5e96a7945db40a52b27e. 25 testes API e compile local passaram; suíte geral em execução. Migração 1008 já está aplicada na produção. Runs cancelados de CI auxiliar resultam da política cancel-in-progress enquanto commits diagnósticos eram publicados; não correspondem a falha de testes. Não repetir mudança funcional nem parar após esta tarefa: seguir até deploy/smokes finais SUCCESS.
