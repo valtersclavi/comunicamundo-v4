@@ -2,9 +2,9 @@
 
 ## CURRENT STATUS
 Last completed task: Fase 0 — branch dedicada e guia canônico commitado exclusivamente como documentação.
-Last commit: cdfd5a9c1920adfcff9aacae8350ac6718551bc2 — plano inicial; a presente atualização documental registra a inspeção e seu próprio SHA é verificável no histórico.
-Current task: Fase 1 — IN PROGRESS, inventário e inspeção estrutural concluídos; falta concluir revisão das branches divergentes e invariantes/testes.
-Next task: concluir comparação da branch hefesto/pdf-caption-assets (fb1236e1d53ba1eeab78397bab11bf40bbc4469b) com main, ler fixtures/contratos de testes e migrations restantes; fechar Fase 1 documental antes de criar contratos mínimos V8 (Fase 2).
+Last commit: 709fe69dada988ff3100531870eca20537a149c6 — inspeção inicial; esta atualização registra o adendo obrigatório.
+Current task: implementação integrada V8 — concluir inspeção, montar caminho completo e validar tecnicamente sem chamadas pagas.
+Next task: concluir inspeção pendente e seguir autonomamente contratos, persistência, contexto, Hermes, editor, recuperação e API/UI até entrega técnica integrada.
 Known blocker: nenhum para operações GitHub; clone HTTPS local sem credencial falhou, usar connector GitHub.
 Paid validation authorized: no
 Deploy status: não executado para V8.
@@ -188,3 +188,13 @@ AGENTS.md lido. Regras de ingestão congelada, divisão em TODAS as chamadas sem
 Ordem de fases mantida. Capacidade/caching/provider atuais ainda NÃO verificados: obrigatório antes das Fases 5/6, sem hardcode de memória.
 SHA Fase 0: cdfd5a9c1920adfcff9aacae8350ac6718551bc2.
 Testes: nenhuma execução funcional; inspeção somente. Deploy: nenhum. Chamadas pagas: nenhuma.
+
+## ADENDO OBRIGATÓRIO — ESTRATÉGIA DE EXECUÇÃO (2026-10-07)
+Este adendo prevalece sobre qualquer interpretação que transforme V8 em pequenas entregas independentes.
+1. Uma arquitetura, uma implementação integrada, uma entrega técnica. Avançar autonomamente pelo caminho completo até funcional e pronto para usuário testar. Tarefas/commits atômicos são disciplina interna, não pontos de parada, confirmação ou validação manual.
+2. Plano é memória operacional (decisões/estado/retomada/próximo passo), não burocracia nem obrigação de parar em cada item.
+3. Executar autonomamente unitários, código, integração, smoke, schemas, migrations em ambiente apropriado, build, rotas/estados e mocks/fixtures. Corrigir falhas antes da entrega.
+4. Teste editorial real é do usuário. Não executar três fontes de luto infantil, PE/podcast pagos, avaliação editorial final ou comparação sem solicitação explícita. Entregar implementado, commitado, documentado, smoke e testes técnicos passando.
+5. Não fazer A/B, V4 não é baseline. Legado pode permanecer isolado, sem infraestrutura de comparação.
+6. Caminho exigido: fontes ou zero fontes→corpus→PE→remoque→eventual busca adicional→aprovação→redação→verificação→persistência/retomada. Incluir contexto, orçamento tokens, máximo dois blocos, erros, proveniência e telemetria.
+7. Não parar por microfase. Fases 0–20 são checklist interno de uma entrega; fases editoriais 21/22 ficam para usuário após entrega técnica.
