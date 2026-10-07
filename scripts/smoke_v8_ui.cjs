@@ -6,7 +6,7 @@ const fs=require('node:fs');const path=require('node:path');const assert=require
   const browser=await chromium.launch({headless:true});
   const page=await browser.newPage({viewport:{width:1024,height:768}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  let auth=false,submission=null;
+  let auth=false,submission=null,submissions=[];
   let state={execution_id:'11111111-1111-4111-8111-111111111111',status:'queued',projects:[{version:1,document:'Central question, narrative movement and an ending.'}],sources:[{source_id:'source-a',title:'Generic original',tokens:100,locations:[{location_id:'p1',page:1}]}],usage:{call_count:1,input_tokens:100,output_tokens:20,cost_usd:'0.001',latency_ms:100}};
   await page.route('http://localhost/**',async route=>{
     const url=new URL(route.request().url());const method=route.request().method();
@@ -16,7 +16,7 @@ const fs=require('node:fs');const path=require('node:path');const assert=require
     if(url.pathname==='/v1/me')return reply(auth?{username:'fixture'}:{detail:'login required'},auth?200:401);
     if(url.pathname==='/v1/login'){auth=true;return reply({username:'fixture'});}
     if(url.pathname==='/v8/projects'&&method==='GET')return reply({projects:[]});
-    if(url.pathname==='/v8/projects'&&method==='POST'){submission=route.request().postDataJSON();return reply(state,202);}
+    if(url.pathname==='/v8/projects'&&method==='POST'){submission=route.request().postDataJSON();submissions.push(submission);if(submissions.length===1)return reply({detail:'Temporary response interruption'},503);assert.deepEqual(submissions[0],submission);return reply(state,202);}
     if(method==='POST'){
       if(url.pathname.endsWith('/resume')){state.status='project_proposed';return reply(state,202);}
       const data=route.request().postDataJSON();assert.equal(data.version,state.projects.at(-1).version);
@@ -32,6 +32,8 @@ const fs=require('node:fs');const path=require('node:path');const assert=require
   await page.locator('#workspace').waitFor({state:'visible'});
   await page.locator('[name=theme]').fill('Generic subject');await page.locator('[name=approach]').fill('Explain a contrast');await page.locator('[name=audience]').fill('General audience');await page.locator('#source-mode').selectOption('search');
   await page.getByRole('button',{name:'Preparar Projeto Editorial',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('#error').textContent==='Temporary response interruption');
+  await page.getByRole('button',{name:'Preparar Projeto Editorial',exact:true}).click();
   await page.locator('#resume').waitFor({state:'visible'});await page.locator('#resume').click();
   await page.locator('#proposal').waitFor({state:'visible'});assert.deepEqual(submission.sources,[]);
   await page.locator('#message').fill('Reconsider the central question.');await page.locator('#revise').click();
@@ -41,6 +43,6 @@ const fs=require('node:fs');const path=require('node:path');const assert=require
   await page.locator('#work').waitFor({state:'visible'});assert.equal(await page.locator('#body').textContent(),'A grounded statement.');
   assert.match(await page.locator('#support').textContent(),/página 1/);assert.deepEqual(errors,[]);
   await page.setViewportSize({width:768,height:1024});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  console.log('PASS V8 browser login, zero sources, restart resume, PE versions, remoque, approval, production, grounding and iPad viewport; zero model calls');
+  console.log('PASS V8 browser login, zero sources, idempotent submission retry, restart resume, PE versions, remoque, approval, production, grounding and iPad viewport; zero model calls');
   await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});
