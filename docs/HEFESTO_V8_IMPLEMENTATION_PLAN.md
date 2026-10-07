@@ -1,16 +1,16 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: implementação integrada V8 (Fases 0–20), testes técnicos, PostgreSQL real, migrations e smoke navegador do commit final passaram no CI.
+Last completed task: entrega técnica V8 integrada (Fases 0–20), com CI e todos os smoke tests concluídos.
 Last commit: 39dc77942654cb0552120585bdd9d5f59284846a — identidade da submissão preservada após resposta HTTP interrompida.
-Current task: acompanhar build e smoke da imagem de produção no CI, run 37630267314.
-Next task: ler resultado/logs desse CI; corrigir somente falhas reais se houver; registrar entrega técnica concluída quando imagem/smoke passarem. Teste editorial final pertence ao usuário.
-Known blocker: nenhum defeito técnico confirmado aberto; build da imagem ainda em execução. Deploy/configuração de produção não executados.
+Current task: entrega técnica concluída; nenhuma mudança funcional em andamento.
+Next task: preparar/realizar deploy da revisão funcional 39dc779 (API e job do mesmo commit, migration 1008 e configuração/secrets conferidos) quando solicitado; depois o usuário executa o teste editorial final. Não iniciar teste pago autonomamente.
+Known blocker: nenhum defeito técnico confirmado aberto. Para testar na aplicação hospedada ainda é necessário deploy; a branch não publica em produção automaticamente.
 Paid validation authorized: no
 Deploy status: V8 não deployado; nenhum merge em main e nenhuma migration executada em produção.
 Main HEAD observado e reconfirmado em 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7.
 CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37630267314.
-Testes locais: 168 passaram; integração PostgreSQL externo foi pulada localmente, mas executou no serviço isolado PostgreSQL 17 do CI. SQL histórico + 1008 validado também em PostgreSQL WASM. Wheel, compile, Node syntax e dependências passaram.
+Testes: CI final SUCCESS, 169 testes passaram (inclui PostgreSQL 17 real); migrations histórico+1008, smoke navegador e smoke imagem passaram. Local: 168 passaram e 1 integração sem banco externo pulada; SQL também passou em PostgreSQL WASM. Wheel, compile, Node syntax e dependências passaram.
 Alterações: V8 completo em domínio/persistência/corpus/editor/Hermes/runtime/API/UI; parsers preservados. Checkout local raso foi reconstruído e validado contra SHA/tree/blobs exatos do GitHub; GitHub permanece memória canônica e fonte do histórico completo.
 
 ## Autoridade e continuidade
@@ -253,3 +253,13 @@ Teste de integração independente em PostgreSQL 17 no CI verifica dois pools/se
 
 ## Idempotência na fronteira UI/API
 A UI preserva project_id e uploads bem-sucedidos ao repetir a mesma submissão depois de falha de resposta HTTP. O Backend identifica a mesma execução e devolve o job existente, evitando nova geração por retry acidental. Novo projeto limpa a identidade. Smoke navegador simula perda de resposta e exige submissão idêntica no retry, além da retomada de processo interrompido.
+
+## ENTREGA TÉCNICA CONCLUÍDA — 2026-10-07
+Revisão funcional validada: 39dc77942654cb0552120585bdd9d5f59284846a.
+Registro documental anterior: c5691e304697d352a6505cb35b4372818e2589cf; o SHA deste registro final está no histórico Git (não pode ser inserido no próprio commit).
+CI SUCCESS: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37630267314, job contracts-build-smoke 112822929832.
+Evidência dos logs: 169 passed, 1 warning in 2.96s. O warning é depreciação de Starlette/AnyIO, sem falha.
+Todos os gates passaram: dependências; contratos/unidade/integração/rotas; PostgreSQL real (locks entre sessões, stale revision, raw e retomada); migrations históricas+1008/reaplicação/FK; compile; JS syntax; wheel/worker; smoke navegador (login, zero fontes, retry idempotente, retomada, PE/versões/remoque/aprovação/produção/fundamentação/iPad); Dockerfile de produção sem alterações; smoke documental da imagem; healthz; /v8; /v8/projects sem autenticação retorna 401.
+Nenhuma chamada editorial paga, nenhum A/B, nenhuma migration em produção, nenhum merge e nenhum deploy. Main permanece 80748b2ce2993aa8f0d28e05262abef4b1a242a7. O caminho V8 é /v8 após deploy, não a tela legada /.
+As Fases 21/22 são validações editoriais futuras do usuário, não tarefas técnicas pendentes do assistente neste esforço. Qualidade editorial real e disponibilidade/configuração de provider em produção não foram testadas por chamadas pagas.
+A entrega está pronta para implantação e teste editorial pelo usuário depois da implantação. Antes do deploy, conferir secrets esperados no documento de operações, direct URL na API/job, migrations e revisão exata. Modelo padrão/provider/capacidade/preços/retirada estão no documento HEFESTO_V8_PROVIDER.md; retirada anunciada em 20/10/2026 exige modelo/perfil explícito atualizado, sem fallback silencioso.
