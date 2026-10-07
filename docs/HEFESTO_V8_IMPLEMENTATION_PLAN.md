@@ -1,19 +1,20 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: correção anterior de thinking máximo implantada em 96adcf86545ae103dd528678aceba7512e3465ae.
-Last commit: 94aed16210ded9d327bb0695a73d50aa0c4633c5 — correção funcional de cache explícito; base main verificada f34e5e939d1ab953cadd0cc9c848cd6b1c8e1258.
-Current task: [~] deploy do commit 94aed16210ded9d327bb0695a73d50aa0c4633c5; CI técnico completo SUCCESS.
-Next task: acompanhar deploy do SHA funcional 94aed162, confirmar migrations/check/startup/smoke HTTP e registrar digest/revisão. Nenhuma geração editorial paga.
-Known blocker: nenhum impedimento encontrado; geração/cache reais não foram exercitados por serem pagos. Falhas do provider pausam sem fallback integral.
+Last completed task: explicit context caching implementado, testes/CI completos, deploy e smokes de produção SUCCESS; IAM de cache confirmado na própria conta runtime, sem modelo/cache pago.
+Last commit: 94aed16210ded9d327bb0695a73d50aa0c4633c5 — SHA funcional efetivamente implantado. Diagnóstico técnico adicional: 118d32d1720b4ca8c0174fbe795b688059b74613; registro final é o HEAD documental.
+Current task: correção entregue; aguardando primeiro teste editorial real pelo usuário.
+Next task: usuário executa teste editorial em /v8. Futuras sessões leem este plano no GitHub, conferem HEAD e produção. Não iniciar teste pago autonomamente.
+Known blocker: nenhum impedimento técnico observado. Qualidade editorial e economia efetiva serão medidas pelo usuário no primeiro teste real; nenhuma geração/cache real pago executado pelo assistente.
 Paid validation authorized: no
-Deploy status: IN PROGRESS — promoção fast-forward autorizada para main após CI completo SUCCESS; registrar recibo real ao concluir.
+Deploy status: DONE — API hefesto-v4-api-00088-ldh e worker hefesto-v4-rebuild na mesma imagem por digest. Migration/check/startup/smoke público SUCCESS.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
-Deployment commit: 96adcf86545ae103dd528678aceba7512e3465ae
-Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:c60e9c2783ee1bffe988698811c44699166b957749338aefa74908636973e7c2
-Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37651327855 — SUCCESS em 2026-10-07 16:45 UTC.
-CI atual: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37650271569 — SUCCESS; 178 testes, PostgreSQL 17 real, migrations, navegador, wheel/build/dependências e imagem de produção.
-Testes locais: 177 passaram, 1 integração PostgreSQL externa pulada; 33 testes V8 passaram. CI executou todos os 178 testes sem skip. pip check, compileall, Node syntax, git diff --check passaram. Smoke público /health, /v8, assets e API privada 401 passaram; nenhuma geração paga.
+Deployment commit: 94aed16210ded9d327bb0695a73d50aa0c4633c5
+Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:e64fb6ce712ff8fb05743ae75aca4cd134b5cb045e9a976761e182193914b28c
+Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37660818246 — SUCCESS em 2026-10-07 18:09 UTC.
+CI da correção funcional: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37657414964 — SUCCESS; 197 testes sem skip, PostgreSQL 17 real, migrations, navegador, build/dependências e imagem. CI adicional do diagnóstico: 37664763899 SUCCESS; 197 testes e imagem/startup/rotas novamente aprovados, sem chamadas de modelo.
+IAM smoke: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37664761799 — SUCCESS; runtime testIamPermissions confirma cachedContents.create/get/list/update/delete. Zero chamadas de modelo e zero criações de cache. Job temporário excluído após execução.
+Testes locais: 195 passaram, 2 integrações PostgreSQL externas puladas; no CI ambas passaram. pip check, compileall, sintaxe Node, wheel e git diff --check passaram. Smokes produção /health, /v8, assets e API privada 401 passaram; nenhuma geração paga.
 Main HEAD na inspeção inicial de 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7. Branches main e hefesto-v8 sincronizadas por fast-forward após desenvolvimento na branch V8; commits documentais posteriores não mudam a imagem implantada.
 Alterações: V8 completo em domínio/persistência/corpus/editor/Hermes/runtime/API/UI; parsers preservados. Checkout local raso validado contra SHA/tree/blobs exatos do GitHub. GitHub permanece memória canônica e fonte do histórico completo.
 
@@ -338,7 +339,7 @@ Fim desta sessão: correção commitada e implantada; branches main/hefesto-v8 s
 
 ### Correção obrigatória de Explicit Context Caching — 2026-10-07
 
-[~] Implementação isolada do reutilizador econômico de corpus. SHA funcional será registrado após criação do commit; sem alteração editorial.
+[x] Implementação isolada do reutilizador econômico de corpus — commit funcional 94aed16210ded9d327bb0695a73d50aa0c4633c5; sem alteração editorial.
 
 Documentação oficial Google Cloud/Google Gen AI SDK consultada antes do código, URLs em HEFESTO_V8_PROVIDER.md: caches.create/get/update/list/delete; cached_content; mínimo Gemini 2 = 2048 tokens; TTL padrão 60 minutos; global suportado; 10 MB inline, acima via GCS; criação como input normal, leitura com desconto 90% e storage Flash USD 1/M tokens/h. Limites e preços pertencem ao perfil verificado por modelo.
 
@@ -352,4 +353,19 @@ Testes locais da correção de cache: 195 passaram, 2 integrações PostgreSQL e
 
 [x] Build wheel local SUCCESS; SDK/python imports/sintaxe/dependências validados. Testes do CI permanecem pendentes.
 
-[x] Correção de explicit caching commitada — 94aed16210ded9d327bb0695a73d50aa0c4633c5. [x] CI técnico run 37657414964 SUCCESS: 197 testes sem skip, PostgreSQL 17 real (inclusive retomada de cache em conexão independente), migrations, build wheel, dependências, navegador e imagem/startup/rotas sem modelo. Jobs 112915937454 e 112916611494 SUCCESS. [~] Deploy iniciado por fast-forward de main para SHA funcional; acompanhar workflow existente. Nenhum cache real pago criado e nenhuma geração editorial paga.
+[x] Correção de explicit caching commitada — 94aed16210ded9d327bb0695a73d50aa0c4633c5. [x] CI técnico run 37657414964 SUCCESS: 197 testes sem skip, PostgreSQL 17 real (inclusive retomada de cache em conexão independente), migrations, build wheel, dependências, navegador e imagem/startup/rotas sem modelo. Jobs 112915937454 e 112916611494 SUCCESS. [x] Deploy por fast-forward para SHA funcional — run 37660818246 SUCCESS. Nenhum cache real pago criado e nenhuma geração editorial paga.
+
+### Recibo final da correção de explicit context caching — 2026-10-07
+
+[x] Implementação/CI/deploy — SHA funcional implantado 94aed16210ded9d327bb0695a73d50aa0c4633c5.
+- API hefesto-v4-api-00088-ldh; worker hefesto-v4-rebuild; digest e64fb6ce712ff8fb05743ae75aca4cd134b5cb045e9a976761e182193914b28c. Deploy 37660818246 SUCCESS.
+- Migration hefesto-v4-rebuild-ns8dw, check hefesto-v4-rebuild-6chsr e startup sem modelo hefesto-v4-rebuild-v2qw9 SUCCESS; nenhuma nova migration/schema nesta correção. HTTP público /health + /v8 + assets + API privada 401 SUCCESS.
+- Mecanismo: Google Gen AI SDK aio.caches.create/get/update/list/delete e generation.cached_content. Corpus endereçado é conteúdo imutável; briefing/PE/remoque/contrato/schema continuam dinâmicos; nenhuma duplicação inline do corpus nos requests de geração elegíveis.
+- TTL deslizante 3600 segundos, mínimo do perfil Flash 2048 tokens; limite inline 10 MB, acima disso representação mecânica imutável no GCS existente. Expiração/perda reconstrói apenas corpus persistido. Cache não compõe identidade editorial. Erro elegível pausa sem fallback integral. Duas leituras usam no máximo seus dois recursos; síntese existente mantém leituras + suporte inline, sem terceira janela/cache.
+- Telemetria registra criação/reuso/recriação/expiração/descarte, modelo/manifesto/bloco/recurso/tokens, input lógico/cacheado/novo, output/reasoning, latência, geração/criação e estimativa de armazenamento/lease. Thinking 24576 e temperatura 1.0 preservados.
+- CI funcional 37657414964: 197 testes sem skip, PostgreSQL 17 e retomada entre conexões, migrations/build/navegador/imagem.
+- Diagnóstico técnico estritamente necessário acrescentado ao workflow já existente para confirmar configuração de cache e esclarecer espera do Cloud Run. A tentativa inicial de getIamPolicy (37664292953) falhou porque a conta de deploy não possui leitura de políticas de projeto; nenhuma permissão foi ampliada. Substituída por testIamPermissions na própria conta runtime via job temporário sem secrets, modelo ou cache. Commit de diagnóstico 118d32d1720b4ca8c0174fbe795b688059b74613; run 37664761799 SUCCESS.
+- IAM runtime confirmou aiplatform.cachedContents.create/get/list/update/delete. Execução hefesto-v8-cache-iam-37664761799-dzjxp SUCCESS; job temporário hefesto-v8-cache-iam-37664761799 excluído. Produção/IAM/secrets não foram alterados pelo diagnóstico. Documentação oficial do teste: https://docs.cloud.google.com/resource-manager/reference/rest/v1/projects/testIamPermissions .
+- Nenhuma geração editorial paga, nenhum cache real pago criado, nenhum teste de luto infantil. Próxima tarefa exata: usuário realiza o primeiro teste editorial no produto.
+
+Fim da execução funcional: commit e imagem implantados, sem mudança editorial incompleta. Registro documental não dispara rebuild de produção. CI final do diagnóstico 37664763899 SUCCESS (jobs 112941394219 / 112942948754); encerramento documental concluído. Branches main/hefesto-v8 atualizadas sem sobrescrever código externo. Nenhuma tarefa funcional incompleta e nenhum job temporário deixado ativo.
