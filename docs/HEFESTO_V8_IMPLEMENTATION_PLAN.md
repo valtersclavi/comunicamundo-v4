@@ -277,3 +277,6 @@ Histórico real: deploy anterior de main80748b2 (37157270246) falhou na execuç�
 ## Correção de infraestrutura do CI durante deploy
 Run técnico 37634067634: testes 169/PostgreSQL/migrations/navegador passaram, mas Docker falhou com OSError errno28 (No space left on device), após coexistirem PostgreSQL e dependências Playwright no runner. Run de produção 37634099690 construiu e passou smoke da mesma imagem em runner sem esses recursos.
 Correção genérica: separar build/smoke da imagem em job dependente com runner limpo; primeiro job mantém PostgreSQL/navegador/testes. Dockerfile/parsers/software V8 não mudam. Validar novo CI antes de fechar entrega. Não interpretar falha de infraestrutura como falha editorial.
+
+### Diagnóstico de deploy — 2026-10-07
+Migration de produção ainda aguardando conclusão. Diagnóstico somente leitura na branch V8 foi recusado pela condição WIF (run 37636817108); manter condição IAM existente e executar diagnóstico em main. Workflow dedicado lê metadata/logs, sem secret values, SQL modificador ou modelos. Workflows exclusivamente técnicos/diagnósticos não disparam rebuild de produção; ajuste de controle de CI será promovido com skip ci, sem alterar imagem já publicada. Próxima ação exata: executar diagnóstico autorizado em main e resolver a causa real encontrada.
