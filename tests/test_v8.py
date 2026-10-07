@@ -420,3 +420,16 @@ async def test_worker_initialization_failure_is_a_persisted_recoverable_pause(mo
     assert result["status"]=="paused" and restored.job["status"]=="paused"
     assert restored.error["recoverable"] and "GOOGLE_CLOUD_PROJECT" in restored.error["message"]
     assert restored.action["id"]=="initial" and not repo.ops
+
+
+@pytest.mark.asyncio
+async def test_retired_or_unknown_model_is_a_configuration_pause_not_corpus_size(monkeypatch):
+    from comunicamundo_v4.hefesto.v8.provider import Vertex
+    provider=object.__new__(Vertex);provider.model="fixture";provider._capacity=None
+    monkeypatch.delenv("HEFESTO_V8_MODEL_PROFILE",raising=False)
+    with pytest.raises(Recoverable,match="verified"):await provider.capacity()
+    profile=Provider().cap.__dict__.copy();profile.pop("model");profile["retirement_date"]="2000-01-01"
+    monkeypatch.setenv("HEFESTO_V8_MODEL_PROFILE",json.dumps(profile))
+    for _ in range(2):
+        with pytest.raises(Recoverable,match="retired"):await provider.capacity()
+    assert provider._capacity is None

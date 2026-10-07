@@ -2,6 +2,7 @@ name: Hefesto V8 technical validation
 on:
   push:
     branches: [hefesto-v8]
+    paths-ignore: ["docs/**"]
   workflow_dispatch:
 permissions:
   contents: read

@@ -2,9 +2,9 @@
 
 ## CURRENT STATUS
 Last completed task: núcleo V8 integrado; 166 testes locais passaram.
-Last commit: bb7baadf1bac32ae8b568a23d0775e1a73ab8bcd — núcleo editorial, Hermes, contexto e recuperação V8.
+Last commit: e9777d67af9113ad4c153172d3d9a74a49196d81 — pausa de inicialização e correção do build CI.
 Current task: validação técnica e commits da implementação integrada; núcleo e API/UI montados localmente.
-Next task: concluir smoke da interface, registrar commits do núcleo e runtime, verificar pacote/CI e finalizar registro de entrega.
+Next task: concluir CI da imagem de produção, corrigir eventual falha e registrar entrega técnica; teste editorial final pertence ao usuário.
 Known blocker: Chromium indisponível localmente (download retornou arquivo inválido); smoke visual e imagem Docker executados no CI. Deploy e validação paga não executados.
 Paid validation authorized: no
 Deploy status: não executado para V8.
@@ -236,3 +236,8 @@ Commit: bb7baadf1bac32ae8b568a23d0775e1a73ab8bcd. Fases 4–18 implementadas. 16
 ## API/UI e revisão técnica final
 Commit integrado API/UI/testes: 6cb011cca0ac1c1f2d9f02d41cc52de741bbd5e5 (Fases 19–20). Legado isolado, sem remoção dos parsers ou migração destrutiva. V8 usa /v8 e tabelas próprias aditivas.
 167 testes locais passaram após proteção de falha de inicialização do worker. CI inicial confirmou os 166 anteriores; falhou somente no empacotamento sem setuptools no runner limpo. Correção: build com ambiente isolado declarado em pyproject, sem pressupor dependências do runner. Smoke navegador usa localhost como contexto seguro; não chama providers.
+
+## Modelo e evidência de CI
+Modelo retirado ou perfil desconhecido agora produz pausa de configuração recuperável, não erro de tamanho do corpus; nenhuma capacidade retirada é cacheada. 168 testes locais (24 V8) passaram. Modelo padrão mantém a documentação verificada em 2026-10-07 e retirada prevista para 2026-10-20; troca exige modelo/perfil explícito, nunca fallback silencioso.
+CI https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37628573456 (e9777d6): testes/build/migrations e smoke navegador passaram; imagem Docker em execução. Smoke navegador: login, zero fontes, proposta, histórico de versões, remoque, aprovação, produção, referências e viewport iPad, com fixtures e zero chamadas LLM.
+Commits somente docs não repetem o CI caro sem mudanças de código. A validação de imagem usa o Dockerfile existente e parsers/modelos documentais já previstos; não toca em produção.

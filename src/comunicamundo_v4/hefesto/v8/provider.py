@@ -82,14 +82,15 @@ class Vertex:
             profiles[self.model] = json.loads(os.environ["HEFESTO_V8_MODEL_PROFILE"])
         profile = profiles.get(self.model)
         if not profile:
-            raise CapacityError("model requires a verified limits/pricing profile")
+            raise Recoverable("model requires a verified limits/pricing profile")
         # Publisher models on Vertex do not consistently expose token limits via
         # models.get. Use explicit vendor-backed profile rather than a remembered
         # constant or a silent fallback to another model.
-        self._capacity = Capacity(model=self.model, **profile)
-        if self._capacity.retirement_date and datetime.now(UTC).date().isoformat() >= self._capacity.retirement_date:
-            raise CapacityError("configured model is retired; select model and verified profile explicitly")
-        return self._capacity
+        capacity = Capacity(model=self.model, **profile)
+        if capacity.retirement_date and datetime.now(UTC).date().isoformat() >= capacity.retirement_date:
+            raise Recoverable("configured model is retired; select model and verified profile explicitly")
+        self._capacity = capacity
+        return capacity
 
     async def count(self, text: str) -> int:
         r = await self.client.aio.models.count_tokens(model=self.model, contents=text)
