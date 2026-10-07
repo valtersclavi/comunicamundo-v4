@@ -19,10 +19,29 @@ jobs:
           workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
           service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v3
-      - name: Read runtime cache IAM prerequisites (no cache creation)
+      - name: Check runtime cache permissions without model or cache creation
         run: |
           set -euo pipefail
-          gcloud projects get-iam-policy comunicamundo-v4 --flatten='bindings[].members' --filter='bindings.members=serviceAccount:hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com' --format=json > "${RUNNER_TEMP}/runtime-cache-iam.json"
+          temporary="hefesto-v8-cache-iam-${GITHUB_RUN_ID}"
+          trap 'gcloud run jobs delete "${temporary}" --project=comunicamundo-v4 --region=us-central1 --quiet' EXIT
+          image="$(gcloud run jobs describe hefesto-v4-rebuild --project=comunicamundo-v4 --region=us-central1 --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test -n "${image}"
+          script="$(cat <<'PYTHON'
+          import json
+          import google.auth
+          from google.auth.transport.requests import AuthorizedSession
+          credentials, project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+          wanted = ["aiplatform.cachedContents." + action for action in ["create", "get", "list", "update", "delete"]]
+          response = AuthorizedSession(credentials).post("https://cloudresourcemanager.googleapis.com/v1/projects/comunicamundo-v4:testIamPermissions", json={"permissions": wanted}, timeout=30)
+          response.raise_for_status()
+          actual = response.json().get("permissions", [])
+          print(json.dumps({"required": wanted, "allowed": actual, "model_calls": 0, "cache_creations": 0}))
+          assert set(wanted) <= set(actual), "runtime lacks explicit cache permissions"
+          PYTHON
+          )"
+          gcloud run jobs deploy "${temporary}" --project=comunicamundo-v4 --region=us-central1 --image="${image}" --service-account=hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com --command=python --args="^@@^-c@@${script}" --cpu=1 --memory=512Mi --task-timeout=300s --max-retries=0 --quiet
+          gcloud run jobs execute "${temporary}" --project=comunicamundo-v4 --region=us-central1 --wait
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${temporary}\"" --project=comunicamundo-v4 --limit=50 --format=json > "${RUNNER_TEMP}/runtime-cache-iam.json"
           cat "${RUNNER_TEMP}/runtime-cache-iam.json"
       - name: Read deployment execution metadata and logs
         run: |
