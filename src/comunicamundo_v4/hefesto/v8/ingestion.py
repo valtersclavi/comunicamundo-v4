@@ -1,7 +1,8 @@
 import asyncio
 from .telemetry import external
 from hashlib import sha256
-from .contracts import Location, Source
+from uuid import uuid5
+from .contracts import Location, Source, identity
 from .provider import Recoverable
 from ..contracts import EditorialInputRequest, SourceInput
 from ..ingestion import ingest
@@ -13,7 +14,11 @@ class Ingestor:
         self.client,self.bucket,self.provider,self.acquirer=client,bucket,provider,acquirer
 
     def request(self,state,source):
-        return EditorialInputRequest(project_id=state.request.project_id,
+        # The reused ingestor stores immutable project-level request/receipt
+        # snapshots. V8 invokes it once per source, so each atomic extraction
+        # needs its own stable namespace, not the editorial project's shared one.
+        namespace=uuid5(state.execution_id, "v8-source-ingestion-v1:"+identity(source))
+        return EditorialInputRequest(project_id=namespace,
                                      brief=state.request.brief,sources=[source])
 
     async def extract(self,state,source_input):

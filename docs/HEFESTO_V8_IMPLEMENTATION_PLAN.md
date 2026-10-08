@@ -1,11 +1,11 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: explicit context caching implementado, testes/CI completos, deploy e smokes de produção SUCCESS; IAM de cache confirmado na própria conta runtime, sem modelo/cache pago.
+Last completed task: diagnóstico e correção mínima da colisão de snapshots imutáveis na ingestão V8; três testes novos passaram e suíte local passou (198 testes, 2 integrações PostgreSQL externas puladas).
 Last commit: 94aed16210ded9d327bb0695a73d50aa0c4633c5 — SHA funcional efetivamente implantado. Diagnóstico técnico adicional: 118d32d1720b4ca8c0174fbe795b688059b74613; registro final é o HEAD documental.
-Current task: correção entregue; aguardando primeiro teste editorial real pelo usuário.
-Next task: usuário executa teste editorial em /v8. Futuras sessões leem este plano no GitHub, conferem HEAD e produção. Não iniciar teste pago autonomamente.
-Known blocker: nenhum impedimento técnico observado. Qualidade editorial e economia efetiva serão medidas pelo usuário no primeiro teste real; nenhuma geração/cache real pago executado pelo assistente.
+Current task: [~] publicar correção de namespace por fonte, executar CI completo e implantar após aprovação técnica automática; nenhuma geração editorial pelo assistente.
+Next task: verificar CI da correção, promover por fast-forward a main, acompanhar deploy e registrar SHA/imagem/revisão/smokes. Depois o usuário retoma a execução pausada; não iniciar teste pago autonomamente.
+Known blocker: execução do usuário 6d9d95bc-8d4c-4781-8b23-a93d647175cb interrompida por colisão de identidade em normalized-request.json. Correção local testada, ainda não implantada. Não apagar snapshots nem reiniciar o teste autonomamente.
 Paid validation authorized: no
 Deploy status: DONE — API hefesto-v4-api-00088-ldh e worker hefesto-v4-rebuild na mesma imagem por digest. Migration/check/startup/smoke público SUCCESS.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
@@ -369,3 +369,17 @@ Testes locais da correção de cache: 195 passaram, 2 integrações PostgreSQL e
 - Nenhuma geração editorial paga, nenhum cache real pago criado, nenhum teste de luto infantil. Próxima tarefa exata: usuário realiza o primeiro teste editorial no produto.
 
 Fim da execução funcional: commit e imagem implantados, sem mudança editorial incompleta. Registro documental não dispara rebuild de produção. CI final do diagnóstico 37664763899 SUCCESS (jobs 112941394219 / 112942948754); encerramento documental concluído. Branches main/hefesto-v8 atualizadas sem sobrescrever código externo. Nenhuma tarefa funcional incompleta e nenhum job temporário deixado ativo.
+
+
+## Correção isolada — colisão de snapshot na ingestão (2026-10-08)
+[~] Namespace estável por operação de extração de fonte; SHA funcional será registrado após commit.
+
+Estado verificado: main e hefesto-v8 em 8ebd53a1d10834247a640bbec7f054e1085b9104. Produção ainda no código funcional 94aed16210ded9d327bb0695a73d50aa0c4633c5, revisão hefesto-v4-api-00088-ldh.
+
+Erro relatado: immutable object conflict em hefesto-product/projects/6d9d95bc-8d4c-4781-8b23-a93d647175cb/normalized-request.json. Não é JSON malformado. O adaptador V8, introduzido no commit bb7baadf1bac32ae8b568a23d0775e1a73ab8bcd, chama o ingestor legado uma vez por fonte usando o mesmo project_id editorial. O ingestor preservado escreve um snapshot imutável por project_id; a segunda fonte tenta gravar outro JSON válido no caminho da primeira. Correções posteriores de thinking e explicit caching não alteraram a ingestão.
+
+Decisão: somente Ingestor.request no adaptador V8 usa UUID determinístico derivado de execution_id + identidade canônica de SourceInput, com versão v8-source-ingestion-v1. Isso isola snapshots de cada tarefa atômica e mantém identidade estável em retries. A mesma função atende extração e aquisição Hermes. Não alterar parsers, normalização, persistência imutável, corpus, arquitetura editorial, thinking ou caching. Não apagar objetos antigos nem sobrescrever fonte/checkpoint concluído. A execução pausada preserva sua primeira fonte e pode processar somente as pendentes na retomada.
+
+Testes novos usam o ingestor mecânico real e armazenamento simulado com semântica imutável real: reproduzem a colisão anterior, verificam duas fontes completas/endereço/original/hash sem colisão, idempotência da extração e preservação do snapshot antigo; interrompem na segunda fonte e retomam sem reler a primeira (original de entrada removido no teste); verificam isolamento por fonte/execução e estabilidade em restart. Provider é mock, sem modelo real. Testes anteriores do engine usavam ingestor mock e não cobriam essa fronteira; corrigida a lacuna de integração.
+
+Validação local: 198 testes passaram e 2 testes PostgreSQL externos pulados; três novos passaram. pip check, compileall, Node syntax, wheel e git diff --check passaram. CI executará PostgreSQL 17 real, migrations, UI/API e imagem de produção. Deploy ainda pendente desta correção; recibo anterior acima permanece válido até implantação confirmada. Nenhuma geração editorial paga, nenhum cache real criado, nenhuma retomada automática do projeto do usuário.
