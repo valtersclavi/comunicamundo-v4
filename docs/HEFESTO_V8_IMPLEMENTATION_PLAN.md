@@ -5,10 +5,10 @@ O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui int
 
 ## CURRENT STATUS
 Last completed task: contrato editorial implementado integralmente e suíte local técnica aprovada; concepção/PE/remoque/aprovação automática/escrita/verificação/recuperação integrados.
-Last commit: 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63 — contrato canônico commitado antes do código; commit funcional integrado: 684d2d98faccd18e7b75134e03184881d31aaa6a. Proteção final de concorrência em publicação. Produção anterior: 03535f2b91c8f35975ff784e54207cfdf28ea732.
-Current task: [~] CI integrada da entrega editorial; PostgreSQL 17 real, navegador, migrations e imagem de produção; promover/implantar após aprovação técnica.
+Last commit: 4dd602ab4e3e06a982da84b78cf3c813b15ba920 — proteção de concorrência; entrega integrada em 684d2d98faccd18e7b75134e03184881d31aaa6a; contrato documental em 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63.
+Current task: [~] CI da imagem de produção; testes técnicos/PostgreSQL 17/migrations/build/navegador já SUCCESS. Promover/implantar após smoke da imagem.
 Next task: obter CI verde; promover o commit funcional de hefesto-v8 para main; implantar API/worker, executar smoke não editorial e registrar SHA/digest/revisão.
-Known blocker: nenhum impedimento de código observado. PostgreSQL externo/Docker não estão disponíveis no checkout local; CI existente cobre ambos. Download local do Chromium bloqueado/truncado pelo ambiente; navegador será validado no CI.
+Known blocker: nenhum. Limitações locais de PostgreSQL/Docker/Chromium supridas pelo CI; testes reais passaram.
 Paid validation authorized: no
 Deploy status: IN PROGRESS — contrato novo ainda não implantado; recibo anterior abaixo permanece histórico até o deploy integrado.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
@@ -418,7 +418,8 @@ Ponto de parada: somente diagnóstico completo; produção continua no SHA funci
 [x] Contratos/estado: planejamento interno integral versionado e PE exatamente três campos, vinculação/approval, compatibilidade aditiva com JSONB existente.
 [x] Engine: concepção integral primeiro, persistência antes da síntese, remoque proporcional, lacunas reais via Hermes, escrita com concepção completa e extensão, revisão intelectual proporcional.
 [x] Produto: aprovação persiste e agenda produção numa única ação; idempotência, UI três campos e planejamento oculto.
-[ ] Testes genéricos, PostgreSQL, cache/ingestão/regressão, build, UI/API/imagem, CI integrada e deploy/smokes.
+[x] Testes genéricos, PostgreSQL 17, cache/ingestão/regressão, build e UI/API offline: 216 aprovados, sem skip. Commits: 684d2d98faccd18e7b75134e03184881d31aaa6a e 4dd602ab4e3e06a982da84b78cf3c813b15ba920.
+[~] Imagem de produção, CI integrada, promoção e deploy/smokes.
 [ ] Registrar SHA funcional e imagem/revisão, entregar sem teste editorial pago.
 
 Inspeção: implementação anterior tinha Proposal.document livre, nenhum planejamento interno, approve separado de produce, writer condicionado a suporte de todas as afirmações e verificador com substring literal. São substituídos, não autoridades funcionais. Preservar parsers/ingestão (incluindo namespace por fonte), Builder e limite dois blocos, Contexts/TTL/perfis/thinking máximo/temperatura, Hermes mecânico, autenticação/jobs e journals brutos. Persistência existente é JSONB versionado; novos campos podem ser aditivos sem criar tabelas desnecessárias. Não reescrever originais nem projetos antigos.
@@ -434,3 +435,6 @@ Inspeção: implementação anterior tinha Proposal.document livre, nenhum plane
 - Testes locais: suíte completa passou (contagem final registrada no recibo); dois testes PostgreSQL externos não executados localmente, a executar no CI real. pip check, compileall, sintaxe Node e wheel passaram. Fixtures neutras cobrem operações/estados/entradas/recuperação, não pretendem comprovar qualidade intelectual do LLM.
 
 Proteção final: aprovação idempotente só inicia no PE proposto ou retoma a própria aprovação pausada; não pode substituir remoque ativo/pausado de uma versão anteriormente aprovada. Teste genérico conserva identidade da revisão sem dispatch.
+
+### Checkpoint técnico — 2026-10-08 18:38 UTC
+CI https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37825641321, candidato 4dd602ab4e3e06a982da84b78cf3c813b15ba920. Job contracts-build-smoke SUCCESS: 216 passed, zero skip, PostgreSQL 17 independente/locks/CAS/journals/planejamento/approval/checkpoint, cache persistido, migrations e idempotência, wheel/pip/compileall/worker, Playwright/Chromium com login/zero-fontes/remoque/versões/PE3campos/aprovação automática/iPad. Local final: 214 passed, 2 integrações PG externas skip; ambas aprovadas no CI. Job production-image-smoke em build; nenhum modelo pago chamado. Commits dos contratos/engine/UI/testes: 684d2d98faccd18e7b75134e03184881d31aaa6a; concorrência: 4dd602ab4e3e06a982da84b78cf3c813b15ba920. Próximo passo exato: smoke da imagem → promoção main → deploy com configuração/migrations/check/startup/HTTP → recibo.
