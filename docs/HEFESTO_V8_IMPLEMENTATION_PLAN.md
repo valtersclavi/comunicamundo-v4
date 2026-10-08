@@ -2,12 +2,12 @@
 
 ## CURRENT STATUS
 Last completed task: diagnóstico e correção mínima da colisão de snapshots imutáveis na ingestão V8; três testes novos passaram e suíte local passou (198 testes, 2 integrações PostgreSQL externas puladas).
-Last commit: 03535f2b91c8f35975ff784e54207cfdf28ea732 — correção funcional de ingestão na branch V8; CI em andamento. Produção anterior: 94aed16210ded9d327bb0695a73d50aa0c4633c5. Registro documental é o HEAD.
-Current task: [~] publicar correção de namespace por fonte, executar CI completo e implantar após aprovação técnica automática; nenhuma geração editorial pelo assistente.
-Next task: verificar CI da correção, promover por fast-forward a main, acompanhar deploy e registrar SHA/imagem/revisão/smokes. Depois o usuário retoma a execução pausada; não iniciar teste pago autonomamente.
-Known blocker: execução do usuário 6d9d95bc-8d4c-4781-8b23-a93d647175cb interrompida por colisão de identidade em normalized-request.json. Correção local testada, ainda não implantada. Não apagar snapshots nem reiniciar o teste autonomamente.
+Last commit: 03535f2b91c8f35975ff784e54207cfdf28ea732 — correção funcional de ingestão aprovada em CI completo; deploy em andamento. Produção anterior: 94aed16210ded9d327bb0695a73d50aa0c4633c5. Registro documental é o HEAD.
+Current task: [~] acompanhar deploy da correção 03535f2 e confirmar revisão/imagem/smokes; CI completo SUCCESS, nenhuma geração editorial pelo assistente.
+Next task: acompanhar workflow de produção 37775589797, conferir todas as etapas e recibo final, atualizar este plano e entregar a retomada ao usuário. Não iniciar teste pago autonomamente.
+Known blocker: execução do usuário 6d9d95bc-8d4c-4781-8b23-a93d647175cb interrompida por colisão de identidade em normalized-request.json. Correção aprovada em CI completo e em implantação. Não apagar snapshots nem reiniciar o teste autonomamente.
 Paid validation authorized: no
-Deploy status: DONE — API hefesto-v4-api-00088-ldh e worker hefesto-v4-rebuild na mesma imagem por digest. Migration/check/startup/smoke público SUCCESS.
+Deploy status: [~] correção de ingestão em implantação: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37775589797. Último deploy confirmado: API hefesto-v4-api-00088-ldh / worker hefesto-v4-rebuild, imagem anterior abaixo.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
 Deployment commit: 94aed16210ded9d327bb0695a73d50aa0c4633c5
 Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:e64fb6ce712ff8fb05743ae75aca4cd134b5cb045e9a976761e182193914b28c
@@ -373,7 +373,8 @@ Fim da execução funcional: commit e imagem implantados, sem mudança editorial
 
 ## Correção isolada — colisão de snapshot na ingestão (2026-10-08)
 [x] Namespace estável por operação de extração de fonte. Commit: 03535f2b91c8f35975ff784e54207cfdf28ea732.
-[~] CI/deploy/smokes da correção: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37774687636 — CI em andamento; ainda não implantada.
+[x] CI completo: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37774687636 — SUCCESS, 200 testes sem skip, PostgreSQL 17 real, migrations, navegador e imagem/smoke sem modelo.
+[~] Deploy/smokes: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37775589797 — em andamento, SHA funcional 03535f2b91c8f35975ff784e54207cfdf28ea732. main promovida por fast-forward após CI; commits documentais não disparam deploy.
 
 Estado verificado: main e hefesto-v8 em 8ebd53a1d10834247a640bbec7f054e1085b9104. Produção ainda no código funcional 94aed16210ded9d327bb0695a73d50aa0c4633c5, revisão hefesto-v4-api-00088-ldh.
 
