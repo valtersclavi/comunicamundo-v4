@@ -6,11 +6,11 @@ O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui int
 ## CURRENT STATUS
 Last completed task: contrato editorial implementado integralmente e suíte local técnica aprovada; concepção/PE/remoque/aprovação automática/escrita/verificação/recuperação integrados.
 Last commit: 4dd602ab4e3e06a982da84b78cf3c813b15ba920 — proteção de concorrência; entrega integrada em 684d2d98faccd18e7b75134e03184881d31aaa6a; contrato documental em 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63.
-Current task: [~] CI da imagem de produção; testes técnicos/PostgreSQL 17/migrations/build/navegador já SUCCESS. Promover/implantar após smoke da imagem.
-Next task: obter CI verde; promover o commit funcional de hefesto-v8 para main; implantar API/worker, executar smoke não editorial e registrar SHA/digest/revisão.
+Current task: [~] deploy integrado em main do candidato 4dd602ab4e3e06a982da84b78cf3c813b15ba920; CI completa e smoke da imagem SUCCESS; pipeline de produção em build.
+Next task: concluir run de produção 37826667585 (push/digest, worker, migrate/check, API, startup/HTTP smoke); registrar imagem/revisão efetiva e entregar ao usuário sem teste editorial pago.
 Known blocker: nenhum. Limitações locais de PostgreSQL/Docker/Chromium supridas pelo CI; testes reais passaram.
 Paid validation authorized: no
-Deploy status: IN PROGRESS — contrato novo ainda não implantado; recibo anterior abaixo permanece histórico até o deploy integrado.
+Deploy status: IN PROGRESS — run https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37826667585 para 4dd602ab4e3e06a982da84b78cf3c813b15ba920. Testes de produção SUCCESS; build em execução. Recibo anterior abaixo permanece histórico até confirmação final.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
 Deployment commit: 03535f2b91c8f35975ff784e54207cfdf28ea732
 Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:ef4a9c518e96240bf46b95b404074e85e2927633d44fe07fa6287790aa402c35
@@ -438,3 +438,6 @@ Proteção final: aprovação idempotente só inicia no PE proposto ou retoma a 
 
 ### Checkpoint técnico — 2026-10-08 18:38 UTC
 CI https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37825641321, candidato 4dd602ab4e3e06a982da84b78cf3c813b15ba920. Job contracts-build-smoke SUCCESS: 216 passed, zero skip, PostgreSQL 17 independente/locks/CAS/journals/planejamento/approval/checkpoint, cache persistido, migrations e idempotência, wheel/pip/compileall/worker, Playwright/Chromium com login/zero-fontes/remoque/versões/PE3campos/aprovação automática/iPad. Local final: 214 passed, 2 integrações PG externas skip; ambas aprovadas no CI. Job production-image-smoke em build; nenhum modelo pago chamado. Commits dos contratos/engine/UI/testes: 684d2d98faccd18e7b75134e03184881d31aaa6a; concorrência: 4dd602ab4e3e06a982da84b78cf3c813b15ba920. Próximo passo exato: smoke da imagem → promoção main → deploy com configuração/migrations/check/startup/HTTP → recibo.
+
+### Promoção e deploy integrado em andamento
+CI 37825641321 integral SUCCESS: job contracts-build-smoke e production-image-smoke concluídos; extração/document_smoke/startup/health/V8/private401 sem modelos pagos. main promovida por fast-forward de 03b66dae66e4aa94f3f18408b6b68221d6c4d08e para 4dd602ab4e3e06a982da84b78cf3c813b15ba920 depois da CI. Run Hefesto production 37826667585/job113481179395 iniciado; configuração existente Gemini 2.5 Flash/global/thinking24576/temp1.0, secrets/migrations/workers preservados. Test product contract SUCCESS; build da imagem em andamento. Não iniciar validação editorial; aguardar deploy e recibo técnico.
