@@ -1,0 +1,73 @@
+name: Hefesto V8 response diagnosis (SELECT only)
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/hefesto-v8-response-diagnostic.yml]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  read-response:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: comunicamundo-v4
+          workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+          service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Read preserved response journal without model or project writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          temporary="hefesto-v8-response-read-${GITHUB_RUN_ID}"
+          trap 'gcloud run jobs delete "${temporary}" --project=comunicamundo-v4 --region=us-central1 --quiet' EXIT
+          image="$(gcloud run jobs describe hefesto-v4-rebuild --project=comunicamundo-v4 --region=us-central1 --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          test -n "${image}"
+          script="$(cat <<'PYTHON'
+          import base64, hashlib, json, os, zlib
+          import psycopg
+          result = {"read_only": True, "model_calls": 0, "projects": []}
+          with psycopg.connect(os.environ["HEFESTO_POSTGRES_DIRECT_URL"], autocommit=True) as db:
+              db.execute("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+              db.execute("SET LOCAL statement_timeout = '30s'")
+              db.execute("SET LOCAL lock_timeout = '5s'")
+              assert db.execute("SHOW transaction_read_only").fetchone()[0] == "on"
+              rows = db.execute("""SELECT execution_id,status,updated_at,payload FROM hefesto_product.v8_projects
+                  WHERE payload->'request'->>'project_id'=%s
+                  OR (updated_at >= %s AND payload->'error'->>'message'=%s)
+                  ORDER BY updated_at DESC""",
+                  ("6d9d95bc-8d4c-4781-8b23-a93d647175cb","2026-10-08T00:00:00Z",
+                   "response repair made no progress; all raw outputs preserved")).fetchall()
+              for eid,status,updated,state in rows:
+                  project = {"execution_id":str(eid),"project_id":state.get("request",{}).get("project_id"),
+                      "status":status,"updated_at":str(updated),"error":state.get("error"),
+                      "action":state.get("action"),"brief":state.get("request",{}).get("brief"),
+                      "work":state.get("work"),"telemetry":state.get("telemetry"),
+                      "sources":[{"source_id":s.get("source_id"),"title":s.get("title"),"tokens":s.get("tokens"),
+                          "locations":s.get("locations")} for s in state.get("sources",[])],"operations":[]}
+                  for key,journal in db.execute("""SELECT operation_key,payload FROM hefesto_product.v8_operations
+                      WHERE execution_id=%s ORDER BY updated_at""",(eid,)).fetchall():
+                      if journal.get("parse_error") or journal.get("repair_digest"):
+                          project["operations"].append({"key":key,"journal":journal})
+                  result["projects"].append(project)
+              db.rollback()
+          raw = json.dumps(result,ensure_ascii=False,default=str).encode()
+          encoded = base64.b64encode(zlib.compress(raw)).decode()
+          chunks = [encoded[i:i+1500] for i in range(0,len(encoded),1500)]
+          print("HEFESTO_DIAG_META "+json.dumps({"chunks":len(chunks),"sha256":hashlib.sha256(raw).hexdigest(),"projects":len(result["projects"])}),flush=True)
+          for i,chunk in enumerate(chunks):
+              print("HEFESTO_DIAG_PART "+json.dumps({"index":i,"data":chunk}),flush=True)
+          PYTHON
+          )"
+          gcloud run jobs deploy "${temporary}" --project=comunicamundo-v4 --region=us-central1 --image="${image}" --service-account=hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com --command=python --args="^@@^-c@@${script}" --set-secrets="HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest" --cpu=1 --memory=512Mi --task-timeout=300s --max-retries=0 --quiet
+          gcloud run jobs execute "${temporary}" --project=comunicamundo-v4 --region=us-central1 --wait
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${temporary}\"" --project=comunicamundo-v4 --limit=5000 --format='value(textPayload)' > "${RUNNER_TEMP}/response-diagnostic.txt"
+          cat "${RUNNER_TEMP}/response-diagnostic.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hefesto-v8-response-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/response-diagnostic.txt
+          retention-days: 7
