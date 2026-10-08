@@ -1,20 +1,20 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: diagnóstico e correção mínima da colisão de snapshots imutáveis na ingestão V8; três testes novos passaram e suíte local passou (198 testes, 2 integrações PostgreSQL externas puladas).
-Last commit: 03535f2b91c8f35975ff784e54207cfdf28ea732 — correção funcional de ingestão aprovada em CI completo; deploy em andamento. Produção anterior: 94aed16210ded9d327bb0695a73d50aa0c4633c5. Registro documental é o HEAD.
-Current task: [~] acompanhar deploy da correção 03535f2 e confirmar revisão/imagem/smokes; CI completo SUCCESS, nenhuma geração editorial pelo assistente.
-Next task: acompanhar workflow de produção 37775589797, conferir todas as etapas e recibo final, atualizar este plano e entregar a retomada ao usuário. Não iniciar teste pago autonomamente.
-Known blocker: execução do usuário 6d9d95bc-8d4c-4781-8b23-a93d647175cb interrompida por colisão de identidade em normalized-request.json. Correção aprovada em CI completo e em implantação. Não apagar snapshots nem reiniciar o teste autonomamente.
+Last completed task: correção isolada de colisão de snapshots imutáveis na ingestão V8, 200 testes/CI completo SUCCESS e deploy/smokes de produção SUCCESS.
+Last commit: 03535f2b91c8f35975ff784e54207cfdf28ea732 — SHA funcional efetivamente implantado. Registro final é o HEAD documental.
+Current task: correção entregue; execução editorial do usuário permanece sob controle do usuário.
+Next task: usuário atualiza /v8 e usa Retomar processamento na execução pausada. Não apagar projeto nem reenviar fontes concluídas. Não iniciar teste pago autonomamente. Futuras sessões leem este plano no GitHub, conferem HEAD e produção.
+Known blocker: colisão relatada corrigida e tecnicamente validada; retomada real/editorial será feita pelo usuário. Nenhuma geração editorial/cache real pago executado pelo assistente.
 Paid validation authorized: no
-Deploy status: [~] correção de ingestão em implantação: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37775589797. Último deploy confirmado: API hefesto-v4-api-00088-ldh / worker hefesto-v4-rebuild, imagem anterior abaixo.
+Deploy status: DONE — correção de ingestão implantada; API hefesto-v4-api-00089-gkw e worker hefesto-v4-rebuild na mesma imagem por digest. Migration/check/startup/smoke público SUCCESS.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
-Deployment commit: 94aed16210ded9d327bb0695a73d50aa0c4633c5
-Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:e64fb6ce712ff8fb05743ae75aca4cd134b5cb045e9a976761e182193914b28c
-Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37660818246 — SUCCESS em 2026-10-07 18:09 UTC.
-CI da correção funcional: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37657414964 — SUCCESS; 197 testes sem skip, PostgreSQL 17 real, migrations, navegador, build/dependências e imagem. CI adicional do diagnóstico: 37664763899 SUCCESS; 197 testes e imagem/startup/rotas novamente aprovados, sem chamadas de modelo.
+Deployment commit: 03535f2b91c8f35975ff784e54207cfdf28ea732
+Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:ef4a9c518e96240bf46b95b404074e85e2927633d44fe07fa6287790aa402c35
+Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37775589797 — SUCCESS em 2026-10-08 12:36 UTC.
+CI da correção funcional: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37774687636 — SUCCESS; 200 testes sem skip, PostgreSQL 17 real, migrations, navegador, build/dependências e imagem/startup/rotas. Explicit caching e thinking máximo preservados.
 IAM smoke: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37664761799 — SUCCESS; runtime testIamPermissions confirma cachedContents.create/get/list/update/delete. Zero chamadas de modelo e zero criações de cache. Job temporário excluído após execução.
-Testes locais: 195 passaram, 2 integrações PostgreSQL externas puladas; no CI ambas passaram. pip check, compileall, sintaxe Node, wheel e git diff --check passaram. Smokes produção /health, /v8, assets e API privada 401 passaram; nenhuma geração paga.
+Testes locais: 198 passaram, 2 integrações PostgreSQL externas puladas; ambas passaram no CI (200 no total). pip check, compileall, sintaxe Node, wheel e git diff --check passaram. Smokes de produção /health, /v8, assets e API privada 401 passaram; nenhuma geração paga.
 Main HEAD na inspeção inicial de 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7. Branches main e hefesto-v8 sincronizadas por fast-forward após desenvolvimento na branch V8; commits documentais posteriores não mudam a imagem implantada.
 Alterações: V8 completo em domínio/persistência/corpus/editor/Hermes/runtime/API/UI; parsers preservados. Checkout local raso validado contra SHA/tree/blobs exatos do GitHub. GitHub permanece memória canônica e fonte do histórico completo.
 
@@ -374,7 +374,7 @@ Fim da execução funcional: commit e imagem implantados, sem mudança editorial
 ## Correção isolada — colisão de snapshot na ingestão (2026-10-08)
 [x] Namespace estável por operação de extração de fonte. Commit: 03535f2b91c8f35975ff784e54207cfdf28ea732.
 [x] CI completo: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37774687636 — SUCCESS, 200 testes sem skip, PostgreSQL 17 real, migrations, navegador e imagem/smoke sem modelo.
-[~] Deploy/smokes: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37775589797 — em andamento, SHA funcional 03535f2b91c8f35975ff784e54207cfdf28ea732. main promovida por fast-forward após CI; commits documentais não disparam deploy.
+[x] Deploy/smokes: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37775589797 — SUCCESS, SHA funcional 03535f2b91c8f35975ff784e54207cfdf28ea732. main promovida por fast-forward após CI; commits documentais não disparam deploy.
 
 Estado verificado: main e hefesto-v8 em 8ebd53a1d10834247a640bbec7f054e1085b9104. Produção ainda no código funcional 94aed16210ded9d327bb0695a73d50aa0c4633c5, revisão hefesto-v4-api-00088-ldh.
 
@@ -384,4 +384,14 @@ Decisão: somente Ingestor.request no adaptador V8 usa UUID determinístico deri
 
 Testes novos usam o ingestor mecânico real e armazenamento simulado com semântica imutável real: reproduzem a colisão anterior, verificam duas fontes completas/endereço/original/hash sem colisão, idempotência da extração e preservação do snapshot antigo; interrompem na segunda fonte e retomam sem reler a primeira (original de entrada removido no teste); verificam isolamento por fonte/execução e estabilidade em restart. Provider é mock, sem modelo real. Testes anteriores do engine usavam ingestor mock e não cobriam essa fronteira; corrigida a lacuna de integração.
 
-Validação local: 198 testes passaram e 2 testes PostgreSQL externos pulados; três novos passaram. pip check, compileall, Node syntax, wheel e git diff --check passaram. CI executará PostgreSQL 17 real, migrations, UI/API e imagem de produção. Deploy ainda pendente desta correção; recibo anterior acima permanece válido até implantação confirmada. Nenhuma geração editorial paga, nenhum cache real criado, nenhuma retomada automática do projeto do usuário.
+Validação local: 198 testes passaram e 2 testes PostgreSQL externos pulados; três novos passaram. pip check, compileall, Node syntax, wheel e git diff --check passaram. CI executou PostgreSQL 17 real, migrations, UI/API e imagem de produção: 200 testes, todos passaram. Deploy desta correção concluído; recibo atual no CURRENT STATUS. Nenhuma geração editorial paga, nenhum cache real criado, nenhuma retomada automática do projeto do usuário.
+
+
+### Recibo final da correção de ingestão (2026-10-08 12:36 UTC)
+[x] Commit funcional implantado: 03535f2b91c8f35975ff784e54207cfdf28ea732.
+[x] CI 37774687636 / jobs 113302476299 e 113303106861: SUCCESS, 200 testes, PostgreSQL 17, migrations aditivas/idempotentes, browser mock, build e imagem real sem modelo.
+[x] Deploy 37775589797 / job 113305472351: SUCCESS. API hefesto-v4-api-00089-gkw servindo 100% do tráfego; worker hefesto-v4-rebuild no mesmo digest sha256:ef4a9c518e96240bf46b95b404074e85e2927633d44fe07fa6287790aa402c35.
+[x] Migration hefesto-v4-rebuild-pbxvr, PostgreSQL check hefesto-v4-rebuild-b8lv2 e startup sem modelo hefesto-v4-rebuild-9fs49: SUCCESS. /health, /v8, assets e API privada 401: SUCCESS.
+[x] Parsers, ingestão legada e proteção de objetos imutáveis preservados; thinking máximo/temperatura/explicit caching preservados. Não foram apagados snapshots nem alterados checkpoints da execução real. Nenhuma geração editorial paga e nenhum cache real criado. Assistente não retomou o job editorial do usuário.
+
+Ponto de parada: correção implantada e documentada; próximo passo é o usuário atualizar a página V8 e clicar Retomar processamento no projeto pausado. O teste de retomada com ingestor mecânico real confirma preservação da fonte concluída e extração somente das pendentes; não é promessa de validação editorial paga que não foi executada. Main e hefesto-v8 sincronizadas, registros documentais posteriores não mudam a imagem de produção.
