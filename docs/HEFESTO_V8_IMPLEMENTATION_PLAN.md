@@ -1,11 +1,11 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
 ## CURRENT STATUS
-Last completed task: correção isolada de colisão de snapshots imutáveis na ingestão V8, 200 testes/CI completo SUCCESS e deploy/smokes de produção SUCCESS.
-Last commit: 03535f2b91c8f35975ff784e54207cfdf28ea732 — SHA funcional efetivamente implantado. Registro final é o HEAD documental.
-Current task: correção entregue; execução editorial do usuário permanece sob controle do usuário.
-Next task: usuário atualiza /v8 e usa Retomar processamento na execução pausada. Não apagar projeto nem reenviar fontes concluídas. Não iniciar teste pago autonomamente. Futuras sessões leem este plano no GitHub, conferem HEAD e produção.
-Known blocker: colisão relatada corrigida e tecnicamente validada; retomada real/editorial será feita pelo usuário. Nenhuma geração editorial/cache real pago executado pelo assistente.
+Last completed task: diagnóstico somente leitura da pausa em verify, com recuperação integral dos textos e parse_error. Nenhuma correção aplicada.
+Last commit: produção permanece em 03535f2b91c8f35975ff784e54207cfdf28ea732. Diagnóstico temporário: 7b5b85be214d08796bdb8baace27500f7b6104e0 e a490bb71d43679e2900bd3cc62a490982c5dfa2b; registro documental/retirada do workflow é o HEAD.
+Current task: diagnóstico concluído conforme pedido do usuário; não corrigir nem retomar a execução.
+Next task: apresentar ao usuário o texto integral e erro exato recuperados; aguardar instrução explícita sobre eventual correção. Não retomar job nem iniciar chamadas pagas.
+Known blocker: execução 5c7cfbd8-b623-5dbd-b439-8f1b00704e58 pausada em verify: support claim absent from body, seguido de reparo idêntico/no progress. Falha de comparação literal e reparo sem o corpo original; somente diagnosticadas, não corrigidas.
 Paid validation authorized: no
 Deploy status: DONE — correção de ingestão implantada; API hefesto-v4-api-00089-gkw e worker hefesto-v4-rebuild na mesma imagem por digest. Migration/check/startup/smoke público SUCCESS.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
@@ -395,3 +395,17 @@ Validação local: 198 testes passaram e 2 testes PostgreSQL externos pulados; t
 [x] Parsers, ingestão legada e proteção de objetos imutáveis preservados; thinking máximo/temperatura/explicit caching preservados. Não foram apagados snapshots nem alterados checkpoints da execução real. Nenhuma geração editorial paga e nenhum cache real criado. Assistente não retomou o job editorial do usuário.
 
 Ponto de parada: correção implantada e documentada; próximo passo é o usuário atualizar a página V8 e clicar Retomar processamento no projeto pausado. O teste de retomada com ingestor mecânico real confirma preservação da fonte concluída e extração somente das pendentes; não é promessa de validação editorial paga que não foi executada. Main e hefesto-v8 sincronizadas, registros documentais posteriores não mudam a imagem de produção.
+
+
+## Diagnóstico somente leitura — pausa na verificação (2026-10-08 13:39 UTC)
+Pedido explícito do usuário: somente diagnosticar, não corrigir. Nenhuma mudança na lógica/configuração do produto, dados/checkpoints, job editorial ou modelo; nenhum deploy ou chamada de geração/cache. Acesso recuperado pelo caminho GitHub Actions/WIF → runtime existente → Secret Manager/PostgreSQL, sem expor secrets. Job temporário somente leitura executou BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY, confirmou transaction_read_only=on, fez SELECT e ROLLBACK; job foi excluído. Workflow diagnóstico temporário retirado ao concluir; fontes/respostas continuam no banco. Commits diagnósticos não disparam deploy de produção.
+
+Diagnóstico: projeto e87adb10-74bc-48ec-a986-4ee621a5d425 / execução 5c7cfbd8-b623-5dbd-b439-8f1b00704e58. Pausa registrada 2026-10-08 13:21:03 UTC. Operação verify 0b381b02392a8c10ce9cacd73f6f8a1de35356cc7f4074becc66a1887169a063, parse_error: support claim absent from body. Três tentativas (initial, repair, repair) com STOP e JSON válido, de 16144/14243/14243 caracteres. Dois reparos finais exatamente iguais; o digest igual provoca response repair made no progress; all raw outputs preserved.
+
+Primeiro bloqueio: podcast contém O "mundo que a criança conhecia" torna-se confuso e desorganizado.; claim da verificação usa aspas simples no mesmo trecho. Calls.validate exige claim in body sem normalização. Verificação inicial tem oito claims ausentes literalmente; reparos mantêm cinco, quatro com diferenças de aspas e um com redação diferente. Isto é falha de validação técnica da resposta do verificador, não rejeição editorial global nem JSON malformado. Prompt de reparo contém assembled/parse_error/endereços válidos; não contém state.work.body que a validação utiliza. Não foi aplicada correção.
+
+Podcast preservado: O Luto na Infância: Um Caminho de Cuidado e Compreensão, 8092 caracteres, 1306 palavras por body.split (aprox. 8,7 min à referência de 150 palavras/minuto). Verificador apontou duração curta (sua estimativa de 1740 palavras é imprecisa), repetição e uma comparação não explicitamente sustentada sobre luto antecipatório. Esses achados são distintos do bloqueio técnico; correções locais da verificação não chegaram a executar.
+
+Coleta: workflow de SELECT 37785224715/job 113338130098 SUCCESS; coleta integral dos logs após ingestão 37785997587/job 113340776792 SUCCESS. Exportação integral validada por 81 partes e SHA256 46493d5bd6a11aaf116c13bfd8409ca83376f2e448179307598bd451c9abd358. Primeira coleta de logs estava incompleta por atraso de ingestão; segunda coleta só leu logs existentes, sem reexecutar consulta/modelo. Relatório entregue com podcast integral e três respostas brutas completas, sem normalização. Projeto anterior 6d9d95bc-8d4c-4781-8b23-a93d647175cb / execução 809da39d-90ed-56fb-95c2-f15686c7351d estava project_proposed, sem erro atual; sua falha anterior de Proposal.document (objeto em lugar de string) já foi reparada. Não confundir com a pausa atual em verify.
+
+Ponto de parada: somente diagnóstico completo; produção continua no SHA funcional 03535f2, revisão hefesto-v4-api-00089-gkw e digest ef4a9c518e96240bf46b95b404074e85e2927633d44fe07fa6287790aa402c35. Aguardar orientação do usuário; não corrigir autonomamente.
