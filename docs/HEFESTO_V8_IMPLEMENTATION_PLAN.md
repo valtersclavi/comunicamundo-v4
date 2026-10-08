@@ -1,11 +1,14 @@
 # HEFESTO V8 — PLANO MESTRE DE IMPLEMENTAÇÃO
 
+## Autoridade funcional vigente (2026-10-08)
+O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui integralmente regras editoriais conflitantes deste histórico: concepção completa persistida, PE de três campos, aprovação única com produção automática, conhecimento geral legítimo e verificação proporcional. O histórico abaixo é memória de implementação, não autorização para restaurar comportamentos recusados. AGENTS.md histórico é reaproveitado apenas onde compatível com o contrato explícito do usuário.
+
 ## CURRENT STATUS
-Last completed task: diagnóstico somente leitura da pausa em verify, com recuperação integral dos textos e parse_error. Nenhuma correção aplicada.
+Last completed task: inspeção real de main/hefesto-v8 em 03b66dae66e4aa94f3f18408b6b68221d6c4d08e; contrato substitutivo documentado antes de alteração funcional.
 Last commit: produção permanece em 03535f2b91c8f35975ff784e54207cfdf28ea732. Diagnóstico temporário: 7b5b85be214d08796bdb8baace27500f7b6104e0 e a490bb71d43679e2900bd3cc62a490982c5dfa2b; registro documental/retirada do workflow é o HEAD.
-Current task: diagnóstico concluído conforme pedido do usuário; não corrigir nem retomar a execução.
-Next task: apresentar ao usuário o texto integral e erro exato recuperados; aguardar instrução explícita sobre eventual correção. Não retomar job nem iniciar chamadas pagas.
-Known blocker: execução 5c7cfbd8-b623-5dbd-b439-8f1b00704e58 pausada em verify: support claim absent from body, seguido de reparo idêntico/no progress. Falha de comparação literal e reparo sem o corpo original; somente diagnosticadas, não corrigidas.
+Current task: [~] implementar integralmente o contrato editorial canônico de 2026-10-08, em uma entrega integrada.
+Next task: artefatos/persistência aditiva, engine concepção/remoque/escrita/verificação, aprovação automática/UI, testes completos, CI única e deploy.
+Known blocker: implementação editorial anterior recusada; substituir comportamento, preservando infraestrutura. Nenhum impedimento técnico observado.
 Paid validation authorized: no
 Deploy status: DONE — correção de ingestão implantada; API hefesto-v4-api-00089-gkw e worker hefesto-v4-rebuild na mesma imagem por digest. Migration/check/startup/smoke público SUCCESS.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
@@ -409,3 +412,13 @@ Podcast preservado: O Luto na Infância: Um Caminho de Cuidado e Compreensão, 8
 Coleta: workflow de SELECT 37785224715/job 113338130098 SUCCESS; coleta integral dos logs após ingestão 37785997587/job 113340776792 SUCCESS. Exportação integral validada por 81 partes e SHA256 46493d5bd6a11aaf116c13bfd8409ca83376f2e448179307598bd451c9abd358. Primeira coleta de logs estava incompleta por atraso de ingestão; segunda coleta só leu logs existentes, sem reexecutar consulta/modelo. Relatório entregue com podcast integral e três respostas brutas completas, sem normalização. Projeto anterior 6d9d95bc-8d4c-4781-8b23-a93d647175cb / execução 809da39d-90ed-56fb-95c2-f15686c7351d estava project_proposed, sem erro atual; sua falha anterior de Proposal.document (objeto em lugar de string) já foi reparada. Não confundir com a pausa atual em verify.
 
 Ponto de parada: somente diagnóstico completo; produção continua no SHA funcional 03535f2, revisão hefesto-v4-api-00089-gkw e digest ef4a9c518e96240bf46b95b404074e85e2927633d44fe07fa6287790aa402c35. Aguardar orientação do usuário; não corrigir autonomamente.
+
+
+## Entrega integrada — contrato editorial substitutivo de 2026-10-08
+[~] Contratos/estado: planejamento interno integral versionado e PE exatamente três campos, vinculação/approval, compatibilidade aditiva com JSONB existente.
+[~] Engine: concepção integral primeiro, persistência antes da síntese, remoque proporcional, lacunas reais via Hermes, escrita com concepção completa e extensão, revisão intelectual proporcional.
+[~] Produto: aprovação persiste e agenda produção numa única ação; idempotência, UI três campos e planejamento oculto.
+[ ] Testes genéricos, PostgreSQL, cache/ingestão/regressão, build, UI/API/imagem, CI integrada e deploy/smokes.
+[ ] Registrar SHA funcional e imagem/revisão, entregar sem teste editorial pago.
+
+Inspeção: implementação anterior tinha Proposal.document livre, nenhum planejamento interno, approve separado de produce, writer condicionado a suporte de todas as afirmações e verificador com substring literal. São substituídos, não autoridades funcionais. Preservar parsers/ingestão (incluindo namespace por fonte), Builder e limite dois blocos, Contexts/TTL/perfis/thinking máximo/temperatura, Hermes mecânico, autenticação/jobs e journals brutos. Persistência existente é JSONB versionado; novos campos podem ser aditivos sem criar tabelas desnecessárias. Não reescrever originais nem projetos antigos.
