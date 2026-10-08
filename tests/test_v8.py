@@ -82,6 +82,21 @@ def support(s,claim="A grounded factual statement."):
     return dict(claim=claim,references=[dict(source_id=str(s.source_id),location_id=s.locations[0].location_id)])
 
 
+def conception(document="A reconsidered narrative.", planning=None):
+    content=planning or ("Mission: explain a contrast to a general audience. Start from an everyday question, "
+        "develop its mechanism and distinguish two interpretations. Relate the contrasting observations "
+        "through an example, test an objection and reach a qualified conclusion. Develop these intellectual "
+        "moves throughout the requested extent, rather than listing topics. The original documents qualify "
+        "the contrast; their order does not set the narrative.")
+    return [{"planning":content}, {"central_idea":document,
+        "narrative_development":"Establish the question, explain the mechanism, confront an objection and connect the consequences.",
+        "intended_conclusion":"A qualified interpretation that the audience can explain."}]
+
+
+def complete_body(prefix="Opening."):
+    return prefix+" " + " ".join(f"Synthetic observation {i} develops a distinct implication for this explanatory argument." for i in range(15))
+
+
 async def run(editor,repo,p,s):
     await repo.create(s)
     await editor.execute(s,Calls(repo,p,s))
@@ -90,11 +105,11 @@ async def run(editor,repo,p,s):
 @pytest.mark.asyncio
 async def test_integrated_supplied_remoque_approval_continuous_write_and_verification():
     s=source();repo=Memory();st=state(request([dict(uri=s.origin)]));ing=Ingestor([s]);search=Search(source(name="B"))
-    p=Provider([{"document":"Question, contrast, consequences and an ending."},
-                {"sufficient":True,"reason":"The existing corpus supports the new perspective."},
-                {"document":"A reconsidered narrative perspective."},
-                {"title":"Work","body":s.text,"support":[support(s)]},
-                {"issues":[],"support":[support(s)]}])
+    body=complete_body(s.text)
+    p=Provider([*conception("Question, contrast, consequences and an ending."),
+                *conception("A reconsidered narrative perspective."),
+                {"title":"Work","body":body,"support":[support(s)]},
+                {"issues":[]}])
     editor=Editor(repo,p,ing,search)
     await run(editor,repo,p,st)
     assert st.status=="project_proposed" and ing.calls==1
@@ -107,21 +122,19 @@ async def test_integrated_supplied_remoque_approval_continuous_write_and_verific
     assert not st.projects[0].approved_at
     st.action=dict(kind="approve",id="approve",version=2)
     await editor.execute(st,Calls(repo,p,st))
-    st.action=dict(kind="produce",id="produce",version=2)
-    await editor.execute(st,Calls(repo,p,st))
-    assert st.status=="text_ready" and st.work.body==s.text
-    assert len(p.prompts)==5
+    assert st.status=="text_ready" and st.work.body==body
+    assert len(p.prompts)==6
     assert [v["stage"] for v in st.telemetry][-2:]==["write","verify"]
     assert st.work.support[0].references[0].source_id==s.source_id
     await editor.execute(st,Calls(repo,p,st))
-    assert len(p.prompts)==5
+    assert len(p.prompts)==6
 
 
 @pytest.mark.asyncio
 async def test_zero_sources_converges_and_remoque_acquires_when_needed():
-    s=source();repo=Memory();st=state();search=Search(s);p=Provider([{"document":"Narrative."},
-        {"sufficient":False,"reason":"A missing perspective needs evidence.","research_direction":"Find original support for that perspective."},
-        {"document":"New narrative."}]);editor=Editor(repo,p,Ingestor([]),search)
+    s=source();repo=Memory();st=state();search=Search(s);p=Provider([*conception("Narrative."),
+        {"planning":"Preserve existing decisions; investigate the indispensable specific gap.","research_direction":"Find original support for that perspective."},
+        *conception("New narrative.")]);editor=Editor(repo,p,Ingestor([]),search)
     await run(editor,repo,p,st)
     assert search.calls==1 and st.status=="project_proposed"
     search.s=source(name="B")
@@ -170,7 +183,7 @@ async def test_crash_after_raw_before_parse_reuses_raw_without_provider_replay()
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure",[RuntimeError("429 RESOURCE_EXHAUSTED"),TimeoutError("timeout")])
 async def test_transport_failure_keeps_completed_stages_and_can_resume(failure):
-    repo=Memory();st=state(sources=[source()]);p=Provider([failure,{"document":"resumed"}]);editor=Editor(repo,p,Ingestor([]),Search(source()))
+    repo=Memory();st=state(sources=[source()]);p=Provider([failure,*conception("resumed")]);editor=Editor(repo,p,Ingestor([]),Search(source()))
     await repo.create(st)
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
     assert st.status=="paused" and st.sources and st.corpus
@@ -214,16 +227,16 @@ async def test_two_context_readings_keep_originals_for_single_writer():
 
 @pytest.mark.asyncio
 async def test_verifier_corrects_exact_passage_preserving_other_text():
-    s=source();repo=Memory();st=state(sources=[s]);body="Opening. Wrong claim. Closing."
-    p=Provider([{"document":"Narrative."}]);editor=Editor(repo,p,Ingestor([]),Search(s));await run(editor,repo,p,st)
-    st.projects[-1].approved_at="now";st.action=dict(kind="produce",id="produce",version=1)
+    s=source();repo=Memory();st=state(sources=[s]);body=complete_body("Opening. Wrong claim. Closing.")
+    p=Provider(conception("Narrative."));editor=Editor(repo,p,Ingestor([]),Search(s));await run(editor,repo,p,st)
+    st.action=dict(kind="approve",id="approve",version=1)
     ref=dict(source_id=str(s.source_id),location_id="A1")
     p.outputs=[{"title":"Work","body":body,"support":[]},
-        {"issues":[{"kind":"unsupported","problem":"Wrong claim.","target":"Wrong claim.","references":[ref]}],"support":[]},
-        {"replacement":"A grounded factual statement.","support":[support(s)]},
-        {"issues":[],"support":[support(s)]}]
+        {"issues":[{"kind":"unsupported","problem":"Wrong claim.","target":"Wrong claim.","passage_ids":["p1"],"correction":"Qualify the assertion, preserving valid opening and closing.","references":[ref]}]},
+        {"replacement":body.replace("Wrong claim.","A grounded factual statement."),"support":[support(s)]},
+        {"issues":[]}]
     await editor.execute(st,Calls(repo,p,st))
-    assert st.work.body=="Opening. A grounded factual statement. Closing."
+    assert st.work.body==body.replace("Wrong claim.","A grounded factual statement.")
     assert len(st.work_versions)>=2 and st.status=="text_ready"
 
 
@@ -231,16 +244,16 @@ async def test_verifier_corrects_exact_passage_preserving_other_text():
 async def test_resume_partial_ingestion_extracts_only_unfinished_sources():
     a,b=source(name="A"),source(name="B");req=request([dict(uri=a.origin),dict(uri=b.origin)])
     st=state(req,sources=[a]);st.ingestion[identity(req.sources[0])]=a.model_dump(mode="json")
-    ing=Ingestor([b]);repo=Memory();p=Provider([{"document":"Narrative."}]);await run(Editor(repo,p,ing,Search(a)),repo,p,st)
+    ing=Ingestor([b]);repo=Memory();p=Provider(conception("Narrative."));await run(Editor(repo,p,ing,Search(a)),repo,p,st)
     assert ing.calls==1 and len(st.sources)==2
 
 
 @pytest.mark.asyncio
 async def test_no_approval_prevents_paid_writing_and_stale_version_rejected():
-    repo=Memory();st=state(sources=[source()]);p=Provider([{"document":"Narrative."}]);editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
+    repo=Memory();st=state(sources=[source()]);p=Provider(conception("Narrative."));editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
     st.action=dict(kind="produce",id="p",version=1)
     with pytest.raises(ValueError):await editor.execute(st,Calls(repo,p,st))
-    assert len(p.prompts)==1
+    assert len(p.prompts)==2
 
 
 @pytest.mark.asyncio
@@ -376,12 +389,12 @@ async def test_unknown_inflight_requires_ack_then_retries_only_missing_operation
 
 @pytest.mark.asyncio
 async def test_action_checkpoint_prevents_duplicate_pe_after_crash_before_completion():
-    repo=Memory();st=state(sources=[source()]);p=Provider([{"document":"Preserved PE"}]);editor=Editor(repo,p,Ingestor([]),Search(source()));await repo.create(st)
+    repo=Memory();st=state(sources=[source()]);p=Provider(conception("Preserved PE"));editor=Editor(repo,p,Ingestor([]),Search(source()));await repo.create(st)
     # Execute atomic planning without final execute() action completion marker.
     await editor.plan(st,Calls(repo,p,st));assert len(st.projects)==1
     restored=await repo.get(st.execution_id)
     await editor.execute(restored,Calls(repo,p,restored))
-    assert len(restored.projects)==1 and len(p.prompts)==1
+    assert len(restored.projects)==1 and len(p.prompts)==2
 
 
 def test_v8_acquire_accepts_short_documents_without_changing_legacy_policy():

@@ -5,7 +5,8 @@ from uuid import uuid4
 import pytest
 from comunicamundo_v4.hefesto.postgres import ProductRepository
 from comunicamundo_v4.hefesto.v8.repository import Repository, Busy
-from comunicamundo_v4.hefesto.v8.contracts import Input, State, EditorialProject, identity
+from comunicamundo_v4.hefesto.v8.contracts import (Input, State, EditorialProject,
+    InternalPlanning, EditorialFields, Extent, GeneratedWork, identity)
 
 
 @pytest.mark.asyncio
@@ -29,6 +30,19 @@ async def test_postgres_independent_sessions_lock_cas_and_restart_journal():
                 async with b.lock(state.execution_id):pytest.fail("overlapping worker acquired project")
             stale=await b.get(state.execution_id)
             state.projects=[EditorialProject(version=1,document="Preserved proposal",corpus_manifest_id="manifest")]
+            plan=InternalPlanning(planning_id=uuid4(),version=1,
+                briefing_hash=identity(request.brief),corpus_manifest_id="manifest",
+                content="Explain a mechanism, develop its consequences and a counterargument, then reach a qualified conclusion.",
+                extent=Extent(target_words=150,duration_minutes=1),approved_at="2026-10-08T00:00:00+00:00")
+            state.internal_plans=[plan]
+            state.projects.append(EditorialProject(version=2,corpus_manifest_id="manifest",
+                planning_id=plan.planning_id,planning_version=1,approved_at=plan.approved_at,
+                fields=EditorialFields(central_idea="Explain a mechanism.",
+                    narrative_development="Develop consequences and a counterargument.",
+                    intended_conclusion="Reach a qualified understanding.")))
+            state.work=GeneratedWork(title="Work",body="A preserved valid passage.")
+            state.review_checkpoint=dict(base_work=state.work.model_dump(mode="json"),
+                groups=[dict(start=0,end=len(state.work.body),issues=[])],next_group=0)
             await a.save(state)
             with pytest.raises(Busy):await b.save(stale)
             key=identity("generic-operation")
@@ -38,6 +52,11 @@ async def test_postgres_independent_sessions_lock_cas_and_restart_journal():
         async with b.lock(state.execution_id):
             recovered=await b.get(state.execution_id)
             assert recovered.projects[0].document=="Preserved proposal"
+            assert recovered.internal_plans[0]==plan
+            assert recovered.projects[1].planning_id==plan.planning_id
+            assert recovered.projects[1].approved_at==plan.approved_at
+            assert recovered.work.body=="A preserved valid passage."
+            assert recovered.review_checkpoint==state.review_checkpoint
             assert (await b.operation(state.execution_id,key))["raw"]=="{malformed"
             assert recovered.action["id"]=="initial"
     finally:

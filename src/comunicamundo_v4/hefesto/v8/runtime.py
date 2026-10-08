@@ -32,6 +32,8 @@ async def repository():
 
 def public(state):
     data=state.model_dump(mode="json")
+    data.pop("internal_plans",None)
+    data.pop("review_checkpoint",None)
     # Text and original addresses remain in durable state; avoid transferring
     # the full corpus and search acquisitions on every polling request.
     data["sources"]=[{k:v for k,v in s.model_dump(mode="json").items() if k not in {"text","metadata"}}
@@ -128,19 +130,33 @@ class Backend:
                         raise ValueError("project is not awaiting editorial interaction")
                     remoque=Remoque(message=message,base_version=version)
                     action["remoque_hash"]=identity(remoque)
+                    action["base_status"]=state.status
                     if not any(identity(r)==identity(remoque) for r in state.remoque):state.remoque.append(remoque)
-                elif kind=="approve":
-                    if state.status=="project_approved":return public(state)
-                    if state.status!="project_proposed":raise ValueError("project is not awaiting approval")
-                elif kind=="produce":
-                    if state.status=="text_ready":return public(state)
-                    if state.status!="project_approved":raise ValueError("approved PE required")
+                elif kind in {"approve","produce"}:
+                    from .editorial import linked_planning
+                    from datetime import UTC,datetime
+                    pe=state.projects[-1];plan=linked_planning(state,pe)
+                    if kind=="produce" and not pe.approved_at:
+                        raise ValueError("approved PE required")
+                    action=dict(kind="approve",version=version,planning_id=str(plan.planning_id))
+                    action["id"]=identity(action)
+                    if action["id"] in state.completed_actions or state.status=="text_ready":return public(state)
+                    if state.action.get("id")==action["id"] and state.status!="paused":return public(state)
+                    if not pe.approved_at and state.status!="project_proposed":
+                        raise ValueError("project is not awaiting approval")
+                    stamp=pe.approved_at or datetime.now(UTC).isoformat()
+                    pe.approved_at=plan.approved_at=stamp
+                    # Approval and automatic production identity are durable
+                    # before dispatch; an interrupted dispatch is retryable.
+                    state.action=action;state.status="queued";state.error=None;state.notice=None
+                    return await self._dispatch(repo,state)
                 else:raise ValueError("unknown action")
                 action["id"]=identity(action)
                 if action["id"] in state.completed_actions:return public(state)
                 state.action=action
                 state.status="queued"
                 state.error=None
+                state.notice=None
                 return await self._dispatch(repo,state)
 
 

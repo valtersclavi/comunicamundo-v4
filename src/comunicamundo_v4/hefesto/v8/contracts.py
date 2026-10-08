@@ -76,10 +76,45 @@ class Corpus(Model):
     budget: dict
 
 
+class Extent(Model):
+    target_words: int = Field(gt=0)
+    duration_minutes: int = Field(gt=0)
+    words_per_minute: int = Field(default=150, gt=0)
+
+
+class EditorialFields(Model):
+    central_idea: str = Field(min_length=1)
+    narrative_development: str = Field(min_length=1)
+    intended_conclusion: str = Field(min_length=1)
+
+
+class Conception(Model):
+    planning: str = Field(min_length=1)
+    research_direction: str = ""
+    unchanged: bool = False
+    revision_effect: str = ""
+
+
+class InternalPlanning(Model):
+    planning_id: UUID
+    version: int = Field(ge=1)
+    briefing_hash: str
+    corpus_manifest_id: str
+    content: str = Field(min_length=1)
+    extent: Extent
+    previous_planning_id: UUID | None = None
+    remoque_hash: str | None = None
+    revision_effect: str = ""
+    approved_at: str | None = None
+
+
 class EditorialProject(Model):
     version: int = Field(ge=1)
-    document: str = Field(min_length=1)
+    document: str = ""  # Preserve previously stored free-form proposals.
     corpus_manifest_id: str
+    fields: EditorialFields | None = None
+    planning_id: UUID | None = None
+    planning_version: int | None = None
     approved_at: str | None = None
 
 
@@ -126,15 +161,28 @@ class SupportAssessment(Model):
 
 
 class Issue(Model):
-    kind: Literal["briefing", "unsupported", "contradiction", "repetition", "duration", "truncation", "consistency"]
+    kind: Literal["briefing", "unsupported", "contradiction", "repetition", "duration", "truncation", "consistency", "progression", "clarity", "omission", "factual"]
     problem: str = Field(min_length=1)
-    target: str = Field(min_length=1)
+    target: str = ""  # Legacy excerpts remain readable, not a validation gate.
+    passage_ids: list[str] = Field(default_factory=list)
+    correction: str = ""
+    scope: Literal["localized", "broad"] = "localized"
+    research_direction: str = ""
     references: list[Reference] = Field(default_factory=list)
 
 
 class Verification(Model):
     issues: list[Issue] = Field(default_factory=list)
     support: list[SupportReference] = Field(default_factory=list)
+
+
+class ReviewIssue(Issue):
+    passage_ids: list[str] = Field(min_length=1)
+    correction: str = Field(min_length=1)
+
+
+class Review(Model):
+    issues: list[ReviewIssue] = Field(default_factory=list)
 
 
 class Patch(Model):
@@ -166,6 +214,9 @@ class State(Model):
     ingestion: dict = Field(default_factory=dict)
     corpus: Corpus | None = None
     projects: list[EditorialProject] = Field(default_factory=list)
+    internal_plans: list[InternalPlanning] = Field(default_factory=list)
+    review_checkpoint: dict = Field(default_factory=dict)
+    notice: str | None = None
     remoque: list[Remoque] = Field(default_factory=list)
     work: GeneratedWork | None = None
     work_versions: list[GeneratedWork] = Field(default_factory=list)

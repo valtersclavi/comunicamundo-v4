@@ -1,7 +1,7 @@
 """Use the real mechanical ingestor and immutable storage contract, no model."""
 import pytest
 from test_ingestion import Storage
-from test_v8 import Provider, Memory, state, request, Search, source
+from test_v8 import Provider, Memory, state, request, Search, source, conception
 from comunicamundo_v4.hefesto.contracts import SourceInput
 from comunicamundo_v4.hefesto.v8.ingestion import Ingestor
 from comunicamundo_v4.hefesto.v8.provider import Calls
@@ -15,7 +15,7 @@ def setup():
                                 'b.txt':b'Second complete document.\n\nA different perspective.'}
     inputs=[SourceInput(uri='gs://uploads/'+name,title=name) for name in ('a.txt','b.txt')]
     st=state(request([x.model_dump(mode='json') for x in inputs]))
-    p=Provider([{'document':'One coherent editorial proposal.'}])
+    p=Provider(conception("One coherent editorial proposal."))
     return storage,inputs,st,p,Ingestor(storage,'product',p)
 
 
@@ -58,7 +58,7 @@ async def test_real_ingestion_restart_preserves_finished_source_and_extracts_rem
     await editor.execute(recovered,Calls(repo,p,recovered))
     assert recovered.status=='project_proposed' and len(recovered.sources)==2
     assert recovered.sources[0].model_dump(mode='json')==first
-    assert len(p.prompts)==1
+    assert len(p.prompts)==2
 
 
 def test_extraction_namespace_is_stable_per_source_and_scoped_to_execution():

@@ -4,13 +4,13 @@
 O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui integralmente regras editoriais conflitantes deste histórico: concepção completa persistida, PE de três campos, aprovação única com produção automática, conhecimento geral legítimo e verificação proporcional. O histórico abaixo é memória de implementação, não autorização para restaurar comportamentos recusados. AGENTS.md histórico é reaproveitado apenas onde compatível com o contrato explícito do usuário.
 
 ## CURRENT STATUS
-Last completed task: inspeção real de main/hefesto-v8 em 03b66dae66e4aa94f3f18408b6b68221d6c4d08e; contrato substitutivo documentado antes de alteração funcional.
-Last commit: produção permanece em 03535f2b91c8f35975ff784e54207cfdf28ea732. Diagnóstico temporário: 7b5b85be214d08796bdb8baace27500f7b6104e0 e a490bb71d43679e2900bd3cc62a490982c5dfa2b; registro documental/retirada do workflow é o HEAD.
-Current task: [~] implementar integralmente o contrato editorial canônico de 2026-10-08, em uma entrega integrada.
-Next task: artefatos/persistência aditiva, engine concepção/remoque/escrita/verificação, aprovação automática/UI, testes completos, CI única e deploy.
-Known blocker: implementação editorial anterior recusada; substituir comportamento, preservando infraestrutura. Nenhum impedimento técnico observado.
+Last completed task: contrato editorial implementado integralmente e suíte local técnica aprovada; concepção/PE/remoque/aprovação automática/escrita/verificação/recuperação integrados.
+Last commit: 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63 — contrato canônico commitado antes do código; commit funcional integrado em publicação. Produção anterior: 03535f2b91c8f35975ff784e54207cfdf28ea732.
+Current task: [~] CI integrada da entrega editorial; PostgreSQL 17 real, navegador, migrations e imagem de produção; promover/implantar após aprovação técnica.
+Next task: obter CI verde; promover o commit funcional de hefesto-v8 para main; implantar API/worker, executar smoke não editorial e registrar SHA/digest/revisão.
+Known blocker: nenhum impedimento de código observado. PostgreSQL externo/Docker não estão disponíveis no checkout local; CI existente cobre ambos. Download local do Chromium bloqueado/truncado pelo ambiente; navegador será validado no CI.
 Paid validation authorized: no
-Deploy status: DONE — correção de ingestão implantada; API hefesto-v4-api-00089-gkw e worker hefesto-v4-rebuild na mesma imagem por digest. Migration/check/startup/smoke público SUCCESS.
+Deploy status: IN PROGRESS — contrato novo ainda não implantado; recibo anterior abaixo permanece histórico até o deploy integrado.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
 Deployment commit: 03535f2b91c8f35975ff784e54207cfdf28ea732
 Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:ef4a9c518e96240bf46b95b404074e85e2927633d44fe07fa6287790aa402c35
@@ -415,10 +415,20 @@ Ponto de parada: somente diagnóstico completo; produção continua no SHA funci
 
 
 ## Entrega integrada — contrato editorial substitutivo de 2026-10-08
-[~] Contratos/estado: planejamento interno integral versionado e PE exatamente três campos, vinculação/approval, compatibilidade aditiva com JSONB existente.
-[~] Engine: concepção integral primeiro, persistência antes da síntese, remoque proporcional, lacunas reais via Hermes, escrita com concepção completa e extensão, revisão intelectual proporcional.
-[~] Produto: aprovação persiste e agenda produção numa única ação; idempotência, UI três campos e planejamento oculto.
+[x] Contratos/estado: planejamento interno integral versionado e PE exatamente três campos, vinculação/approval, compatibilidade aditiva com JSONB existente.
+[x] Engine: concepção integral primeiro, persistência antes da síntese, remoque proporcional, lacunas reais via Hermes, escrita com concepção completa e extensão, revisão intelectual proporcional.
+[x] Produto: aprovação persiste e agenda produção numa única ação; idempotência, UI três campos e planejamento oculto.
 [ ] Testes genéricos, PostgreSQL, cache/ingestão/regressão, build, UI/API/imagem, CI integrada e deploy/smokes.
 [ ] Registrar SHA funcional e imagem/revisão, entregar sem teste editorial pago.
 
 Inspeção: implementação anterior tinha Proposal.document livre, nenhum planejamento interno, approve separado de produce, writer condicionado a suporte de todas as afirmações e verificador com substring literal. São substituídos, não autoridades funcionais. Preservar parsers/ingestão (incluindo namespace por fonte), Builder e limite dois blocos, Contexts/TTL/perfis/thinking máximo/temperatura, Hermes mecânico, autenticação/jobs e journals brutos. Persistência existente é JSONB versionado; novos campos podem ser aditivos sem criar tabelas desnecessárias. Não reescrever originais nem projetos antigos.
+
+### Decisões e validação da entrega canônica
+- Planejamento é documento editorial completo de organização livre, expressamente produzido; não thinking privado nem matriz. Versões persistidas no JSONB existente, ligadas por UUID/versão/briefing hash/manifest à síntese em exatamente três campos. Nenhuma migration SQL nova é necessária: estrutura já suporta payload aditivo.
+- Concepção é uma operação intelectual integrada com corpus; síntese do PE é uma operação curta usando o planejamento já salvo, sem repetir corpus. Remoque preserva planejamento anterior; intervenção inteiramente contemplada gera aviso objetivo sem versão fictícia. Pesquisa é decidida pelo LLM apenas por lacuna específica indispensável.
+- Aprovação única salva aprovação do par planejamento/PE e identidade de produção antes de dispatch. Repetição da UI não duplica job. Falha de dispatch/worker mantém estado retomável. Projetos anteriores permanecem legíveis; sem planejamento não se fabrica concepção depois do PE: um remoque cria novo par canônico antes da aprovação.
+- Escritor recebe planejamento completo, PE, briefing e corpus original/contexto V8. Mantida conversão existente 150 palavras/minuto, agora transmitida como meta desde concepção e escrita. Saída contínua preflight usa limite verificado, sem truncar.
+- Obra salva antes de verificação. Verificador recebe contagem real e endereços técnicos dos parágrafos completos da obra; não cria escritores por parágrafo. Conhecimento geral/inferência/interpretação legítimos são permitidos. Apenas problemas acionáveis, com localização/explicação/correção. Substring support.claim removida; referências reais continuam validadas.
+- Correção substitui apenas intervalos afetados (agrupa sobreposições; ordem descendente preserva offsets). Checkpoint salva obra e progresso juntos; retomada não repete patches concluídos. Reparo de resposta recebe obra/planejamento relevante e raw preservado, sem repetir corpus.
+- Preservados ingestão/parsers/namespace por fonte, corpus Builder, máximo dois blocos, Hermes, context manager explícito/TTL 3600, perfis, thinking 24576/temperatura 1.0, telemetria/cache/journals, autenticação/storage/jobs. Sem geração paga, teste editorial, A/B, billing ou exceção temática.
+- Testes locais: suíte completa passou (contagem final registrada no recibo); dois testes PostgreSQL externos não executados localmente, a executar no CI real. pip check, compileall, sintaxe Node e wheel passaram. Fixtures neutras cobrem operações/estados/entradas/recuperação, não pretendem comprovar qualidade intelectual do LLM.
