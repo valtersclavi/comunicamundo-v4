@@ -121,6 +121,22 @@ async def test_one_approval_persists_both_artifacts_dispatches_once_and_writes_f
 
 
 @pytest.mark.asyncio
+async def test_approval_cannot_replace_an_active_revision(monkeypatch):
+    st=state(sources=[source()]);repo=Memory();p=Provider(conception())
+    await run(Editor(repo,p,Ingestor([]),Search(source())),repo,p,st)
+    st.projects[-1].approved_at=st.internal_plans[-1].approved_at="previous approval"
+    st.action=dict(kind="revise",id="active-revision",version=1)
+    st.status="planning";await repo.save(st)
+    @asynccontextmanager
+    async def db():yield repo
+    monkeypatch.setattr("comunicamundo_v4.hefesto.v8.runtime.repository",db)
+    async def dispatch(args):pytest.fail("approval must not replace an active revision")
+    with pytest.raises(ValueError,match="awaiting approval"):
+        await Backend(dispatch).action(st.execution_id,"u","approve",1)
+    assert (await repo.get(st.execution_id)).action["id"]=="active-revision"
+
+
+@pytest.mark.asyncio
 async def test_approval_dispatch_failure_retries_only_scheduling(monkeypatch):
     st=state(sources=[source()]);repo=Memory();p=Provider(conception());await run(Editor(repo,p,Ingestor([]),Search(source())),repo,p,st)
     @asynccontextmanager

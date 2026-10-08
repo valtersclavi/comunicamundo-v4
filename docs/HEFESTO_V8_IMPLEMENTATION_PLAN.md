@@ -5,7 +5,7 @@ O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui int
 
 ## CURRENT STATUS
 Last completed task: contrato editorial implementado integralmente e suíte local técnica aprovada; concepção/PE/remoque/aprovação automática/escrita/verificação/recuperação integrados.
-Last commit: 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63 — contrato canônico commitado antes do código; commit funcional integrado em publicação. Produção anterior: 03535f2b91c8f35975ff784e54207cfdf28ea732.
+Last commit: 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63 — contrato canônico commitado antes do código; commit funcional integrado: 684d2d98faccd18e7b75134e03184881d31aaa6a. Proteção final de concorrência em publicação. Produção anterior: 03535f2b91c8f35975ff784e54207cfdf28ea732.
 Current task: [~] CI integrada da entrega editorial; PostgreSQL 17 real, navegador, migrations e imagem de produção; promover/implantar após aprovação técnica.
 Next task: obter CI verde; promover o commit funcional de hefesto-v8 para main; implantar API/worker, executar smoke não editorial e registrar SHA/digest/revisão.
 Known blocker: nenhum impedimento de código observado. PostgreSQL externo/Docker não estão disponíveis no checkout local; CI existente cobre ambos. Download local do Chromium bloqueado/truncado pelo ambiente; navegador será validado no CI.
@@ -432,3 +432,5 @@ Inspeção: implementação anterior tinha Proposal.document livre, nenhum plane
 - Correção substitui apenas intervalos afetados (agrupa sobreposições; ordem descendente preserva offsets). Checkpoint salva obra e progresso juntos; retomada não repete patches concluídos. Reparo de resposta recebe obra/planejamento relevante e raw preservado, sem repetir corpus.
 - Preservados ingestão/parsers/namespace por fonte, corpus Builder, máximo dois blocos, Hermes, context manager explícito/TTL 3600, perfis, thinking 24576/temperatura 1.0, telemetria/cache/journals, autenticação/storage/jobs. Sem geração paga, teste editorial, A/B, billing ou exceção temática.
 - Testes locais: suíte completa passou (contagem final registrada no recibo); dois testes PostgreSQL externos não executados localmente, a executar no CI real. pip check, compileall, sintaxe Node e wheel passaram. Fixtures neutras cobrem operações/estados/entradas/recuperação, não pretendem comprovar qualidade intelectual do LLM.
+
+Proteção final: aprovação idempotente só inicia no PE proposto ou retoma a própria aprovação pausada; não pode substituir remoque ativo/pausado de uma versão anteriormente aprovada. Teste genérico conserva identidade da revisão sem dispatch.

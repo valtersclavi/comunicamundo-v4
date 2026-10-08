@@ -142,7 +142,8 @@ class Backend:
                     action["id"]=identity(action)
                     if action["id"] in state.completed_actions or state.status=="text_ready":return public(state)
                     if state.action.get("id")==action["id"] and state.status!="paused":return public(state)
-                    if not pe.approved_at and state.status!="project_proposed":
+                    if state.status!="project_proposed" and not (
+                            state.status=="paused" and state.action.get("id")==action["id"]):
                         raise ValueError("project is not awaiting approval")
                     stamp=pe.approved_at or datetime.now(UTC).isoformat()
                     pe.approved_at=plan.approved_at=stamp
