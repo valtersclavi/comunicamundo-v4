@@ -4,20 +4,20 @@
 O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui integralmente regras editoriais conflitantes deste histórico: concepção completa persistida, PE de três campos, aprovação única com produção automática, conhecimento geral legítimo e verificação proporcional. O histórico abaixo é memória de implementação, não autorização para restaurar comportamentos recusados. AGENTS.md histórico é reaproveitado apenas onde compatível com o contrato explícito do usuário.
 
 ## CURRENT STATUS
-Last completed task: contrato editorial implementado integralmente e suíte local técnica aprovada; concepção/PE/remoque/aprovação automática/escrita/verificação/recuperação integrados.
+Last completed task: entrega canônica integrada implementada, testada, promovida e implantada. CI 216 testes sem skip; imagem/DB/startup/HTTP SUCCESS; pronta para validação editorial do usuário.
 Last commit: 4dd602ab4e3e06a982da84b78cf3c813b15ba920 — proteção de concorrência; entrega integrada em 684d2d98faccd18e7b75134e03184881d31aaa6a; contrato documental em 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63.
-Current task: [~] deploy integrado em main do candidato 4dd602ab4e3e06a982da84b78cf3c813b15ba920; CI completa e smoke da imagem SUCCESS; pipeline de produção em build.
-Next task: concluir run de produção 37826667585 (push/digest, worker, migrate/check, API, startup/HTTP smoke); registrar imagem/revisão efetiva e entregar ao usuário sem teste editorial pago.
+Current task: nenhuma implementação pendente nesta entrega técnica; aguardando teste editorial do usuário.
+Next task: usuário cria projeto novo e valida concepção/PE/remoque/aprovação automática/obra no produto. Não executar teste editorial pago autonomamente. Sessão futura: ler este plano e HEADs reais antes de qualquer alteração.
 Known blocker: nenhum. Limitações locais de PostgreSQL/Docker/Chromium supridas pelo CI; testes reais passaram.
 Paid validation authorized: no
-Deploy status: IN PROGRESS — run https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37826667585 para 4dd602ab4e3e06a982da84b78cf3c813b15ba920. Testes de produção SUCCESS; build em execução. Recibo anterior abaixo permanece histórico até confirmação final.
+Deploy status: DONE — https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37826667585 SUCCESS em 2026-10-08 19:11 UTC. API hefesto-v4-api-00090-7dr, 100% tráfego; worker e API pelo mesmo digest; migration/check/startup/HTTP smoke SUCCESS.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
-Deployment commit: 03535f2b91c8f35975ff784e54207cfdf28ea732
-Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:ef4a9c518e96240bf46b95b404074e85e2927633d44fe07fa6287790aa402c35
-Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37775589797 — SUCCESS em 2026-10-08 12:36 UTC.
-CI da correção funcional: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37774687636 — SUCCESS; 200 testes sem skip, PostgreSQL 17 real, migrations, navegador, build/dependências e imagem/startup/rotas. Explicit caching e thinking máximo preservados.
+Deployment commit: 4dd602ab4e3e06a982da84b78cf3c813b15ba920
+Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:468ba5664c896fe6092ec16361fe9ffa86f9fcf53711b3d0fdf75fc75fda9365
+Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37826667585 — SUCCESS em 2026-10-08 19:11 UTC; job 113481179395.
+CI da entrega canônica: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37825641321 — SUCCESS; 216 testes sem skip, PostgreSQL 17 real, migrations, navegador, build/dependências e imagem/startup/rotas. Explicit caching e thinking máximo preservados.
 IAM smoke: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37664761799 — SUCCESS; runtime testIamPermissions confirma cachedContents.create/get/list/update/delete. Zero chamadas de modelo e zero criações de cache. Job temporário excluído após execução.
-Testes locais: 198 passaram, 2 integrações PostgreSQL externas puladas; ambas passaram no CI (200 no total). pip check, compileall, sintaxe Node, wheel e git diff --check passaram. Smokes de produção /health, /v8, assets e API privada 401 passaram; nenhuma geração paga.
+Testes locais finais: 214 passaram, 2 integrações PostgreSQL externas puladas; ambas passaram no CI (216 no total). pip check, compileall, sintaxe Node, wheel e git diff --check passaram. Smokes de produção /health, /v8, assets e API privada 401 passaram; nenhuma geração editorial paga.
 Main HEAD na inspeção inicial de 2026-10-07: 80748b2ce2993aa8f0d28e05262abef4b1a242a7. Branches main e hefesto-v8 sincronizadas por fast-forward após desenvolvimento na branch V8; commits documentais posteriores não mudam a imagem implantada.
 Alterações: V8 completo em domínio/persistência/corpus/editor/Hermes/runtime/API/UI; parsers preservados. Checkout local raso validado contra SHA/tree/blobs exatos do GitHub. GitHub permanece memória canônica e fonte do histórico completo.
 
@@ -419,8 +419,8 @@ Ponto de parada: somente diagnóstico completo; produção continua no SHA funci
 [x] Engine: concepção integral primeiro, persistência antes da síntese, remoque proporcional, lacunas reais via Hermes, escrita com concepção completa e extensão, revisão intelectual proporcional.
 [x] Produto: aprovação persiste e agenda produção numa única ação; idempotência, UI três campos e planejamento oculto.
 [x] Testes genéricos, PostgreSQL 17, cache/ingestão/regressão, build e UI/API offline: 216 aprovados, sem skip. Commits: 684d2d98faccd18e7b75134e03184881d31aaa6a e 4dd602ab4e3e06a982da84b78cf3c813b15ba920.
-[~] Imagem de produção, CI integrada, promoção e deploy/smokes.
-[ ] Registrar SHA funcional e imagem/revisão, entregar sem teste editorial pago.
+[x] Imagem de produção, CI integrada, promoção e deploy/smokes. Commit: 4dd602ab4e3e06a982da84b78cf3c813b15ba920; CI 37825641321 / deploy 37826667585 SUCCESS.
+[x] Registrar SHA funcional e imagem/revisão, entregar sem teste editorial pago. Recibo final abaixo.
 
 Inspeção: implementação anterior tinha Proposal.document livre, nenhum planejamento interno, approve separado de produce, writer condicionado a suporte de todas as afirmações e verificador com substring literal. São substituídos, não autoridades funcionais. Preservar parsers/ingestão (incluindo namespace por fonte), Builder e limite dois blocos, Contexts/TTL/perfis/thinking máximo/temperatura, Hermes mecânico, autenticação/jobs e journals brutos. Persistência existente é JSONB versionado; novos campos podem ser aditivos sem criar tabelas desnecessárias. Não reescrever originais nem projetos antigos.
 
@@ -441,3 +441,20 @@ CI https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37825641321, ca
 
 ### Promoção e deploy integrado em andamento
 CI 37825641321 integral SUCCESS: job contracts-build-smoke e production-image-smoke concluídos; extração/document_smoke/startup/health/V8/private401 sem modelos pagos. main promovida por fast-forward de 03b66dae66e4aa94f3f18408b6b68221d6c4d08e para 4dd602ab4e3e06a982da84b78cf3c813b15ba920 depois da CI. Run Hefesto production 37826667585/job113481179395 iniciado; configuração existente Gemini 2.5 Flash/global/thinking24576/temp1.0, secrets/migrations/workers preservados. Test product contract SUCCESS; build da imagem em andamento. Não iniciar validação editorial; aguardar deploy e recibo técnico.
+
+### Recibo final — contrato editorial canônico (2026-10-08 19:11 UTC)
+- Commit documental de autoridade antes do código: 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63.
+- Contratos, planejamento persistente, engine, UI e testes: 684d2d98faccd18e7b75134e03184881d31aaa6a.
+- Commit efetivamente implantado (inclui proteção de concorrência): 4dd602ab4e3e06a982da84b78cf3c813b15ba920.
+- CI: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37825641321 SUCCESS — 216 testes técnicos sem skip, PostgreSQL 17 real, cache/ingestão, versões/approval/idempotência/recuperação, migrations/idempotência/CAS/FK, pip/compileall/wheel/worker, Playwright/Chromium e imagem/document_smoke/startup/V8/auth.
+- Deploy: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37826667585 SUCCESS, job 113481179395. Suíte de produção: 214 passed / 2 PG externos skip (ambos já aprovados na CI real).
+- API: hefesto-v4-api; revisão hefesto-v4-api-00090-7dr, 100% do tráfego confirmado pelo Cloud Run. Worker: hefesto-v4-rebuild.
+- Imagem pinada API/worker: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:468ba5664c896fe6092ec16361fe9ffa86f9fcf53711b3d0fdf75fc75fda9365.
+- Migration execution: hefesto-v4-rebuild-pbnl9 SUCCESS; PostgreSQL check: hefesto-v4-rebuild-8tgjp SUCCESS; no-model startup: hefesto-v4-rebuild-m7tfx SUCCESS.
+- HTTP publicado: /health ready; /v8; assets/v8.js; /v8/projects não autenticado 401. SUCCESS.
+- Produto: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8.
+- Implementado: concepção intelectual integral e livre documentada antes da síntese; planejamento versionado/recuperável/oculto; PE fiel exatamente três campos e ligado à versão; remoque proporcional/com manifestação e histórico; lacuna específica via Hermes; aprovação única persiste/agenda produção idempotente; escritor usa plano completo e meta de extensão; obra persistida antes de revisão; verificação intelectual proporcional sem substring/citação compulsória; correções endereçadas preservam partes válidas e retomam checkpoints.
+- Infraestrutura preservada: ingestão e originais, Builder/máximo dois contextos, Hermes, PostgreSQL/GCS/autenticação/jobs, cache explícito/TTL deslizante 3600/perfis, Gemini 2.5 Flash/thinking24576/temperatura1.0, telemetria e raw journals.
+- Zero geração editorial paga executada nesta entrega. Nenhum teste de luto infantil, A/B ou avaliação de qualidade intelectual real.
+- Projetos anteriores preservados e legíveis. PEs históricos não têm planejamento completo; não se inventa concepção retrospectivamente. Remoque em checkpoint editorial cria novo par canônico. Para o primeiro teste desta entrega, criar projeto novo; qualidade editorial pertence à validação do usuário.
+- Parada: entrega técnica concluída; nenhuma alteração funcional pendente. Próximo passo: teste editorial do usuário. Commits documentais posteriores apenas registram recibos; imagem continua correspondendo ao SHA funcional acima.
