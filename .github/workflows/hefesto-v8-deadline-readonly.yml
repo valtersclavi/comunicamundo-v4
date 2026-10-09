@@ -1,0 +1,48 @@
+name: Hefesto V8 deadline diagnosis SELECT only
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/hefesto-v8-deadline-readonly.yml]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: comunicamundo-v4
+          workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+          service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      - run: pip install 'psycopg[binary]'
+      - name: Read persisted error without corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DIAG_DB_URL="$(gcloud secrets versions access latest --secret=hefesto-postgres-direct-url --project=comunicamundo-v4)"
+          python - <<'PY'
+          import os,json,psycopg
+          eid="3e259a8c-c508-5c80-928b-0a0cfbfc9140"
+          with psycopg.connect(os.environ["DIAG_DB_URL"],options="-c default_transaction_read_only=on") as c:
+              c.execute("SET TRANSACTION READ ONLY")
+              row=c.execute("SELECT payload FROM hefesto_product.v8_projects WHERE execution_id=%s",(eid,)).fetchone()
+              d=row[0]
+              result={k:d.get(k) for k in ["execution_id","revision","status","error","updated_at","telemetry","checkpoints","review_checkpoint","planning_checkpoint","writing_checkpoint"]}
+              result["state_keys"]=list(d)
+              result["work_summary"]={k:v for k,v in (d.get("work") or {}).items() if k not in ["text","support"]}
+              result["work_characters"]=len((d.get("work") or {}).get("text",""))
+              result["operations"]=[]
+              for key,p in c.execute("SELECT operation_key,payload FROM hefesto_product.v8_operations WHERE execution_id=%s",(eid,)).fetchall():
+                  result["operations"].append({"key":key,"stage":p.get("stage"),"errors":p.get("errors"),"in_flight":p.get("in_flight"),"keys":list(p),"responses":[{"keys":list(r),"stage":r.get("stage"),"usage":r.get("usage"),"raw_length":len(r.get("text",""))} for r in p.get("responses",[])]})
+          path=os.path.join(os.environ["RUNNER_TEMP"],"deadline-diagnosis.json")
+          open(path,"w").write(json.dumps(result,ensure_ascii=False,default=str))
+          print("Read-only diagnosis saved; no model calls; no state updates.")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deadline-readonly-diagnosis
+          path: ${{ runner.temp }}/deadline-diagnosis.json
+          retention-days: 7
