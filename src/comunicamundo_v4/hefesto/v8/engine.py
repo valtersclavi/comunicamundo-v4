@@ -195,6 +195,8 @@ class Editor:
         await self.checkpoint(state,"project_proposed")
 
     def validate_work(self,work,state):
+        from .corpus import sanitize_support
+        sanitize_support(work,state.sources)
         for support in work.support:
             validate_references(support.references,state.sources)
 
