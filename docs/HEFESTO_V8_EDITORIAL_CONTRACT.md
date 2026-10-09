@@ -10,6 +10,8 @@ A operação principal de planejamento recebe briefing, fontes disponíveis e ex
 
 O planejador produz diretamente o rascunho intelectual desenvolvido, usando o núcleo de instruções fornecido pelo usuário em `v8/editorial.py:DRAFT`: começar pela matéria central, aprofundar explicações por causas/mecanismos/consequências, relacionar ideias, explorar implicações, incorporar exemplos pertinentes, nuances e contrapontos. O desenvolvimento progressivo acontece dentro dessa tarefa. Não pedir acabamento estilístico nem relatórios sobre o processo. Proibidos repetição, paráfrases redundantes, exemplos decorativos, digressões e assuntos artificiais para aumentar volume.
 
+O princípio `AUTHORSHIP`, compartilhado pelo planejador e escritor, estabelece o briefing como direção da obra e as fontes como sustentação do conhecimento e limites factuais. O autor concebe a linha narrativa e pode formular relações, analogias e interpretações originais, distinguindo-as de fatos estabelecidos. Não reproduzir obrigatoriamente a sequência, classificações ou importância relativa dos documentos. Não inventar fatos ou evidências.
+
 Uma chamada principal `intellectual-draft`, não chamadas por assunto nem ciclos de escrever/avaliar/aprofundar. A resposta contém apenas `body`, com o próprio rascunho integral. O envelope JSON reutiliza transporte e recuperação existentes; não acrescenta análise de suficiência.
 
 ## 2. Persistência e Projeto Editorial
@@ -36,9 +38,13 @@ Planejamentos históricos permanecem legíveis com `content_kind=abstract_plan`,
 
 O escritor recebe rascunho integral, encomenda original, PE aprovado, fontes/contexto e instruções editoriais de público, formato, idioma e tom. O rascunho excedente é matéria-prima: liberdade explícita para selecionar, reorganizar, condensar e reescrever, sem preservar literalmente redação, ordem dos parágrafos ou todos os detalhes ilustrativos. A meta final continua sendo a encomenda original, não os 130%.
 
+Dentro da concepção aprovada, o escritor também pode ampliar relações e melhorar explicações. Essa liberdade permanece nas instruções da complementação de extensão, sem alterar seu mecanismo, metas ou tolerância. Classificações e enumerações do rascunho não são obrigatórias.
+
 Preservar a produção e recuperação existentes, incluindo o tratamento da extensão da obra final dentro da escrita. Esse tratamento não chama novamente o planejador. A contagem do rascunho é somente telemetria.
 
 A esteira hierárquica posterior permanece: completude → coerência/consistência → narrativa → estilo. A completude respeita a seleção e condensação autorizadas do material excedente; não exige incorporar todos os detalhes do rascunho. Permanecem diagnósticos, correções, confirmações, reconsideração autônoma e preservação das aprovações anteriores.
+
+O contrato `CONSISTENCY` vale no diagnóstico, correção, confirmação e reconsideração: protege coerência e responsabilidade factual, sem exigir passagem documental equivalente para cada argumento ou conexão, nem fidelidade à organização das fontes. Originalidade não constitui defeito. Contradições efetivas, erros factuais, inferências apresentadas como fatos e conclusões injustificadas continuam verificáveis; a consulta documental existente atende somente dúvida factual específica e relevante. A narrativa avalia qualidade efetiva, não conformidade documental; estilo preserva pensamento e ordem narrativa consolidada. Todas as etapas aprovam diretamente quando não há defeito concreto dentro de sua competência.
 
 ## 5. Capacidade, recuperação e observabilidade
 
