@@ -89,14 +89,14 @@ async def test_entire_editorial_cycle_reuses_one_cache_without_reingestion():
     await editor.execute(st,Calls(repo,p,st))
     st.action=dict(kind="approve",id="a",version=2);await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready" and ing.calls==1
-    assert len(p.creations)==1 and len(p.reads)==11
+    assert len(p.creations)==1 and len(p.reads)==9
     assert len({v["resource"] for v in p.reads if v})==1
     assert all("ORIGINAL TEXT" not in prompt for prompt,_ in p.prompts)
     assert p.creations[0][0]==st.corpus.blocks[0]
     assert all(ttl==3600 for _,ttl in p.renewals)
     usage=public(st)["usage"]
     assert usage["cache_creations"]==1 and usage["cache_reuses"]==2
-    assert usage["reasoning_tokens"]==60 and usage["uncached_input_tokens"]==110
+    assert usage["reasoning_tokens"]==60 and usage["uncached_input_tokens"]==90
     assert usage["cached_tokens"]==3*st.corpus.block_tokens[0]
 
 
@@ -333,3 +333,4 @@ async def test_postgres_explicit_cache_metadata_survives_independent_worker_rest
             assert recovered.sources[0].text==st.sources[0].text
             assert public(recovered)["usage"]["cache_reuses"]==1
     finally:await fresh.close()
+

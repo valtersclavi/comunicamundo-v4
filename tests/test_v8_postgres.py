@@ -34,7 +34,7 @@ async def test_postgres_independent_sessions_lock_cas_and_restart_journal():
             plan=InternalPlanning(planning_id=uuid4(),version=1,
                 briefing_hash=identity(request.brief),corpus_manifest_id="manifest",
                 content="Explain a mechanism, develop its consequences and a counterargument, then reach a qualified conclusion.",
-                extent=Extent(target_words=150,duration_minutes=1),movements=conception()[0]["movements"],sufficiency=conception()[1],approved_at="2026-10-08T00:00:00+00:00")
+                extent=Extent(target_words=150,duration_minutes=1),content_kind="intellectual_draft",draft_target_words=195,measured_words=18,approved_at="2026-10-08T00:00:00+00:00")
             state.internal_plans=[plan]
             state.projects.append(EditorialProject(version=2,corpus_manifest_id="manifest",
                 planning_id=plan.planning_id,planning_version=1,approved_at=plan.approved_at,
@@ -44,7 +44,7 @@ async def test_postgres_independent_sessions_lock_cas_and_restart_journal():
             state.work=GeneratedWork(title="Work",body="A preserved valid passage.")
             state.review_checkpoint=dict(base_work=state.work.model_dump(mode="json"),
                 groups=[dict(start=0,end=len(state.work.body),issues=[])],next_group=0)
-            state.planning_checkpoint=dict(history=[conception()[0]],assessments=[conception()[1]])
+            state.planning_checkpoint={}
             state.writing_checkpoint=dict(complete=True,attempts=[])
             state.editorial_stages=[EditorialStage(position=1,stage_id="completeness",status="approved",
                 examined_work=state.work,approval=dict(work_hash=identity(state.work),consolidated_work=state.work.model_dump(mode="json"))),
@@ -72,3 +72,4 @@ async def test_postgres_independent_sessions_lock_cas_and_restart_journal():
             assert recovered.action["id"]=="initial"
     finally:
         await first.close();await second.close()
+

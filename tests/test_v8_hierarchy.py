@@ -7,8 +7,8 @@ from test_v8 import (Memory, Provider, Ingestor, Search, source, state, concepti
                      complete_body, review_ok, problem, confirmed, run)
 from comunicamundo_v4.hefesto.v8.engine import Editor
 from comunicamundo_v4.hefesto.v8.provider import Calls, Recoverable
-from comunicamundo_v4.hefesto.v8.contracts import InternalPlanning, Conception, Sufficiency
-from comunicamundo_v4.hefesto.v8.editorial import dimensioned
+from comunicamundo_v4.hefesto.v8.contracts import InternalPlanning
+from comunicamundo_v4.hefesto.v8.editorial import has_intellectual_draft
 from comunicamundo_v4.hefesto.v8.runtime import public
 
 
@@ -35,53 +35,48 @@ def decision(disposition, replacement=None):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("approach",["Explain a process","Compare interpretations"])
-async def test_insufficient_nominal_conception_is_deepened_before_pe(approach):
+async def test_draft_precedes_pe_without_sufficiency_or_regeneration(approach):
     st=state(sources=[source()]);st.request.brief.approach=approach;repo=Memory()
-    good=conception();nominal=deepcopy(good[0])
-    nominal["planning"]="Mention the topics for one minute."
-    for m in nominal["movements"]:
-        m["development"]="Mention the topic."
-        m["space_justification"]="The allocated number is the target."
-    insufficient=dict(sufficient=False,reasoning="Numbers match but there is no executable explanation.",
-        movement_evidence={},deficiencies=["Develop the mechanism, distinction, objection and their intellectual relationship."])
+    outputs=conception()
     class Inspect(Provider):
         async def generate(self,prompt,system,output):
-            if "COMPLETE PERSISTED INTERNAL PLANNING" in prompt:
+            if "COMPLETE PERSISTED INTELLECTUAL DRAFT" in prompt:
                 saved=await repo.get(st.execution_id)
-                assert dimensioned(saved.internal_plans[-1]) and len(saved.planning_checkpoint["history"])==1
+                assert has_intellectual_draft(saved.internal_plans[-1])
+                assert saved.internal_plans[-1].content==outputs[0]["body"]
                 assert not saved.projects
             return await super().generate(prompt,system,output)
-    p=Inspect([nominal,insufficient,*good]);editor=Editor(repo,p,Ingestor([]),Search(source()))
+    p=Inspect(outputs);editor=Editor(repo,p,Ingestor([]),Search(source()))
     await run(editor,repo,p,st)
-    assert len(p.prompts)==5 and len(st.internal_plans)==1
-    assert good[0]["planning"]==st.internal_plans[0].content
-    assert insufficient["deficiencies"][0] in p.prompts[2][0]
-    assert "PRESERVED LAST CONCEPTION" in p.prompts[2][0]
-    assert set(st.projects[0].fields.model_dump())=={"central_idea","narrative_development","intended_conclusion"}
+    assert len(p.prompts)==2 and len(st.internal_plans)==1
+    assert not st.internal_plans[0].sufficiency and not st.internal_plans[0].movements
+    assert not st.planning_checkpoint
+    assert st.internal_plans[0].draft_target_words==195
+    assert st.internal_plans[0].measured_words==len(outputs[0]["body"].split())
     p.outputs=[dict(title="Work",body=complete_body()),*review_ok()]
     st.action=dict(kind="approve",id="a",version=1)
     await editor.execute(st,Calls(repo,p,st))
-    writer=next(prompt for prompt,_ in p.prompts if "QUANTITATIVE TARGET" in prompt)
-    for movement in st.internal_plans[0].movements:
-        assert movement.development in writer and movement.space_justification in writer
-    assert '"target_words":120' in writer
+    writer,contract=next((prompt,system) for prompt,system in p.prompts if "QUANTITATIVE TARGET" in prompt)
+    assert outputs[0]["body"] in writer
+    assert "select, reorganize, condense and rewrite" in contract
     assert all("does not complete duration" in system for _,system in p.prompts if "STAGE " in system)
 
 
 @pytest.mark.asyncio
-async def test_planning_insufficiency_progress_survives_transport_restart():
+async def test_draft_technical_continuation_preserves_partial_output_after_restart():
     st=state(sources=[source()]);repo=Memory();good=conception()
-    failed=dict(sufficient=False,reasoning="The objection needs substantive reasoning.",movement_evidence={},deficiencies=["Develop the objection."])
-    draft=deepcopy(good[0]);draft["planning"]="An incomplete mechanism without its objection."
-    p=Provider([draft,failed,TimeoutError("service"),*good]);editor=Editor(repo,p,Ingestor([]),Search(source()))
+    body=good[0]["body"];raw=json.dumps(good[0]);cut=len(raw)//2
+    p=Provider([(raw[:cut],"MAX_TOKENS"),TimeoutError("service"),(raw[cut:],"STOP"),good[1]])
+    editor=Editor(repo,p,Ingestor([]),Search(source()))
     await repo.create(st)
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
     saved=await repo.get(st.execution_id)
-    assert saved.planning_checkpoint["history"][0]["planning"]==draft["planning"]
-    assert not saved.projects and not saved.internal_plans
+    journal=next(iter(repo.ops.values()))
+    assert journal["assembled"]==raw[:cut] and not saved.projects
     await editor.execute(saved,Calls(repo,p,saved))
-    assert saved.status=="project_proposed" and len(saved.planning_checkpoint["assessments"])==2
-    assert sum("Assess the COMPLETE conception" in system for _,system in p.prompts)==2
+    assert saved.status=="project_proposed" and saved.internal_plans[0].content==body
+    assert not saved.planning_checkpoint
+    assert p.prompts[2][0].endswith(raw[:cut])
 
 
 @pytest.mark.asyncio
@@ -219,13 +214,11 @@ async def test_reconsideration_can_reject_excessive_objection_without_fabricatin
     assert len(st.editorial_stages[1].attempts)==2 and not st.error
 
 
-def test_numeric_declaration_without_substantive_evidence_is_not_dimensioned():
-    c,s,_=conception()
+def test_legacy_planning_is_preserved_without_being_relabelled_as_a_draft():
     plan=InternalPlanning(planning_id=uuid4(),version=1,briefing_hash="b",corpus_manifest_id="m",content="Topics; one minute.",
-        extent=dict(target_words=150,duration_minutes=1),movements=Conception.model_validate(c).movements,
-        sufficiency=Sufficiency(sufficient=True,reasoning="150 words",movement_evidence={}))
-    assert not dimensioned(plan)
-    assert not dimensioned(plan.model_copy(update=dict(movements=[])))
+        extent=dict(target_words=150,duration_minutes=1))
+    assert not has_intellectual_draft(plan)
+    assert has_intellectual_draft(plan.model_copy(update=dict(content_kind="intellectual_draft")))
 
 
 @pytest.mark.asyncio
@@ -249,3 +242,4 @@ async def test_final_save_failure_recovers_delivery_without_repeating_approved_o
     assert saved.status=="text_ready" and saved.error is None
     assert [stage.approval for stage in saved.editorial_stages]==approved
     assert len(p.prompts)==before and public(saved)["work"]["body"]==complete_body()
+

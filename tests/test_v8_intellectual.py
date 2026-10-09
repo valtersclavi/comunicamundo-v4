@@ -6,7 +6,7 @@ import pytest
 
 from test_v8 import (Memory, Provider, Ingestor, Search, source, state, request,
                      conception, complete_body, review_ok, problem, confirmed, support, run)
-from comunicamundo_v4.hefesto.v8.contracts import (EditorialFields, Conception,
+from comunicamundo_v4.hefesto.v8.contracts import (EditorialFields,
     EditorialProject, GeneratedWork, Review, Remoque, State, identity)
 from comunicamundo_v4.hefesto.v8.engine import Editor
 from comunicamundo_v4.hefesto.v8.provider import Calls, Recoverable
@@ -34,7 +34,7 @@ async def test_complete_conception_is_persisted_before_three_field_synthesis_and
     # A completed planning is present in the persisted state before the PE call.
     class Inspect(Provider):
         async def generate(self,prompt,system,output):
-            if "COMPLETE PERSISTED INTERNAL PLANNING" in prompt:
+            if "COMPLETE PERSISTED INTELLECTUAL DRAFT" in prompt:
                 saved=await repo.get(st.execution_id)
                 assert saved.internal_plans and not saved.projects
             return await super().generate(prompt,system,output)
@@ -47,7 +47,7 @@ async def test_complete_conception_is_persisted_before_three_field_synthesis_and
 async def test_planning_survives_synthesis_failure_without_repeating_conception():
     st=state(sources=[source()]);repo=Memory()
     outputs=conception("One checkpoint.")
-    p=Provider([outputs[0],outputs[1],TimeoutError("transport"),outputs[2]])
+    p=Provider([outputs[0],TimeoutError("transport"),outputs[1]])
     editor=Editor(repo,p,Ingestor([]),Search(source()))
     await repo.create(st)
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
@@ -57,7 +57,7 @@ async def test_planning_survives_synthesis_failure_without_repeating_conception(
     await editor.execute(recovered,Calls(repo,p,recovered))
     assert recovered.internal_plans[0].model_dump(mode="json")==before
     assert len(recovered.internal_plans)==1 and len(recovered.projects)==1
-    assert sum("CURRENT COMPLETE PLANNING" in x[0] for x in p.prompts)==1
+    assert sum("CURRENT COMPLETE WORKING MATERIAL" in x[0] for x in p.prompts)==1
 
 
 @pytest.mark.asyncio
@@ -79,7 +79,7 @@ async def test_intelligent_remoque_versions_full_planning_and_manifests_effect(s
     assert st.internal_plans[1].remoque_hash==identity(r)
     assert st.projects[-1].planning_id==st.internal_plans[-1].planning_id
     assert st.projects[-1].fields.central_idea==message
-    assert original in p.prompts[3][0] and message in p.prompts[3][0]
+    assert original in p.prompts[2][0] and message in p.prompts[2][0]
     assert "Mission remains explanation" in st.internal_plans[-1].content
 
 
@@ -88,10 +88,10 @@ async def test_fully_contemplated_remoque_reports_truth_without_fake_versions():
     st=state(sources=[source()]);repo=Memory();p=Provider(conception());editor=Editor(repo,p,Ingestor([]),Search(source()))
     await run(editor,repo,p,st);r=Remoque(message="Keep the qualified conclusion",base_version=1)
     st.remoque.append(r);st.action=dict(kind="revise",id="r",remoque_hash=identity(r),version=1)
-    p.outputs=[dict(planning=st.internal_plans[0].content,unchanged=True,revision_effect="A conclusão qualificada já integra a concepção vigente.")]
+    p.outputs=[dict(body=st.internal_plans[0].content)]
     await editor.execute(st,Calls(repo,p,st))
     assert len(st.projects)==len(st.internal_plans)==1 and st.notice
-    assert st.status=="project_proposed" and len(p.prompts)==4
+    assert st.status=="project_proposed" and len(p.prompts)==3
 
 
 @pytest.mark.asyncio
@@ -118,7 +118,7 @@ async def test_one_approval_persists_both_artifacts_dispatches_once_and_writes_f
     assert recovered.projects[-1].fields.central_idea in writer
     assert "150 words" in writer
     await backend.action(st.execution_id,"u","approve",1);assert len(jobs)==1
-    await editor.execute(recovered,Calls(repo,p,recovered));assert len(p.prompts)==8
+    await editor.execute(recovered,Calls(repo,p,recovered));assert len(p.prompts)==7
 
 
 @pytest.mark.asyncio
@@ -154,7 +154,7 @@ async def test_approval_dispatch_failure_retries_only_scheduling(monkeypatch):
     assert stamp and saved.projects[-1].approved_at==stamp
     await backend.action(st.execution_id,"u","approve",1)
     await backend.action(st.execution_id,"u","approve",1)
-    assert len(jobs)==2 and len(p.prompts)==3
+    assert len(jobs)==2 and len(p.prompts)==2
     assert (await repo.get(st.execution_id)).internal_plans[-1].approved_at==stamp
 
 
@@ -167,7 +167,7 @@ async def test_work_persisted_before_failed_review_and_not_written_again():
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
     saved=await repo.get(st.execution_id);assert saved.work.body==body and saved.work_versions
     await editor.execute(saved,Calls(repo,p,saved))
-    assert saved.status=="text_ready" and len(p.prompts)==9
+    assert saved.status=="text_ready" and len(p.prompts)==8
     assert sum("QUANTITATIVE TARGET" in prompt for prompt,_ in p.prompts)==1
 
 
@@ -248,3 +248,4 @@ def test_old_jsonb_projects_remain_readable_without_fabricating_a_planning():
 def test_three_field_schema_does_not_create_a_fourth_editorial_field():
     assert set(EditorialFields.model_json_schema()["properties"])=={"central_idea","narrative_development","intended_conclusion"}
     assert [p["passage_id"] for p in passages("Opening.\n\nSecond movement.")]==["p1","p2"]
+
