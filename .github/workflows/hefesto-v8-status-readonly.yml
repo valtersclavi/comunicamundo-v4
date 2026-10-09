@@ -1,0 +1,100 @@
+name: Hefesto V8 status diagnosis SELECT only
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/hefesto-v8-status-readonly.yml]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: comunicamundo-v4
+          workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
+          service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: SELECT-only status
+        run: |
+          set -euo pipefail
+          temporary="hefesto-v8-status-${GITHUB_RUN_ID}"
+          trap 'gcloud run jobs delete "${temporary}" --project=comunicamundo-v4 --region=us-central1 --quiet' EXIT
+          image="$(gcloud run jobs describe hefesto-v4-rebuild --project=comunicamundo-v4 --region=us-central1 --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          script="$(cat <<'PYTHON'
+          import json, os
+          import psycopg
+          eid = "bb30b7e6-b8b2-525a-933e-573b184f672c"
+          with psycopg.connect(os.environ["HEFESTO_POSTGRES_DIRECT_URL"], options="-c default_transaction_read_only=on") as c:
+              c.execute("SET TRANSACTION READ ONLY")
+              row = c.execute("SELECT payload FROM hefesto_product.v8_projects WHERE execution_id=%s", (eid,)).fetchone()
+              d = row[0]
+              ops = []
+              for key, p in c.execute("SELECT operation_key, payload FROM hefesto_product.v8_operations WHERE execution_id=%s", (eid,)).fetchall():
+                  ops.append({
+                      "key": key[:16],
+                      "stage": p.get("stage"),
+                      "complete": p.get("complete"),
+                      "pending": p.get("pending"),
+                      "next_mode": p.get("next_mode"),
+                      "parse_error": p.get("parse_error"),
+                      "attempt_count": len(p.get("attempts") or []),
+                      "errors": p.get("errors"),
+                      "in_flight": p.get("in_flight"),
+                  })
+              stages = []
+              for s in d.get("editorial_stages") or []:
+                  stages.append({
+                      "position": s.get("position"),
+                      "name": s.get("name"),
+                      "status": s.get("status"),
+                      "approved_at": s.get("approved_at"),
+                  })
+              work = d.get("work") or {}
+              result = {
+                  "execution_id": d.get("execution_id"),
+                  "status": d.get("status"),
+                  "revision": d.get("revision"),
+                  "updated_at": d.get("updated_at"),
+                  "error": d.get("error"),
+                  "action": d.get("action"),
+                  "completed_actions": d.get("completed_actions"),
+                  "work_title": work.get("title"),
+                  "work_chars": len(work.get("body") or ""),
+                  "work_words": len((work.get("body") or "").split()),
+                  "support_count": len(work.get("support") or []),
+                  "editorial_stages": stages,
+                  "writing_checkpoint_keys": list((d.get("writing_checkpoint") or {}).keys()),
+                  "review_checkpoint_keys": list((d.get("review_checkpoint") or {}).keys()),
+                  "operations": ops,
+                  "telemetry_tail": [
+                      {k: t.get(k) for k in ("stage", "physical_call", "finish_reason", "status", "error", "cache_status", "input_tokens", "output_tokens") if t.get(k) is not None}
+                      for t in (d.get("telemetry") or [])[-15:]
+                  ],
+              }
+              print("STATUS_DIAG " + json.dumps(result, ensure_ascii=False, default=str))
+          PYTHON
+          )"
+          gcloud run jobs deploy "${temporary}" --project=comunicamundo-v4 --region=us-central1 --image="${image}" --service-account=hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com --command=python --args="^@@^-c@@${script}" --set-secrets=HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest --cpu=1 --memory=512Mi --task-timeout=300s --max-retries=0 --quiet
+          gcloud run jobs execute "${temporary}" --project=comunicamundo-v4 --region=us-central1 --wait
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${temporary}\"" --project=comunicamundo-v4 --limit=50 --format=json > "${RUNNER_TEMP}/status-diagnosis.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          logs = json.loads(Path(os.environ["RUNNER_TEMP"], "status-diagnosis.json").read_text())
+          for e in logs:
+              t = e.get("textPayload") or ""
+              if "STATUS_DIAG " in t:
+                  print(t.split("STATUS_DIAG ", 1)[1])
+                  break
+          else:
+              raise SystemExit("STATUS_DIAG not found")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: status-readonly-diagnosis
+          path: ${{ runner.temp }}/status-diagnosis.json
+          retention-days: 3
