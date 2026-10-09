@@ -48,7 +48,7 @@ def public(state):
     data["research"]={k:{field:value for field,value in v.items() if field!="acquired"}
                       for k,v in state.research.items()}
     cache_events=[v for v in state.telemetry if v.get("kind")=="cache"]
-    calls=[v for v in state.telemetry if v.get("kind")!="cache"]
+    calls=[v for v in state.telemetry if v.get("kind") not in {"cache","artifact"}]
     data["usage"]=dict(call_count=len(calls),input_tokens=sum(v.get("input_tokens",0) for v in calls),
         output_tokens=sum(v.get("output_tokens",0) for v in calls),cached_tokens=sum(v.get("cached_tokens",0) for v in calls),
         latency_ms=sum(v.get("latency_ms",0) for v in calls), cost_unknown_calls=sum(bool(v.get("cost_unknown")) for v in calls),
@@ -139,11 +139,11 @@ class Backend:
                     action["base_status"]=state.status
                     if not any(identity(r)==identity(remoque) for r in state.remoque):state.remoque.append(remoque)
                 elif kind in {"approve","produce"}:
-                    from .editorial import linked_planning,dimensioned
+                    from .editorial import linked_planning,has_intellectual_draft
                     from datetime import UTC,datetime
                     pe=state.projects[-1];plan=linked_planning(state,pe)
-                    if not dimensioned(plan):
-                        raise ValueError("Planejamento anterior preservado; solicite um remoque para consolidar o dimensionamento antes da aprovação.")
+                    if not has_intellectual_draft(plan):
+                        raise ValueError("Planejamento anterior preservado; solicite um remoque para desenvolver o rascunho intelectual antes da aprovação.")
                     if kind=="produce" and not pe.approved_at:
                         raise ValueError("approved PE required")
                     action=dict(kind="approve",version=version,planning_id=str(plan.planning_id))
@@ -204,3 +204,4 @@ async def run(execution_id: UUID):
                 state.job["status"]="completed" if state.status not in {"paused","project_too_large"} else "paused"
                 await repo.save(state)
             return public(state)
+

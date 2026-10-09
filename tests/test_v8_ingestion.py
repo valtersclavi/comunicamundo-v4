@@ -58,7 +58,7 @@ async def test_real_ingestion_restart_preserves_finished_source_and_extracts_rem
     await editor.execute(recovered,Calls(repo,p,recovered))
     assert recovered.status=='project_proposed' and len(recovered.sources)==2
     assert recovered.sources[0].model_dump(mode='json')==first
-    assert len(p.prompts)==3
+    assert len(p.prompts)==2
 
 
 def test_extraction_namespace_is_stable_per_source_and_scoped_to_execution():
@@ -68,3 +68,4 @@ def test_extraction_namespace_is_stable_per_source_and_scoped_to_execution():
     assert ingestor.request(st.model_copy(deep=True),inputs[0]).project_id==a.project_id
     other=state(st.request)
     assert ingestor.request(other,inputs[0]).project_id!=a.project_id
+

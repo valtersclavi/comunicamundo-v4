@@ -1,55 +1,53 @@
 # HEFESTO V8 — CONTRATO CANÔNICO DE IMPLEMENTAÇÃO
 
-Autoridade funcional: instrução integral do usuário de 2026-10-08, contrato editorial substitutivo. Este contrato prevalece sobre regras editoriais incompatíveis do plano histórico, AGENTS.md e código anterior. Repositório valtersclavi/comunicamundo-v4; desenvolvimento em hefesto-v8. A implementação editorial anterior não foi aceita. Uma entrega integrada, testes técnicos sem modelos pagos, commit/promoção/deploy/smokes; avaliação intelectual pelo usuário. Não A/B, faturamento, casos especiais, funcionalidades oportunistas ou novas aprovações.
+Autoridade funcional: ordem de correção do planejador de 2026-10-09. Substitui as instruções anteriores de dimensionamento abstrato e avaliação de suficiência. Nesta entrega: alterações integradas e testes sem inferência paga; nenhuma alteração de produção, promoção para main ou deploy sem autorização explícita.
 
-## I. Identidade e concepção intelectual
-Hefesto é um sistema genérico de concepção, planejamento e produção de obras intelectuais, para quaisquer assuntos e formatos viáveis. O briefing encomenda; o LLM concebe com conhecimento geral confiável, raciocínio e fontes; as fontes ampliam, aprofundam, qualificam, confrontam e fundamentam. O software administra contexto/estado/decisões/integridade/execução/entrega. Fontes não são uma lista fechada de afirmações autorizadas. A obra é construção intelectual original, não reorganização documental.
+## 1. Matéria intelectual antes do PE
 
-A primeira operação editorial concebe a obra integralmente, de forma integrada:
-1. Interpretar assunto/recorte, finalidade, público, formato/linguagem, perspectiva, extensão, requisitos e profundidade; determinar o que o público deve compreender, experimentar ou explicar. Exposição, narração, investigação, argumentação, interpretação, comparação e ensino podem se combinar conforme decisão intelectual do LLM.
-2. Considerar conceitos, fatos, processos, acontecimentos, argumentos, interpretações, perguntas, hipóteses, relações, contradições, consequências e perspectivas provenientes do conhecimento do modelo, ideias explícitas/implícitas das fontes, inferências/raciocínio e tensões. Não preencher categorias obrigatórias. Selecionar pela finalidade; menção breve pode justificar desenvolvimento amplo e discussão longa pode ser pouco útil.
-3. Desenvolver intelectualmente ideias, não apenas identificá-las. Escolher livremente explicar significado/contexto/mecanismos/causas/consequências; distinguir conceitos; estabelecer relações; confrontar interpretações/argumentos; qualificar afirmações; explorar implicações/contradições/conexões; construir analogias/exemplos/perguntas; desenvolver progressivamente interpretação. Não transformar essas possibilidades em matriz. Profundidade vem do desenvolvimento, não da quantidade de tópicos.
-4. Conceber progressão intelectual/narrativa: início, pré-requisitos, introdução/aprofundamento, ordem de relações, transições, tensões e conclusão. Qualquer organização adequada à encomenda; não ordem das fontes nem seções fixas.
-5. Dimensionar a obra inteira desde a concepção: profundidade, movimentos e desenvolvimento aproximado compatíveis com extensão/duração. Não preenchimento posterior.
-6. Materializar uma concepção explícita, persistível, executável pelo escritor. Documento de trabalho editorial produzido expressamente; nunca transcrição de thinking privado.
+O briefing encomenda uma obra intelectual. Fontes aprofundam, qualificam, contradizem e fundamentam; não determinam a ordem narrativa nem uma distribuição proporcional do texto. Conhecimento geral confiável, interpretação, raciocínio e exemplos ilustrativos são admitidos, distinguidos de informação documental. Nunca inventar estudos, dados, acontecimentos, depoimentos ou bibliografia.
 
-## II. Conhecimento, fontes e responsabilidade factual
-Utilizar conjuntamente conhecimento geral confiável, informação documental, raciocínio/interpretação e evidências específicas quando necessárias. Não exigir frase equivalente no corpus para cada afirmação; ausência nas fontes não indica erro. Conhecimento estabelecido pode ser usado diretamente, sem pesquisa compulsória por fato comum. Ideias explícitas podem ser desenvolvidas; ideias implícitas e construções próprias (interpretações, argumentos, analogias, relações, explicações) são legítimas. Expressar certeza proporcional à fundamentação.
+A operação principal de planejamento recebe briefing, fontes disponíveis e extensão contratada. O contrato existente converte duração em palavras a 150 palavras/minuto. O alvo do rascunho é inicialmente 130% da extensão contratada, arredondado para cima: 20 minutos → 3.000 palavras finais → aproximadamente 3.900 palavras de rascunho.
 
-Evidência particular é necessária conforme natureza/relevância/finalidade/público para dados quantitativos específicos, acontecimentos/declarações atribuídos, descobertas recentes, causalidades incertas, controvérsias, alegações extraordinárias e informações cuja precisão é essencial. Fundamentar, qualificar ou enriquecer quando indispensável. Fontes podem ensinar, aprofundar, inspirar, fornecer fatos/exemplos, fundamentar, contradizer, corrigir e nuançar; não determinam a estrutura intelectual. Distinguir fato estabelecido, informação documental, inferência, interpretação, hipótese e exemplo ilustrativo. Nunca inventar estudos, dados, depoimentos reais, acontecimentos ou bibliografia. Responsabilidade intelectual, não correspondência literal documental.
+O planejador produz diretamente o rascunho intelectual desenvolvido, usando o núcleo de instruções fornecido pelo usuário em `v8/editorial.py:DRAFT`: começar pela matéria central, aprofundar explicações por causas/mecanismos/consequências, relacionar ideias, explorar implicações, incorporar exemplos pertinentes, nuances e contrapontos. O desenvolvimento progressivo acontece dentro dessa tarefa. Não pedir acabamento estilístico nem relatórios sobre o processo. Proibidos repetição, paráfrases redundantes, exemplos decorativos, digressões e assuntos artificiais para aumentar volume.
 
-## III. Artefatos
-### Planejamento Interno da Obra
-Persistir concepção completa suficiente para o escritor executar sem reconstruí-la: missão, ideia central, ideias selecionadas/desenvolvimento previsto, relações/tensões, progressão narrativa, estratégias explicativas, profundidade/extensão, conclusão e contribuições documentais pertinentes. Representação acomoda gêneros diversos, sem sequência fixa. Preservar identificação, versão, vínculo com briefing/manifesto, conteúdo integral, revisões e aprovação. Recuperável após interrupção. Nunca aparecer na UI.
+Uma chamada principal `intellectual-draft`, não chamadas por assunto nem ciclos de escrever/avaliar/aprofundar. A resposta contém apenas `body`, com o próprio rascunho integral. O envelope JSON reutiliza transporte e recuperação existentes; não acrescenta análise de suficiência.
 
-### Projeto Editorial
-Checkpoint humano derivado fielmente do planejamento completo, vinculado inequivocamente à sua versão. Exatamente três campos visíveis:
-- Ideia central: uma ou duas frases.
-- Desenvolvimento narrativo: texto conciso com condução, relações importantes e avanço da compreensão.
-- Conclusão pretendida: ponto intelectual/interpretativo/comunicativo de chegada.
-Não inventar planejamento depois de apresentar PE.
+## 2. Persistência e Projeto Editorial
 
-## IV. Fluxo
-Primeiro PE: briefing + corpus → concepção integral → planejamento completo → persistência → síntese fiel em três campos → persistência vinculada → UI. Corpus integral em uma janela; estratégia V8 de no máximo dois blocos quando necessário, com compreensão integrada na operação final.
+O rascunho ocupa `InternalPlanning.content`, no estado existente, identificado como `content_kind=intellectual_draft`. Preservar identificação, versão, briefing, manifesto, vínculo anterior, remoque e aprovação. `draft_target_words` e `measured_words` registram alvo e contagem determinística. A contagem não aprova/reprova o rascunho nem dispara chamadas adicionais.
 
-Remoque: planejamento + PE vigentes + instrução + contexto → LLM compreende intenção/alcance, identifica decisões afetadas, preserva válidas, altera afetadas e consequências de coerência, verifica briefing/extensão, produz planejamento revisado completo → nova versão persistida → novo PE. Pode ser localizado ou estrutural. Manifestar mudança nos campos pertinentes, sem quarto campo. Quando já totalmente contemplado, informar objetivamente, sem simular modificação. Pesquisar via Hermes somente lacuna indispensável de conhecimento/evidência específica, não ausência de equivalência literal. Incorporar e reconsiderar planejamento pertinente. Preservar versões/retomada.
+Persistir integralmente antes da síntese `editorial-project`. O PE descreve o conteúdo efetivamente desenvolvido, exclusivamente em três campos:
 
-Aprovação única: usuário remoca ou aprova. Aprovar identifica PE/planejamento vigentes, persiste aprovação, agenda/inicia produção automaticamente, mostra progresso e entrega após verificação. Idempotência contra solicitações repetidas. Nenhuma segunda autorização editorial.
+- `central_idea`: uma ou duas frases.
+- `narrative_development`: progressão concisa e relações intelectuais importantes.
+- `intended_conclusion`: destino intelectual/comunicativo.
 
-## V. Escrita
-Escritor recebe briefing completo, planejamento integral aprovado, PE aprovado, corpus/contexto e público/formato/idioma/extensão. Executa concepção: desenvolve profundidade, conexões/transições, conhecimento e contribuições documentais, explicações/argumentos/descrições/exemplos, coerência e conclusão. Não enumeração nem um parágrafo por tópico. Transmitir meta quantitativa correspondente à encomenda; extensão dimensionada desde o princípio. Uma geração contínua quando cabe no output real. Persistir obra antes da verificação; falha posterior não repete escrita válida.
+O PE permanece vinculado à versão exata do rascunho e é o checkpoint apresentado ao usuário. O rascunho interno não vira um quarto campo nem aparece na UI.
 
-## VI. Verificação proporcional e correção
-Recebe briefing, planejamento aprovado, PE, obra e contexto documental pertinente. Avalia cumprimento, extensão, coerência, progressão, inteligibilidade, repetições prejudiciais, contradições relevantes, fatos especificamente problemáticos e omissões do planejamento. Considera conhecimento confiável, certeza, natureza e contexto; não policiar todas as frases nem exigir corpus para conhecimento geral/interpretação/inferência. Problemas relevantes/acionáveis apenas: tipo, trecho/localização, explicação, correção necessária. Sem problemas, concluir.
+## 3. Remoque e aprovação
 
-Correções localizadas para problemas locais, revisão proporcional para múltiplas partes, preservando todas as partes válidas. Extensão insuficiente exige desenvolvimento intelectual ausente do planejamento e expansão coerente, nunca enchimento. Não exigir support.claim como substring literal de todo texto. Preservar integridade de referências sem inventário de citações. Persistir correções/checkpoints. Fundamentar/qualificar/enriquecer fatos específicos indispensáveis conforme necessidade real.
+Remoque recebe texto anterior completo, PE, briefing, fontes/contexto e instrução persistida. A mesma operação principal atualiza a matéria intelectual afetada e suas consequências, preservando o que continua válido, e entrega o rascunho inteiro. Persistir nova versão antes do novo PE. Se o texto retornar exatamente igual ao rascunho vigente, preservar versão/PE e informar que não houve alteração; o resultado bruto continua no journal.
 
-## VII. Infraestrutura preservada
-Reutilizar ingestão/normalização, originais/endereços, corpus, Hermes, PostgreSQL/Neon, Cloud Storage, explicit caching, perfis/capacidade cognitiva, telemetria, recuperação, operações, autenticação e Cloud Run. Adaptar domínio/engine/provider/runtime/UI somente pelo contrato. Artefatos integram estado existente; schema aditivo e projetos anteriores preservados. Sem procedimentos por tema e sem faturamento.
+A aprovação única do PE aprova também o rascunho vinculado e mantém o agendamento automático e idempotente da produção. Nenhuma nova aprovação editorial ou agente de fiscalização.
 
-## VIII–XI. Execução, testes e entrega
-Ler estado/plano; mapear substituições; menor sequência técnica integrada; implementar planejamento/persistência, três campos, concepção, remoque/manifestação, aprovação/produção automática, escritor integral, verificação proporcional e integração/retomada/UI/telemetria. Testar sem modelo pago, corrigir falhas técnicas, commit único funcional coerente, promoção/deploy e smoke. Não CI/deploy a cada pequeno ajuste. Resolver impedimentos reais sem redefinir produto.
+Planejamentos históricos permanecem legíveis com `content_kind=abstract_plan`, sem fingir que são rascunhos. Um remoque os transforma no novo contrato. Checkpoints e journals anteriores ficam preservados. Ao retomar planejamento antigo interrompido, reutilizar seu material disponível na tarefa de rascunho, sem reabrir avaliações antigas.
 
-Fixtures sintéticas/neutras diferentes comprovam generalidade: finalidades/organizações distintas; desenvolvimento e extensão na concepção; PE derivado/vinculado; escritor recebe todo planejamento; conhecimento/ideias implícitas/inferências/interpretações/contradições legítimos sem correspondência frase a frase; fundamentação específica possível; remoque localizado preserva decisões e estrutural reorganiza, mudança no PE, versões recuperáveis; aprovação única e idempotente; obra persistida antes de verificar; problemas factuais reais detectáveis; correções preservam validade; falhas retomam sem repetir trabalho pago. Regressão de múltiplas fontes, explicit cache, checkpoints, operações e armazenamento.
+## 4. Escritor e qualidade
 
-Entrega aceita tecnicamente somente com o fluxo completo acima, todos os testes técnicos sem geração paga, registro do SHA funcional/plano, imagem/revisão implantadas e smokes. CI verde comprova engenharia, não qualidade intelectual; validação editorial pertence ao usuário.
+O escritor recebe rascunho integral, encomenda original, PE aprovado, fontes/contexto e instruções editoriais de público, formato, idioma e tom. O rascunho excedente é matéria-prima: liberdade explícita para selecionar, reorganizar, condensar e reescrever, sem preservar literalmente redação, ordem dos parágrafos ou todos os detalhes ilustrativos. A meta final continua sendo a encomenda original, não os 130%.
+
+Preservar a produção e recuperação existentes, incluindo o tratamento da extensão da obra final dentro da escrita. Esse tratamento não chama novamente o planejador. A contagem do rascunho é somente telemetria.
+
+A esteira hierárquica posterior permanece: completude → coerência/consistência → narrativa → estilo. A completude respeita a seleção e condensação autorizadas do material excedente; não exige incorporar todos os detalhes do rascunho. Permanecem diagnósticos, correções, confirmações, reconsideração autônoma e preservação das aprovações anteriores.
+
+## 5. Capacidade, recuperação e observabilidade
+
+`Calls.structured` solicita a capacidade máxima de saída do perfil verificado do modelo, com preflight do contexto real. Não criar teto de conteúdo a partir de uma estimativa arbitrária de tokens por palavra. Se ocorrer interrupção técnica de saída, usar a continuação já existente com bytes preservados. JSON malformado aciona reparo técnico do transporte, não replanejamento editorial.
+
+Persistir resposta bruta antes de parsing/validação; recuperar resultados completos do journal sem repetir chamadas. Timeout mantém checkpoints e progresso. Não alterar modelo, limites cognitivos, timeout, preço, caching, ingestão, fontes originais, autenticação, banco ou infraestrutura nesta correção.
+
+Cada chamada mantém etapa, tokens, latência, custo e motivo de término. A medição do rascunho é um evento de artefato e não aumenta o contador de chamadas físicas.
+
+## 6. Verificação
+
+Testar sem inferência real: uma chamada principal seguida de síntese do PE; meta 130%; ausência de avaliação de suficiência e de regeneração por contagem; persistência antes do PE; resposta bruta recuperável; retomada após falhas; remoque do texto; escritor recebendo rascunho completo e liberdade editorial; vínculos/versionamento; fontes, caching e quatro estágios de qualidade. Qualidade literária e consumo real dependem de teste pago posterior autorizado, não de fixtures.

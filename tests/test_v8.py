@@ -83,17 +83,15 @@ def support(s,claim="A grounded factual statement."):
 
 
 def conception(document="A reconsidered narrative.", planning=None):
-    content=planning or ("Mission: explain a contrast to a general audience. Start from an everyday question, "
+    content=planning or (document+" Mission: explain a contrast to a general audience. Start from an everyday question, "
         "develop its mechanism and distinguish two interpretations. Relate the contrasting observations "
         "through an example, test an objection and reach a qualified conclusion. Develop these intellectual "
         "moves throughout the requested extent, rather than listing topics. The original documents qualify "
         "the contrast; their order does not set the narrative.")
-    return [{"planning":content,"movements":[
-        dict(movement_id="opening",purpose="Establish the chosen intellectual entry",development="Develop the opening question through a distinction and an illustrative observation.",relationships="Establish prerequisites for the central argument.",target_words=30,space_justification="The question, distinction and example justify this opening space."),
-        dict(movement_id="development",purpose="Develop and resolve the chosen intellectual progression",development=content,relationships="Connect the mechanism, objection and qualified conclusion.",target_words=120,space_justification="The mechanism, contrasting interpretations, example, objection and synthesis need substantive development.")
-        ]},dict(sufficient=True,reasoning="The allocated explanation, example and objection are executable developments, not nominal topics.",movement_evidence=dict(opening="A concrete question, distinction and observation establish the entry.",development=content),deficiencies=[]), {"central_idea":document,
+    return [{"body":content}, {"central_idea":document,
         "narrative_development":"Establish the question, explain the mechanism, confront an objection and connect the consequences.",
         "intended_conclusion":"A qualified interpretation that the audience can explain."}]
+
 
 
 def complete_body(prefix="Opening."):
@@ -141,17 +139,16 @@ async def test_integrated_supplied_remoque_approval_continuous_write_and_verific
     st.action=dict(kind="approve",id="approve",version=2)
     await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready" and st.work.body==body
-    assert len(p.prompts)==11
+    assert len(p.prompts)==9
     assert [v["stage"] for v in st.telemetry][-4:]==["completeness-diagnose","consistency-diagnose","narrative-diagnose","style-diagnose"]
     assert st.work.support[0].references[0].source_id==s.source_id
     await editor.execute(st,Calls(repo,p,st))
-    assert len(p.prompts)==11
+    assert len(p.prompts)==9
 
 
 @pytest.mark.asyncio
-async def test_zero_sources_converges_and_remoque_acquires_when_needed():
+async def test_zero_sources_converges_and_remoque_updates_draft_with_available_sources():
     s=source();repo=Memory();st=state();search=Search(s);p=Provider([*conception("Narrative."),
-        {"planning":"Preserve existing decisions; investigate the indispensable specific gap.","research_direction":"Find original support for that perspective."},
         *conception("New narrative.")]);editor=Editor(repo,p,Ingestor([]),search)
     await run(editor,repo,p,st)
     assert search.calls==1 and st.status=="project_proposed"
@@ -159,7 +156,8 @@ async def test_zero_sources_converges_and_remoque_acquires_when_needed():
     r=Remoque(message="An additional perspective",base_version=1);st.remoque.append(r)
     st.action=dict(kind="revise",id="rev",version=1,remoque_hash=identity(r))
     await editor.execute(st,Calls(repo,p,st))
-    assert search.calls==2 and len(st.sources)==2 and len(st.projects)==2
+    assert search.calls==1 and len(st.sources)==1 and len(st.projects)==2
+    assert st.internal_plans[0].content!=st.internal_plans[1].content
 
 
 @pytest.mark.asyncio
@@ -271,7 +269,7 @@ async def test_no_approval_prevents_paid_writing_and_stale_version_rejected():
     repo=Memory();st=state(sources=[source()]);p=Provider(conception("Narrative."));editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
     st.action=dict(kind="produce",id="p",version=1)
     with pytest.raises(ValueError):await editor.execute(st,Calls(repo,p,st))
-    assert len(p.prompts)==3
+    assert len(p.prompts)==2
 
 
 @pytest.mark.asyncio
@@ -412,7 +410,7 @@ async def test_action_checkpoint_prevents_duplicate_pe_after_crash_before_comple
     await editor.plan(st,Calls(repo,p,st));assert len(st.projects)==1
     restored=await repo.get(st.execution_id)
     await editor.execute(restored,Calls(repo,p,restored))
-    assert len(restored.projects)==1 and len(p.prompts)==3
+    assert len(restored.projects)==1 and len(p.prompts)==2
 
 
 def test_v8_acquire_accepts_short_documents_without_changing_legacy_policy():
@@ -543,3 +541,4 @@ async def test_vertex_actual_thought_tokens_are_journaled_and_priced(monkeypatch
     await Calls(repo,provider,st).structured("proposal","corpus",Proposal)
     assert models.generate_content.await_count==calls_before
     assert len(st.telemetry)==1
+

@@ -104,12 +104,9 @@ class Sufficiency(Model):
     deficiencies: list[str] = Field(default_factory=list)
 
 
-class Conception(Model):
-    planning: str = Field(min_length=1)
-    movements: list[Movement] = Field(default_factory=list)
-    research_direction: str = ""
-    unchanged: bool = False
-    revision_effect: str = ""
+class IntellectualDraft(Model):
+    # Only the developed text: no sufficiency report or future-work outline.
+    body: str = Field(min_length=1)
 
 
 class InternalPlanning(Model):
@@ -118,6 +115,10 @@ class InternalPlanning(Model):
     briefing_hash: str
     corpus_manifest_id: str
     content: str = Field(min_length=1)
+    # Defaults preserve historical JSONB without relabelling abstract plans.
+    content_kind: Literal["abstract_plan", "intellectual_draft"] = "abstract_plan"
+    draft_target_words: int | None = Field(default=None, gt=0)
+    measured_words: int | None = Field(default=None, ge=0)
     extent: Extent
     movements: list[Movement] = Field(default_factory=list)
     sufficiency: Sufficiency | None = None
@@ -319,3 +320,4 @@ class State(Model):
     error: dict | None = None
     job: dict = Field(default_factory=dict)
     updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+

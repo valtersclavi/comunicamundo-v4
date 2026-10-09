@@ -7,9 +7,9 @@ from .corpus import Builder, originals, validate_references
 from .provider import CapacityError, Recoverable
 
 from uuid import uuid5
-from .contracts import (InternalPlanning, EditorialFields, Conception, Review, Sufficiency)
-from .editorial import (INTELLECTUAL, CONCEIVE, SYNTHESIZE, WRITE, DIMENSION,
-                        extent_for, linked_planning, dimensioned, within_extent)
+from .contracts import (InternalPlanning, EditorialFields, IntellectualDraft)
+from .editorial import (INTELLECTUAL, DRAFT, SYNTHESIZE, WRITE,
+                        extent_for, linked_planning, has_intellectual_draft, within_extent)
 
 EDITOR = INTELLECTUAL
 WRITER = WRITE
@@ -34,8 +34,8 @@ class Editor:
         # Include schemas and all operation instructions in the envelope used to
         # route the corpus. Each eventual call also performs exact preflight.
         schemas="\n".join(json.dumps(c.model_json_schema(),ensure_ascii=False)
-                           for c in [Conception,EditorialFields,Reading,GeneratedWork,Sufficiency,Patch])
-        envelope=CONCEIVE+SYNTHESIZE+WRITE+DIMENSION+schemas+direction+pe+planning+purpose
+                           for c in [IntellectualDraft,EditorialFields,Reading,GeneratedWork,Patch])
+        envelope=DRAFT+SYNTHESIZE+WRITE+schemas+direction+pe+planning+purpose
         corpus=await Builder(self.provider).build(state.sources,envelope)
         if state.corpus != corpus:
             state.corpus=corpus
@@ -134,9 +134,10 @@ class Editor:
                 await self.checkpoint(state)
         await self.checkpoint(state,"planning")
         extent=extent_for(state.request.brief)
-        cap=await self.provider.capacity()
-        if extent.target_words*4>cap.output_tokens:
-            raise CapacityError("requested extent exceeds continuous model output; divide the project")
+        draft_target=(extent.target_words*130+99)//100
+        # Calls uses the full verified model output capacity and exact input
+        # preflight. Do not turn an estimated tokens/word ratio into a content
+        # ceiling. Technical MAX_TOKENS recovery retains every returned byte.
         current_pe=state.projects[-1] if state.projects else None
         current_plan=None
         if current_pe and current_pe.planning_id:
@@ -145,76 +146,44 @@ class Editor:
             raise ValueError("missing persisted remoque")
         # A saved planning is reused after a crash or interruption of PE synthesis.
         plan=next((p for p in state.internal_plans if str(p.planning_id)==state.action.get("planning_id")),None)
+        if plan is not None and not has_intellectual_draft(plan):
+            current_plan=plan
+            plan=None  # Retain legacy progress; do not synthesize an abstract PE.
         if plan is None:
+            context=await self.context(state,calls,"Develop the complete surplus intellectual draft")
+            prompt=context+"\nCOMMISSION:\n"+self.direction(state)+"\nFINAL EXTENT:\n"+extent.model_dump_json()
+            prompt+="\nCURRENT COMPLETE WORKING MATERIAL:\n"+(current_plan.content if current_plan else "none")
+            prompt+="\nCURRENT PE:\n"+(current_pe.fields.model_dump_json() if current_pe and current_pe.fields else "none")
+            prompt+="\nREVISION INTENT:\n"+(state.remoque[-1].message if kind=="revise" else "Initial intellectual development")
+            # Preserve useful work from an interrupted legacy action, without
+            # continuing its former assessments or regeneration loop.
             cp=state.planning_checkpoint
-            if cp.get("action_id")!=state.action["id"]:
-                cp=dict(action_id=state.action["id"],draft=None,history=[],assessments=[],feedback="")
-                state.planning_checkpoint=cp
-            while True:
-                context=await self.context(state,calls,"Complete intellectual conception and quantitative extent")
-                prompt=context+"\nCOMMISSION:\n"+self.direction(state)+"\nEXTENT:\n"+extent.model_dump_json()
-                prompt+="\nCURRENT COMPLETE PLANNING:\n"+(current_plan.model_dump_json() if current_plan else "none; conceive fully before the PE")
-                prompt+="\nCURRENT PE:\n"+(current_pe.model_dump_json() if current_pe else "none")
-                prompt+="\nREVISION INTENT:\n"+(state.remoque[-1].message if kind=="revise" else "Initial complete conception")
-                prompt+="\nPLANNER DEFICIENCIES TO RESOLVE BEFORE PE:\n"+cp["feedback"]
-                if cp["history"]:
-                    prompt+="\nPRESERVED LAST CONCEPTION:\n"+json.dumps(cp["history"][-1],ensure_ascii=False)
-                    prompt+=f"\nConception development iteration {len(cp['history'])+1}: reconsider the failed approach intellectually, retain valid development and materially deepen the explanatory/argumentative/narrative substance. A repeated nominal conception is not completion. This remains the planner's responsibility, never the writer's or reviewer's."
-
-                if cp["draft"] is not None and cp.get("draft_manifest")!=state.corpus.manifest_id:
-                    cp["history"].append(cp["draft"]);cp["draft"]=None
-                    await self.checkpoint(state)
-                if cp["draft"] is None:
-                    conception=await calls.structured("conception",prompt,Conception,
-                        [s.source_id for s in state.sources],CONCEIVE)
-                    cp["draft"]=conception.model_dump(mode="json");cp["draft_manifest"]=state.corpus.manifest_id
-                    await self.checkpoint(state)
-                else:
-                    conception=Conception.model_validate(cp["draft"])
-                if conception.unchanged:
-                    if kind!="revise" or current_plan is None or not dimensioned(current_plan):
-                        cp["history"].append(cp["draft"]);cp["draft"]=None
-                        cp["feedback"]="Unchanged cannot conclude an incomplete conception. Complete substantive development and dimensioned movements before any PE, preserving valid previous decisions."
-                        await self.checkpoint(state)
-                        continue
-                    state.notice=conception.revision_effect or "O remoque já está integralmente contemplado na concepção vigente."
-                    state.action["result"]=dict(version=current_pe.version,unchanged=True)
-                    await self.checkpoint(state,state.action.get("base_status","project_proposed"));return
-                if not conception.research_direction:
-                    assessment=await calls.structured("planning-sufficiency",
-                        "COMMISSION:\n"+self.direction(state)+"\nEXTENT:\n"+extent.model_dump_json()+
-                        "\nCOMPLETE CONCEPTION AND DISTRIBUTION:\n"+conception.model_dump_json(),
-                        Sufficiency,system=DIMENSION)
-                    candidate=InternalPlanning(planning_id=uuid5(state.execution_id,"draft"),
-                        version=1,briefing_hash=identity(state.request.brief),
-                        corpus_manifest_id=state.corpus.manifest_id,content=conception.planning,
-                        extent=extent,movements=conception.movements,sufficiency=assessment)
-                    cp["assessments"].append(assessment.model_dump(mode="json"))
-                    if dimensioned(candidate):break
-                    cp["history"].append(cp["draft"])
-                    cp["feedback"]=assessment.model_dump_json()+"\nAlso ensure unique movements, substantive development/space justification, approximate total matching commissioned extent and concrete sufficiency evidence for every movement. Complete conception itself, not merely numbers."
-                    cp["draft"]=None
-                    await self.checkpoint(state)
-                    continue
-                manifest=state.corpus.manifest_id
-                await self.checkpoint(state,"searching_sources")
-                ok=await self.hermes.research(state,calls,self.direction(state)+"\nINDISPENSABLE GAP:\n"+conception.research_direction)
-                if not ok:
-                    await self.checkpoint(state,"no_reliable_support");return
-                cp["history"].append(cp["draft"]);cp["draft"]=None
-                await self.checkpoint(state,"planning")
-                await self.context(state,calls,"Reconsider conception after indispensable enrichment")
-                if state.corpus.manifest_id==manifest:
-                    raise Recoverable("research added no new evidence; conception and corpus preserved")
-            plan=InternalPlanning(planning_id=uuid5(state.execution_id,"planning:"+identity([state.action["id"],state.corpus.manifest_id])),
+            if cp.get("action_id")==state.action["id"]:
+                previous=cp.get("draft") or next(iter(reversed(cp.get("history",[]))),None)
+                if previous:
+                    prompt+="\nPRESERVED EARLIER WORK:\n"+json.dumps(previous,ensure_ascii=False)
+            draft=await calls.structured("intellectual-draft",prompt,IntellectualDraft,
+                [s.source_id for s in state.sources],DRAFT.format(
+                    palavras_contratadas=extent.target_words,palavras_rascunho=draft_target))
+            if (kind=="revise" and current_plan and has_intellectual_draft(current_plan)
+                    and draft.body==current_plan.content):
+                state.notice="O remoque já está contemplado no rascunho vigente; o texto foi preservado."
+                state.action["result"]=dict(version=current_pe.version,unchanged=True)
+                await self.checkpoint(state,state.action.get("base_status","project_proposed"));return
+            plan=InternalPlanning(planning_id=uuid5(state.execution_id,"intellectual-draft:"+identity([state.action["id"],state.corpus.manifest_id])),
                 version=len(state.internal_plans)+1,briefing_hash=identity(state.request.brief),
-                corpus_manifest_id=state.corpus.manifest_id,content=conception.planning,extent=extent,movements=conception.movements,sufficiency=assessment,
+                corpus_manifest_id=state.corpus.manifest_id,content=draft.body,extent=extent,
+                content_kind="intellectual_draft",draft_target_words=draft_target,
+                measured_words=len(draft.body.split()),
                 previous_planning_id=current_plan.planning_id if current_plan else None,
-                remoque_hash=state.action.get("remoque_hash"),revision_effect=conception.revision_effect)
+                remoque_hash=state.action.get("remoque_hash"))
             state.internal_plans.append(plan);state.action["planning_id"]=str(plan.planning_id)
-            await self.checkpoint(state)  # Complete conception persisted BEFORE PE.
+            state.telemetry.append(dict(kind="artifact",stage="intellectual-draft",
+                planning_id=str(plan.planning_id),target_words=draft_target,
+                measured_words=plan.measured_words,contracted_words=extent.target_words))
+            await self.checkpoint(state)  # Entire draft durable BEFORE PE synthesis.
         fields=await calls.structured("editorial-project",
-            "COMMISSION:\n"+self.direction(state)+"\nCOMPLETE PERSISTED INTERNAL PLANNING:\n"+plan.model_dump_json(),
+            "COMMISSION:\n"+self.direction(state)+"\nCOMPLETE PERSISTED INTELLECTUAL DRAFT:\n"+plan.model_dump_json(),
             EditorialFields,system=SYNTHESIZE)
         state.projects.append(EditorialProject(version=len(state.projects)+1,fields=fields,
             planning_id=plan.planning_id,planning_version=plan.version,
@@ -235,18 +204,18 @@ class Editor:
             raise ValueError("writing requires explicit approval of the linked planning/PE")
         if state.action["version"]!=pe.version:
             raise ValueError("writing refers to a stale approved PE")
-        if not dimensioned(planning):
-            raise Recoverable("approved planning lacks consolidated intellectual dimensioning; preserved PE requires remoque before writing")
+        if not has_intellectual_draft(planning):
+            raise Recoverable("previous planning preserved; remoque must develop the intellectual draft before writing")
         extent=planning.extent
         cap=await self.provider.capacity()
         if extent.target_words*4>cap.output_tokens:
             raise CapacityError("requested extent exceeds continuous model output; divide the project")
-        common="\nBRIEFING:\n"+self.direction(state)+"\nAPPROVED COMPLETE INTERNAL PLANNING:\n"+planning.model_dump_json()+"\nAPPROVED PE:\n"+pe.fields.model_dump_json()
+        common="\nBRIEFING:\n"+self.direction(state)+"\nAPPROVED COMPLETE INTELLECTUAL DRAFT (RAW MATERIAL):\n"+planning.model_dump_json()+"\nAPPROVED PE:\n"+pe.fields.model_dump_json()
         if state.work is None:
             await self.checkpoint(state,"writing")
             context=await self.context(state,calls,"Writing with full planning; target "+str(extent.target_words)+" words")
             work=await calls.structured("write",context+common+
-                f"\nQUANTITATIVE TARGET: {extent.target_words} words; {extent.duration_minutes} minutes at {extent.words_per_minute} words/minute. Develop the complete approved conception and ending.",
+                f"\nQUANTITATIVE TARGET: {extent.target_words} words; {extent.duration_minutes} minutes at {extent.words_per_minute} words/minute. Select, reorganize, condense and rewrite the surplus draft into the commissioned final work and ending.",
                 GeneratedWork,[s.source_id for s in state.sources],WRITE)
             self.validate_work(work,state)
             state.work=work;state.work_versions.append(work.model_copy(deep=True))
@@ -277,3 +246,4 @@ class Editor:
             state.action["result"]=dict(work_hash=identity(state.work),version=pe.version,
                 planning_id=str(planning.planning_id))
             await self.checkpoint(state,"text_ready")
+
