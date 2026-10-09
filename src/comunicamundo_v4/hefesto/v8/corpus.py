@@ -21,10 +21,34 @@ def render_range(source: Source, start=0, end=None) -> str:
 
 
 
+def address_index(sources: list[Source]):
+    return {(s.source_id, l.location_id) for s in sources for l in s.locations}
+
+
 def validate_references(refs: list[Reference], sources: list[Source]):
-    index = {(s.source_id,l.location_id) for s in sources for l in s.locations}
+    index = address_index(sources)
     if any((r.source_id,r.location_id) not in index for r in refs):
         raise ValueError("support references an unknown source/location")
+
+
+def sanitize_support(value, sources: list[Source]):
+    """Drop unknown optional support addresses; never invent replacements.
+
+    Title/body (or other substantive fields) stay intact. Support metadata is
+    optional grounding; unresolved hashes must not block an otherwise valid
+    artifact or force a no-progress paid repair loop.
+    """
+    support = getattr(value, "support", None)
+    if support is None:
+        return value
+    index = address_index(sources)
+    cleaned = []
+    for item in support:
+        refs = [r for r in item.references if (r.source_id, r.location_id) in index]
+        if refs:
+            cleaned.append(item.model_copy(update={"references": refs}))
+    value.support = cleaned
+    return value
 
 
 def originals(refs: list[Reference], sources: list[Source]) -> str:

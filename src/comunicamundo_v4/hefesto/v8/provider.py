@@ -242,6 +242,12 @@ class Calls:
         measure=getattr(self.provider,"count_envelope",None)
         return await measure(prompt,system) if measure else await self.provider.count(system+"\n"+prompt)
 
+    def accept(self,value):
+        from .corpus import sanitize_support
+        sanitize_support(value,self.state.sources)
+        self.validate(value)
+        return value
+
     def validate(self,value):
         from .contracts import Reading,GeneratedWork,Verification,Patch,Review
         from .corpus import validate_references
@@ -339,8 +345,7 @@ class Calls:
                     await self.repository.save_operation(self.state.execution_id,key,journal)
                     raise Recoverable("provider finish reason: "+response["finish"])
                 try:
-                    value=parse(journal["assembled"],schema)
-                    self.validate(value)
+                    value=self.accept(parse(journal["assembled"],schema))
                 except (ValueError,ValidationError,json.JSONDecodeError) as error:
                     previous=journal.get("repair_digest")
                     digest=identity(journal["assembled"])
@@ -354,13 +359,25 @@ class Calls:
                 return value
             mode=journal["next_mode"]
             assembled=journal["assembled"]
+            # Local acceptance of preserved raw output before another paid repair.
+            if mode=="repair" and assembled.strip():
+                try:
+                    value=self.accept(parse(assembled,schema))
+                except (ValueError,ValidationError,json.JSONDecodeError):
+                    pass
+                else:
+                    journal.update(complete=True,value=value.model_dump(mode="json"),pending=False)
+                    await self.repository.save_operation(self.state.execution_id,key,journal)
+                    return value
             if mode=="initial":
                 current,current_system=prompt,system
             elif mode=="continue":
                 current_system=system+"\nContinue unfinished JSON with only the missing suffix, no repeated bytes. Use the retained original context for substantive completion."
                 current=prompt+"\nEXISTING PARTIAL JSON (continue exactly from its last byte):\n"+assembled
             else:
-                current_system="Repair only this response's syntax/schema/references. Preserve substantive content. Return complete JSON. Schema:\n"+schema_text
+                current_system=("Repair only this response's syntax/schema/references. Preserve substantive content. "
+                    "Unknown optional support references must use VALID ADDRESSES or be removed; empty support is allowed. "
+                    "Return complete JSON. Schema:\n"+schema_text)
                 addresses={str(s.source_id):[l.location_id for l in s.locations] for s in self.state.sources}
                 current=assembled+"\nVALIDATION ERROR:\n"+journal.get("parse_error","")+"\nVALID ADDRESSES:\n"+json.dumps(addresses)
                 if repair_context:
