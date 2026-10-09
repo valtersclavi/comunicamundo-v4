@@ -229,7 +229,7 @@ class Editor:
             completion=await calls.structured("writing-completion",context+common+
                 "\nPREVIOUS EXECUTION STRATEGIES AND RESULTS:\n"+json.dumps(state.writing_checkpoint.get("attempts",[]),ensure_ascii=False)+
                 "\nPRESERVED WRITING:\n"+work_context(state.work,extent)+
-                f"\nACTUAL WORDS: {len(state.work.body.split())}; target {extent.target_words}, acceptable ±10%. Finish omitted realization of already planned development; if overlong, condense expression without losing planned substance. Preserve valid text. Do not invent development to compensate planning. Reconsider failed execution strategies and their causes; choose a materially different faithful realization rather than repeating an ineffective intervention. Return coordinated edits and execution strategy.",
+                f"\nACTUAL WORDS: {len(state.work.body.split())}; target {extent.target_words}, acceptable ±10%. Finish realization of the approved conception, including deeper relationships and explanations where pertinent; if overlong, condense expression without losing planned substance. Preserve valid text. Do not introduce unrelated themes, invented evidence or padding. Reconsider failed execution strategies and their causes; choose a materially different faithful realization rather than repeating an ineffective intervention. Return coordinated edits and execution strategy.",
                 Correction,[s.source_id for s in state.sources],WRITE)
             before=state.work.model_copy(deep=True)
             candidate=apply_edits(before,completion)
