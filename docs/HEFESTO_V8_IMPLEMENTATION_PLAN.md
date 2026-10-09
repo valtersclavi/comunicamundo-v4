@@ -4,13 +4,13 @@
 O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui integralmente regras editoriais conflitantes deste histórico: concepção completa persistida, PE de três campos, aprovação única com produção automática, conhecimento geral legítimo e verificação proporcional. O histórico abaixo é memória de implementação, não autorização para restaurar comportamentos recusados. AGENTS.md histórico é reaproveitado apenas onde compatível com o contrato explícito do usuário.
 
 ## CURRENT STATUS
-Last completed task: correção dimensionamento/hierarquia/reconsideração autônoma implementada e commitada; CI integrado SUCCESS com 228 testes sem skip, PostgreSQL 17, migrations, browser e imagem/startup/rotas.
-Last commit: 1c8c38f8d8be7340d74e15747b17ef13aa8575b4 — commit funcional desta correção; documental anterior ao código 6b2566a18435a931a39b97928ef74a0ef11e336a.
-Current task: [~] entrega principal implantada com sucesso; proteção adicional estritamente necessária de retomada do checkpoint final em testes/commit/CI, antes do recibo final.
-Next task: publicar correção de fechamento de estado após falha de transporte no último checkpoint; executar CI integrado, promover/deploy, confirmar novo SHA/digest/revisão e recibo. Nenhuma chamada editorial paga.
+Last completed task: correção integrada e proteção de fechamento final commitadas; CI 37872509472 integral SUCCESS com 230 testes sem skip, PostgreSQL 17, migrations, browser e imagem/startup/rotas.
+Last commit: 61979b4aee1d13ef4e59eb3b9c351e39665056e9 — proteção de recuperação final; implementação principal 1c8c38f8d8be7340d74e15747b17ef13aa8575b4.
+Current task: [~] commit final promovido; deploy 37873200800 do SHA 61979b4aee1d13ef4e59eb3b9c351e39665056e9 em execução.
+Next task: concluir deploy existente, conferir digest/revisão/tráfego, migrations/check/startup/HTTP, registrar recibo e entregar para validação editorial do usuário. Nenhuma geração paga.
 Known blocker: nenhum. Limitações locais de PostgreSQL/Docker/Chromium supridas pelo CI; testes reais passaram.
 Paid validation authorized: no
-Deploy status: IN PROGRESS — https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37869705877; SHA 1c8c38f8d8be7340d74e15747b17ef13aa8575b4. Campos Deployment commit/image abaixo ainda identificam a versão anterior até confirmação do novo deploy.
+Deploy status: IN PROGRESS — https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37873200800; SHA 61979b4aee1d13ef4e59eb3b9c351e39665056e9. Deployment commit/image ainda identificam publicação anterior 1c8c38f até confirmação deste deploy.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
 Deployment commit: 1c8c38f8d8be7340d74e15747b17ef13aa8575b4
 Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:f524d56683a3b8f6d55a158d96002226ebeb25ec15ee66f037a8730a2ab059e9
@@ -494,3 +494,9 @@ A ordem posterior corrige a própria política de tentativas: duas intervençõe
 - Correção mínima em Editor.execute: recibo final consolidado restaura status text_ready e limpa erro, antes do atalho completed_actions, validando as quatro aprovações; planejamento com resultado restaura seu checkpoint correspondente. Salva a marca de conclusão sem repetir concepção/escrita/verificações/chamadas pagas. Nenhum novo papel/etapa/fluxo editorial. Necessidade direta do contrato de checkpoints/retomada, não melhoria paralela.
 - Suíte local após correção: 228 passed, 2 integrações PG externas skip; ambas devem rodar na CI real (230 no total). Compileall/wheel/diff check aprovados. Necessário novo CI/deploy porque uma falha real de recuperação foi demonstrada após a primeira publicação; não reutilizar imagem anterior para afirmar correção implantada.
 - Próximo passo exato: commit dessa proteção → CI/PG/build/browser/imagem → promoção e deploy normais → smoke/recibo final. Aprovações anteriores e resultados intelectuais não são refeitos.
+
+### Promoção final — 2026-10-09 02:09 UTC
+- Proteção final de retomada: 61979b4aee1d13ef4e59eb3b9c351e39665056e9, inclui a entrega funcional 1c8c38f8d8be7340d74e15747b17ef13aa8575b4. Checkout limpo, validado contra os blobs/tree/commit do GitHub.
+- CI https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37872509472 integral SUCCESS. contracts-build-smoke 113633551698: 230 passed, zero skip; PostgreSQL 17/locks/CAS/restart/raw/checkpoints/decisões/aprovações, cache persistido, migrations/idempotência/FK, wheel/pip/compileall/worker e Playwright/Chromium. production-image-smoke 113634000794: extração, startup/health/V8/private401 SUCCESS, sem modelos pagos.
+- main promovida com lease de cf8276c0c6bd384113aa54d9461e901e766c764d para 61979b4aee1d13ef4e59eb3b9c351e39665056e9 após sucesso do CI. Produção 37873200800 em execução.
+- Próximo passo exato: aguardar deploy, extrair recibo efetivo de SHA/digest/revisão/migrations/check/startup/HTTP e finalizar documento. Não iniciar teste editorial pago.
