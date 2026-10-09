@@ -61,12 +61,21 @@ class Editor:
 
     async def execute(self,state,calls):
         action=state.action
-        if action.get("id") in state.completed_actions:
-            return
         kind=action["kind"]
         if action.get("result"):
-            state.completed_actions.append(action["id"])
-            await self.checkpoint(state)
+            if kind in {"approve","produce"}:
+                if not state.work or len(state.editorial_stages)!=4 or any(s.status!="approved" for s in state.editorial_stages):
+                    raise Recoverable("completed production receipt lacks consolidated hierarchy; all progress preserved")
+                target="text_ready"
+            else:
+                target=action.get("base_status","project_proposed") if action["result"].get("unchanged") else "project_proposed"
+            completed=action["id"] in state.completed_actions
+            if not completed:state.completed_actions.append(action["id"])
+            if not completed or state.status!=target or state.error:
+                state.error=None
+                await self.checkpoint(state,target)
+            return
+        if action.get("id") in state.completed_actions:
             return
         try:
             if kind in {"plan","revise"}:

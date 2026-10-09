@@ -6,14 +6,14 @@ O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui int
 ## CURRENT STATUS
 Last completed task: correção dimensionamento/hierarquia/reconsideração autônoma implementada e commitada; CI integrado SUCCESS com 228 testes sem skip, PostgreSQL 17, migrations, browser e imagem/startup/rotas.
 Last commit: 1c8c38f8d8be7340d74e15747b17ef13aa8575b4 — commit funcional desta correção; documental anterior ao código 6b2566a18435a931a39b97928ef74a0ef11e336a.
-Current task: [~] promoção concluída; deploy do commit funcional em execução pelo workflow Hefesto production 37869705877.
-Next task: aguardar build/push do digest, migrations/check, deploy API/worker, startup/HTTP smoke; confirmar revisão/tráfego/imagem e registrar recibo. Nenhuma chamada editorial paga.
+Current task: [~] entrega principal implantada com sucesso; proteção adicional estritamente necessária de retomada do checkpoint final em testes/commit/CI, antes do recibo final.
+Next task: publicar correção de fechamento de estado após falha de transporte no último checkpoint; executar CI integrado, promover/deploy, confirmar novo SHA/digest/revisão e recibo. Nenhuma chamada editorial paga.
 Known blocker: nenhum. Limitações locais de PostgreSQL/Docker/Chromium supridas pelo CI; testes reais passaram.
 Paid validation authorized: no
 Deploy status: IN PROGRESS — https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37869705877; SHA 1c8c38f8d8be7340d74e15747b17ef13aa8575b4. Campos Deployment commit/image abaixo ainda identificam a versão anterior até confirmação do novo deploy.
 Product URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
-Deployment commit: 4dd602ab4e3e06a982da84b78cf3c813b15ba920
-Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:468ba5664c896fe6092ec16361fe9ffa86f9fcf53711b3d0fdf75fc75fda9365
+Deployment commit: 1c8c38f8d8be7340d74e15747b17ef13aa8575b4
+Deployment image: us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:f524d56683a3b8f6d55a158d96002226ebeb25ec15ee66f037a8730a2ab059e9
 Deployment run: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37826667585 — SUCCESS em 2026-10-08 19:11 UTC; job 113481179395.
 CI da entrega canônica: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37825641321 — SUCCESS; 216 testes sem skip, PostgreSQL 17 real, migrations, navegador, build/dependências e imagem/startup/rotas. Explicit caching e thinking máximo preservados.
 IAM smoke: https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37664761799 — SUCCESS; runtime testIamPermissions confirma cachedContents.create/get/list/update/delete. Zero chamadas de modelo e zero criações de cache. Job temporário excluído após execução.
@@ -487,3 +487,10 @@ A ordem posterior corrige a própria política de tentativas: duas intervençõe
 - CI https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37869038198 SUCCESS: contracts-build-smoke 113622561237 (228 passed, zero skip, PostgreSQL 17, todas migrations/idempotência/FK/CAS/raw, browser login/zero-fontes/remoque/aprovação única/PE3campos/iPad); production-image-smoke 113622992508 SUCCESS (imagem, extração, health ready, V8 e API privada 401), nenhum modelo chamado.
 - main confirmada sem alterações externas e promovida de 8fbabcc6b767bec2600182ffacd31fdb1cd47eed para 1c8c38f8d8be7340d74e15747b17ef13aa8575b4 por fast-forward com lease. Workflow de produção 37869705877 em execução; não declarar novo SHA implantado antes de conclusão.
 - Próximo passo exato: concluir produção, conferir recibo de revisão/digest/migrations/check/startup/HTTP e atualizar CURRENT STATUS. Zero chamadas editoriais pagas.
+
+### Produção principal confirmada e proteção final de recuperação — 2026-10-09 02:00 UTC
+- Deploy 37869705877/job113624720026 SUCCESS em 01:49 UTC; SHA 1c8c38f8d8be7340d74e15747b17ef13aa8575b4, API hefesto-v4-api-00091-klb, digest f524d56683a3b8f6d55a158d96002226ebeb25ec15ee66f037a8730a2ab059e9. Worker/API pelo mesmo digest; migrations hefesto-v4-rebuild-46tkg, check hefesto-v4-rebuild-wc4hv, startup hefesto-v4-rebuild-w2mqj e HTTP smoke SUCCESS. Nenhuma geração editorial paga.
+- Na conferência do contrato de retomada, dois mocks reproduziram falha de transporte no salvamento final: (1) depois de fixar resultado e (2) depois de marcar a ação concluída. A obra e quatro aprovações persistiam, mas o atalho de idempotência podia conservar status paused na retomada. Os dois testes falharam antes da correção.
+- Correção mínima em Editor.execute: recibo final consolidado restaura status text_ready e limpa erro, antes do atalho completed_actions, validando as quatro aprovações; planejamento com resultado restaura seu checkpoint correspondente. Salva a marca de conclusão sem repetir concepção/escrita/verificações/chamadas pagas. Nenhum novo papel/etapa/fluxo editorial. Necessidade direta do contrato de checkpoints/retomada, não melhoria paralela.
+- Suíte local após correção: 228 passed, 2 integrações PG externas skip; ambas devem rodar na CI real (230 no total). Compileall/wheel/diff check aprovados. Necessário novo CI/deploy porque uma falha real de recuperação foi demonstrada após a primeira publicação; não reutilizar imagem anterior para afirmar correção implantada.
+- Próximo passo exato: commit dessa proteção → CI/PG/build/browser/imagem → promoção e deploy normais → smoke/recibo final. Aprovações anteriores e resultados intelectuais não são refeitos.

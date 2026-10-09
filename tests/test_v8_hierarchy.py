@@ -226,3 +226,26 @@ def test_numeric_declaration_without_substantive_evidence_is_not_dimensioned():
         sufficiency=Sufficiency(sufficient=True,reasoning="150 words",movement_evidence={}))
     assert not dimensioned(plan)
     assert not dimensioned(plan.model_copy(update=dict(movements=[])))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_save",[1,2])
+async def test_final_save_failure_recovers_delivery_without_repeating_approved_operations(failed_save):
+    class FailFinalSave(Memory):
+        ready_saves=0
+        async def save(self,st):
+            if st.status=="text_ready":
+                self.ready_saves+=1
+                if self.ready_saves==failed_save:raise OSError("temporary final checkpoint transport failure")
+            await super().save(st)
+    st=state(sources=[source()]);repo=FailFinalSave();p=Provider([*conception(),dict(title="Work",body=complete_body()),*review_ok()])
+    editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
+    st.action=dict(kind="approve",id="a",version=1)
+    with pytest.raises(OSError):await editor.execute(st,Calls(repo,p,st))
+    saved=await repo.get(st.execution_id);assert saved.status=="paused"
+    approved=[deepcopy(stage.approval) for stage in saved.editorial_stages]
+    before=len(p.prompts)
+    await editor.execute(saved,Calls(repo,p,saved))
+    assert saved.status=="text_ready" and saved.error is None
+    assert [stage.approval for stage in saved.editorial_stages]==approved
+    assert len(p.prompts)==before and public(saved)["work"]["body"]==complete_body()
