@@ -88,8 +88,25 @@ class EditorialFields(Model):
     intended_conclusion: str = Field(min_length=1)
 
 
+class Movement(Model):
+    movement_id: str = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    development: str = Field(min_length=1)
+    relationships: str = Field(min_length=1)
+    target_words: int = Field(gt=0)
+    space_justification: str = Field(min_length=1)
+
+
+class Sufficiency(Model):
+    sufficient: bool
+    reasoning: str = Field(min_length=1)
+    movement_evidence: dict[str, str] = Field(default_factory=dict)
+    deficiencies: list[str] = Field(default_factory=list)
+
+
 class Conception(Model):
     planning: str = Field(min_length=1)
+    movements: list[Movement] = Field(default_factory=list)
     research_direction: str = ""
     unchanged: bool = False
     revision_effect: str = ""
@@ -102,6 +119,8 @@ class InternalPlanning(Model):
     corpus_manifest_id: str
     content: str = Field(min_length=1)
     extent: Extent
+    movements: list[Movement] = Field(default_factory=list)
+    sufficiency: Sufficiency | None = None
     previous_planning_id: UUID | None = None
     remoque_hash: str | None = None
     revision_effect: str = ""
@@ -190,6 +209,75 @@ class Patch(Model):
     support: list[SupportReference] = Field(default_factory=list)
 
 
+class Problem(Model):
+    problem_id: str = Field(min_length=1)
+    passage_ids: list[str] = Field(min_length=1)
+    nature: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    cause: str = Field(min_length=1)
+    intervention: str = Field(min_length=1)
+    resolution_condition: str = Field(min_length=1)
+
+
+class EvidenceQuestion(Model):
+    question: str = Field(min_length=1)
+    references: list[Reference] = Field(min_length=1)
+
+
+class Diagnosis(Model):
+    problems: list[Problem] = Field(default_factory=list)
+    evidence_questions: list[EvidenceQuestion] = Field(default_factory=list)
+
+
+class Edit(Model):
+    passage_ids: list[str] = Field(min_length=1)
+    replacement: str
+
+
+class Correction(Model):
+    strategy: str = Field(min_length=1)
+    edits: list[Edit] = Field(min_length=1)
+    support: list[SupportReference] = Field(default_factory=list)
+
+
+class Resolution(Model):
+    problem_id: str
+    resolved: bool
+    explanation: str = Field(min_length=1)
+
+
+class Confirmation(Model):
+    resolutions: list[Resolution] = Field(min_length=1)
+    constraints_preserved: bool
+    preservation_evidence: str = Field(min_length=1)
+
+
+class EditorialDecision(Model):
+    problem_id: str
+    disposition: Literal['qualified','reformulated','replaced','removed','not_a_defect','accepted_minor','completed','narratively_resolved','linguistically_resolved']
+    reasoning: str = Field(min_length=1)
+
+
+class Reconsideration(Model):
+    strategy: str = Field(min_length=1)
+    decisions: list[EditorialDecision] = Field(min_length=1)
+    edits: list[Edit] = Field(default_factory=list)
+    support: list[SupportReference] = Field(default_factory=list)
+    preservation_evidence: str = Field(min_length=1)
+
+
+class EditorialStage(Model):
+    position: int = Field(ge=1, le=4)
+    stage_id: str
+    status: Literal['pending','diagnosing','correcting','confirming','approved','paused','reconsidering'] = 'pending'
+    examined_work: GeneratedWork | None = None
+    diagnosis: Diagnosis | None = None
+    evidence: dict[str, str] = Field(default_factory=dict)
+    attempts: list[dict] = Field(default_factory=list)
+    reconsideration: dict = Field(default_factory=dict)
+    approval: dict | None = None
+
+
 class SearchDecision(Model):
     decision: Literal["search", "success", "no_reliable_support"]
     reason: str = Field(min_length=1)
@@ -216,6 +304,9 @@ class State(Model):
     projects: list[EditorialProject] = Field(default_factory=list)
     internal_plans: list[InternalPlanning] = Field(default_factory=list)
     review_checkpoint: dict = Field(default_factory=dict)
+    planning_checkpoint: dict = Field(default_factory=dict)
+    writing_checkpoint: dict = Field(default_factory=dict)
+    editorial_stages: list[EditorialStage] = Field(default_factory=list)
     notice: str | None = None
     remoque: list[Remoque] = Field(default_factory=list)
     work: GeneratedWork | None = None

@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 
 from test_v8 import (Memory, Provider, Ingestor, Search, source, state, request,
-                     conception, complete_body, support, run)
+                     conception, complete_body, review_ok, problem, confirmed, support, run)
 from comunicamundo_v4.hefesto.v8.contracts import (EditorialFields, Conception,
     EditorialProject, GeneratedWork, Review, Remoque, State, identity)
 from comunicamundo_v4.hefesto.v8.engine import Editor
@@ -47,7 +47,7 @@ async def test_complete_conception_is_persisted_before_three_field_synthesis_and
 async def test_planning_survives_synthesis_failure_without_repeating_conception():
     st=state(sources=[source()]);repo=Memory()
     outputs=conception("One checkpoint.")
-    p=Provider([outputs[0],TimeoutError("transport"),outputs[1]])
+    p=Provider([outputs[0],outputs[1],TimeoutError("transport"),outputs[2]])
     editor=Editor(repo,p,Ingestor([]),Search(source()))
     await repo.create(st)
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
@@ -79,7 +79,7 @@ async def test_intelligent_remoque_versions_full_planning_and_manifests_effect(s
     assert st.internal_plans[1].remoque_hash==identity(r)
     assert st.projects[-1].planning_id==st.internal_plans[-1].planning_id
     assert st.projects[-1].fields.central_idea==message
-    assert original in p.prompts[2][0] and message in p.prompts[2][0]
+    assert original in p.prompts[3][0] and message in p.prompts[3][0]
     assert "Mission remains explanation" in st.internal_plans[-1].content
 
 
@@ -91,7 +91,7 @@ async def test_fully_contemplated_remoque_reports_truth_without_fake_versions():
     p.outputs=[dict(planning=st.internal_plans[0].content,unchanged=True,revision_effect="A conclusão qualificada já integra a concepção vigente.")]
     await editor.execute(st,Calls(repo,p,st))
     assert len(st.projects)==len(st.internal_plans)==1 and st.notice
-    assert st.status=="project_proposed" and len(p.prompts)==3
+    assert st.status=="project_proposed" and len(p.prompts)==4
 
 
 @pytest.mark.asyncio
@@ -110,14 +110,15 @@ async def test_one_approval_persists_both_artifacts_dispatches_once_and_writes_f
     assert response["status"]=="queued" and "internal_plans" not in response
     await backend.action(st.execution_id,"u","approve",1);assert len(jobs)==1
     recovered=await repo.get(st.execution_id);body=complete_body("Reliable general explanation and an original inference.")
-    p.outputs=[dict(title="Work",body=body,support=[]),dict(issues=[])]
+    p.outputs=[dict(title="Work",body=body,support=[]),*review_ok()]
     await editor.execute(recovered,Calls(repo,p,recovered))
     assert recovered.status=="text_ready"
-    assert recovered.internal_plans[-1].content in p.prompts[-2][0]
-    assert recovered.projects[-1].fields.central_idea in p.prompts[-2][0]
-    assert "150 words" in p.prompts[-2][0]
+    writer=next(prompt for prompt,_ in p.prompts if "QUANTITATIVE TARGET" in prompt)
+    assert recovered.internal_plans[-1].content in writer
+    assert recovered.projects[-1].fields.central_idea in writer
+    assert "150 words" in writer
     await backend.action(st.execution_id,"u","approve",1);assert len(jobs)==1
-    await editor.execute(recovered,Calls(repo,p,recovered));assert len(p.prompts)==4
+    await editor.execute(recovered,Calls(repo,p,recovered));assert len(p.prompts)==8
 
 
 @pytest.mark.asyncio
@@ -153,27 +154,27 @@ async def test_approval_dispatch_failure_retries_only_scheduling(monkeypatch):
     assert stamp and saved.projects[-1].approved_at==stamp
     await backend.action(st.execution_id,"u","approve",1)
     await backend.action(st.execution_id,"u","approve",1)
-    assert len(jobs)==2 and len(p.prompts)==2
+    assert len(jobs)==2 and len(p.prompts)==3
     assert (await repo.get(st.execution_id)).internal_plans[-1].approved_at==stamp
 
 
 @pytest.mark.asyncio
 async def test_work_persisted_before_failed_review_and_not_written_again():
     st=state(sources=[source()]);repo=Memory();body=complete_body()
-    p=Provider([*conception(),dict(title="Work",body=body),TimeoutError("verify"),dict(issues=[])])
+    p=Provider([*conception(),dict(title="Work",body=body),TimeoutError("verify"),*review_ok()])
     editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
     st.action=dict(kind="approve",id="a",version=1)
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
     saved=await repo.get(st.execution_id);assert saved.work.body==body and saved.work_versions
     await editor.execute(saved,Calls(repo,p,saved))
-    assert saved.status=="text_ready" and len(p.prompts)==5
+    assert saved.status=="text_ready" and len(p.prompts)==9
     assert sum("QUANTITATIVE TARGET" in prompt for prompt,_ in p.prompts)==1
 
 
 @pytest.mark.asyncio
 async def test_nonliteral_documentary_support_general_knowledge_and_inference_are_allowed():
     s=source();st=state(sources=[s]);repo=Memory();body=complete_body("A legitimate interpretation connects two established observations.")
-    p=Provider([*conception(),dict(title="Work",body=body,support=[support(s,"Semantic documentary contribution, not a quotation.")]),dict(issues=[])])
+    p=Provider([*conception(),dict(title="Work",body=body,support=[support(s,"Semantic documentary contribution, not a quotation.")]),*review_ok()])
     editor=Editor(repo,p,Ingestor([]),Search(s));await run(editor,repo,p,st)
     st.action=dict(kind="approve",id="a",version=1);await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready" and st.work.support
@@ -187,13 +188,17 @@ async def test_extent_expansion_develops_planned_ideas_and_keeps_other_parts():
     short="Valid opening.\n\nA mechanism requires explanation.\n\nValid ending."
     expansion=complete_body("Explain the mechanism through its causes, consequences and an objection.")
     p=Provider([*conception(),dict(title="Work",body=short),
-        dict(issues=[dict(kind="duration",passage_ids=["p2"],problem="Planned mechanism and objection remain undeveloped.",correction="Develop the planned mechanism, causes and objection to the commissioned extent.")]),
-        dict(replacement=expansion),dict(issues=[])])
+        dict(strategy="Complete the approved mechanism and objection before quality review.",
+             edits=[dict(passage_ids=["p2"],replacement=expansion)]),*review_ok()])
     editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
     st.action=dict(kind="approve",id="a",version=1);await editor.execute(st,Calls(repo,p,st))
     assert st.work.body=="Valid opening.\n\n"+expansion+"\n\nValid ending."
-    assert len(st.work.body.split())>=150 and st.status=="text_ready"
-    assert st.internal_plans[0].content in p.prompts[-2][0]
+    assert 135<=len(st.work.body.split())<=165 and st.status=="text_ready"
+    assert st.writing_checkpoint["complete"] and st.writing_checkpoint["attempts"]
+    completion_prompt=next(prompt for prompt,_ in p.prompts if "ACTUAL WORDS:" in prompt)
+    assert st.internal_plans[0].content in completion_prompt
+    assert expansion in next(prompt for prompt,system in p.prompts if "STAGE 1:" in system)
+
 
 
 @pytest.mark.asyncio
@@ -211,18 +216,25 @@ async def test_review_repair_has_existing_work_and_planning_without_reconsulting
 @pytest.mark.asyncio
 async def test_disjoint_corrections_resume_after_failure_without_repeating_done_patch():
     st=state(sources=[source()]);repo=Memory();prefix=complete_body();body=prefix+"\n\nFirst inaccurate attribution.\n\nValid bridge.\n\nSecond unsupported number."
-    issues=[dict(kind="factual",passage_ids=["p2"],problem="An attribution is inaccurate",correction="Qualify the attribution"),
-            dict(kind="factual",passage_ids=["p4"],problem="A number lacks evidence",correction="Qualify the number")]
-    p=Provider([*conception(),dict(title="Work",body=body),dict(issues=issues),dict(replacement="Qualified number."),TimeoutError("patch"),dict(replacement="Qualified attribution."),dict(issues=[])])
+    problems=[problem("attribution",["p2"]),problem("number",["p4"])]
+    confirmation=dict(resolutions=[dict(problem_id=k,resolved=True,explanation="Specific defect resolved.") for k in ("attribution","number")],
+        constraints_preserved=True,preservation_evidence="Both edits preserve all other content and duration.")
+    p=Provider([*conception(),dict(title="Work",body=body),review_ok()[0],
+        dict(problems=problems),dict(strategy="Qualify both related specific claims in one coordinated intervention.",
+            edits=[dict(passage_ids=["p2"],replacement="Qualified attribution."),dict(passage_ids=["p4"],replacement="Qualified number.")]),
+        TimeoutError("confirmation"),confirmation,*review_ok()[2:]])
     editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
     st.action=dict(kind="approve",id="a",version=1)
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
     saved=await repo.get(st.execution_id)
-    assert saved.review_checkpoint["next_group"]==1 and "Qualified number." in saved.work.body
+    attempt=saved.editorial_stages[1].attempts[0]
+    assert "Qualified number." in attempt["candidate"]["body"] and saved.work.body==body
+    assert saved.editorial_stages[0].status=="approved"
     await editor.execute(saved,Calls(repo,p,saved))
     assert saved.status=="text_ready"
     assert saved.work.body==prefix+"\n\nQualified attribution.\n\nValid bridge.\n\nQualified number."
-    assert sum("Second unsupported number.\nReturn only" in x[0] for x in p.prompts)==1
+    assert sum("Return strategy and one coordinated set of edits" in system for _,system in p.prompts)==1
+
 
 
 def test_old_jsonb_projects_remain_readable_without_fabricating_a_planning():

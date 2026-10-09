@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from google.genai import types
 
-from test_v8 import Provider, Memory, source, state, request, Ingestor, Search, support, vertex_fixture, conception, complete_body
+from test_v8 import Provider, Memory, source, state, request, Ingestor, Search, support, vertex_fixture, conception, complete_body, review_ok, problem, confirmed
 from comunicamundo_v4.hefesto.v8.provider import Calls, Recoverable, CapacityError
 from comunicamundo_v4.hefesto.v8.context import Contexts
 from comunicamundo_v4.hefesto.v8.corpus import Builder
@@ -81,7 +81,7 @@ async def setup(p=None, text="Evidence. "*1400):
 async def test_entire_editorial_cycle_reuses_one_cache_without_reingestion():
     s=source("Evidence. "*1400); repo=Memory(); st=state(request([dict(uri=s.origin)]))
     p=CachedProvider([*conception("A narrative."), *conception("A new direction."),
-        {"title":"Work","body":complete_body(),"support":[support(s,"Evidence.")]}, {"issues":[]}])
+        {"title":"Work","body":complete_body(),"support":[support(s,"Evidence.")]}, *review_ok()])
     ing=Ingestor([s]); editor=Editor(repo,p,ing,Search(source(name="B")))
     await repo.create(st); await editor.execute(st,Calls(repo,p,st))
     r=Remoque(message="Change the direction",base_version=1);st.remoque.append(r)
@@ -89,15 +89,15 @@ async def test_entire_editorial_cycle_reuses_one_cache_without_reingestion():
     await editor.execute(st,Calls(repo,p,st))
     st.action=dict(kind="approve",id="a",version=2);await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready" and ing.calls==1
-    assert len(p.creations)==1 and len(p.reads)==6
+    assert len(p.creations)==1 and len(p.reads)==11
     assert len({v["resource"] for v in p.reads if v})==1
     assert all("ORIGINAL TEXT" not in prompt for prompt,_ in p.prompts)
     assert p.creations[0][0]==st.corpus.blocks[0]
     assert all(ttl==3600 for _,ttl in p.renewals)
     usage=public(st)["usage"]
-    assert usage["cache_creations"]==1 and usage["cache_reuses"]==3
-    assert usage["reasoning_tokens"]==80 and usage["uncached_input_tokens"]==60
-    assert usage["cached_tokens"]==4*st.corpus.block_tokens[0]
+    assert usage["cache_creations"]==1 and usage["cache_reuses"]==2
+    assert usage["reasoning_tokens"]==60 and usage["uncached_input_tokens"]==110
+    assert usage["cached_tokens"]==3*st.corpus.block_tokens[0]
 
 
 @pytest.mark.asyncio
@@ -251,10 +251,12 @@ async def test_localized_correction_uses_same_cache_and_preserves_other_passages
     st.action=dict(kind="approve",id="produce",version=1)
     ref=dict(source_id=str(s.source_id),location_id=s.locations[0].location_id)
     opening=complete_body("Opening.");body=opening+"\n\nWrong claim.\n\nClosing."
-    p.outputs=[{"title":"Work","body":body,"support":[]},
-        {"issues":[{"kind":"unsupported","problem":"Unsupported assertion","passage_ids":["p2"],"correction":"Qualify the assertion without changing valid opening or closing.","references":[ref]}]},
-        {"replacement":"Evidence.","support":[support(s,"Documentary contribution, not a literal quote.")]},
-        {"issues":[]}]
+    p.outputs=[{"title":"Work","body":body,"support":[]},review_ok()[0],
+        dict(problems=[problem(passages=["p2"])],evidence_questions=[]),
+        dict(strategy="Qualify the specific claim while preserving the surrounding work.",
+             edits=[dict(passage_ids=["p2"],replacement="Evidence.")],
+             support=[support(s,"Documentary contribution, not a literal quote.")]),
+        confirmed(),*review_ok()[2:]]
     await editor.execute(st,Calls(repo,p,st))
     assert st.work.body==opening+"\n\nEvidence.\n\nClosing." and st.status=="text_ready"
     assert len(p.creations)==1 and len({x["resource"] for x in p.reads if x})==1

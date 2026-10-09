@@ -258,10 +258,42 @@ class Calls:
             known={p["passage_id"] for p in passages(self.state.work.body)}
             if any(k not in known for issue in value.issues for k in issue.passage_ids):
                 raise ValueError("review references an unknown work passage")
-            extent=linked_planning(self.state).extent
-            if len(self.state.work.body.split())<extent.target_words and not any(
-                    i.kind in {"duration","truncation"} for i in value.issues):
-                raise ValueError("measured work is below requested extent; identify missing planned development and actionable expansion passages")
+        from .contracts import Diagnosis,Correction,Confirmation,Reconsideration
+        from .editorial import passages,apply_edits
+        if isinstance(value,Diagnosis):
+            known={p["passage_id"] for p in passages(self.state.work.body)}
+            ids=[p.problem_id for p in value.problems]
+            if len(set(ids))!=len(ids) or any(k not in known for p in value.problems for k in p.passage_ids):
+                raise ValueError("diagnosis requires unique problem IDs and valid work passages")
+            for q in value.evidence_questions:validate_references(q.references,self.state.sources)
+        if isinstance(value,Correction):
+            apply_edits(self.state.work,value)
+            for support in value.support:validate_references(support.references,self.state.sources)
+        if isinstance(value,Reconsideration):
+            current=next(s for s in self.state.editorial_stages if s.status=="reconsidering")
+            expected={p.problem_id for p in current.diagnosis.problems}
+            actual=[d.problem_id for d in value.decisions]
+            if len(actual)!=len(expected) or set(actual)!=expected:
+                raise ValueError("responsible reconsideration must close every known problem with a reasoned disposition")
+            authorized={1:{"completed","not_a_defect"},
+                2:{"qualified","reformulated","replaced","removed","not_a_defect"},
+                3:{"narratively_resolved","not_a_defect"},
+                4:{"linguistically_resolved","accepted_minor","not_a_defect"}}
+            if any(d.disposition not in authorized[current.position] for d in value.decisions):
+                raise ValueError("responsible disposition exceeds current stage authority; preserve earlier intellectual/narrative approvals")
+            if not value.edits and any(d.disposition not in {"not_a_defect","accepted_minor"} for d in value.decisions):
+                raise ValueError("a material editorial resolution requires executed edits, not a bare declaration")
+            candidate=apply_edits(self.state.work,value) if value.edits else self.state.work
+            from .editorial import within_extent,linked_planning
+            if not within_extent(candidate,linked_planning(self.state).extent):
+                raise ValueError("reconsideration must preserve completed extent ±10%; adjust expression without losing approved development")
+            for support in value.support:validate_references(support.references,self.state.sources)
+        if isinstance(value,Confirmation):
+            current=next(s for s in self.state.editorial_stages if s.status=="confirming")
+            expected={p.problem_id for p in current.diagnosis.problems}
+            actual=[r.problem_id for r in value.resolutions]
+            if len(actual)!=len(expected) or set(actual)!=expected:
+                raise ValueError("confirmation may examine only all previously diagnosed problem IDs, no new problems")
 
     async def structured(self, stage: str, prompt: str, schema, source_ids=(), system="", *, corpus_block=None, repair_context=""):
         cap = await self.provider.capacity()

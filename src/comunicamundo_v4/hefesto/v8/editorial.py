@@ -69,24 +69,97 @@ documented claims and valid original references; it is NOT a sentence-by-sentenc
 inventory and claim wording need not be a literal substring of the body.
 """
 
-REVIEW = INTELLECTUAL + """
-Review the work as an intellectual product against briefing, complete approved
-planning and PE. Identify ONLY relevant actionable problems: commission, measured
-extent, coherence, progression, intelligibility, harmful repetition, relevant
-contradictions, specifically problematic facts or important planned omissions.
-General knowledge, justified inference and legitimate interpretation do not need
-literal documentary equivalents. Assess certainty and evidence proportionally.
-Do not inventory support for all sentences. Return only issues, each with kind,
-affected passage_ids, concrete problem and necessary correction. Use supplied
-passage identifiers, not exact quote matching. If multiple parts need revision,
-identify them and preserve valid parts. If extent is below its supplied target,
-identify missing intellectual development from the approved planning and where
-to expand coherently, not filler. Actual measured word count is supplied: do not
-guess it. If no relevant problem exists, return an empty issues array.
-Use research_direction only when specific indispensable evidence cannot be
-obtained by legitimate knowledge or qualification; research is not compulsory
-for common knowledge or interpretation. Never invent evidence or citations.
+DIMENSION = INTELLECTUAL + """
+Assess the COMPLETE conception and its LLM-chosen movements intellectually.
+A topic list or a declared duration is not dimensioning. Examine the substantive
+explanations, arguments, examples, relationships and progression actually planned
+for EACH movement and why they legitimately sustain its allocated space.
+Return movement_evidence keyed by movement_id with concrete evidence from the
+planned development, not a bare sufficiency declaration or repetition of numbers.
+Check the total commissioned extent and approximate distribution, but arithmetic
+alone cannot prove sufficient depth. Identify actionable deficiencies when needed.
+The planner must resolve these BEFORE PE synthesis; the writer executes a complete
+conception and must not invent development to compensate for an insufficient plan.
 """
+
+CONCEIVE += """
+Materialize movements freely chosen for this particular work: unique movement_id,
+purpose, substantive development, intellectual relationships, approximate
+allocated target_words and space_justification. Their approximate total must match
+the commissioned extent. No fixed chapters, uniform quotas or topic checklist.
+Resolve previous insufficiency diagnoses by developing the conception itself.
+"""
+
+WRITE += """
+Execute the approved dimensioned movements and distribution; do not invent new
+intellectual developments to compensate for planning. The 150 words/minute is the
+existing narration convention, not a universal speech speed. The realized work
+may vary approximately ±10% from target. A technically incomplete response is
+continued within writing, preserving valid text, before any quality verification.
+"""
+
+# Descending authority; no stage reopens an earlier approval.
+STAGES = (
+    ('completeness', 'Intellectual completeness',
+     'Realization of essential planned developments, ideas, indispensable relationships, arguments, explanations and intended conclusion; substantive omissions.',
+     'Incorporate ONLY omitted or incompletely executed approved developments and indispensable integrating connections. Preserve valid content. Do not dimension the work or invent material to fill duration.'),
+    ('consistency', 'Coherence and consistency',
+     'Substantive contradictions, incompatible arguments, problematic specific facts, deficient causal relationships, overcertain inferences and development/conclusion coherence.',
+     'Correct facts, reformulate arguments, resolve contradictions, qualify inferences, adjust relationships or reorganize developments when necessary. This is the LAST authority for structural intellectual/thematic changes. Preserve maximum valid work.'),
+    ('narrative', 'Narrative development',
+     'Progression, sequence, transitions, rhythm, continuity, fluency and harmful narrative repetition.',
+     'Improve transitions, presentation order, narrative connections, redundancy of expression and rhythm. Preserve ALL consolidated ideas, arguments, facts, intellectual relationships, interpretations, conclusions and substantive developments. Do not reopen thematic structure.'),
+    ('style', 'Clarity and style',
+     'Clarity, linguistic precision, naturalness, vocabulary, sentences, expressive fluency, audience/format fit, orality and consistent tone.',
+     'Change linguistic formulation ONLY. Preserve content, facts, ideas, arguments, relationships, consolidated narrative order, conclusions and substantial extent. Do not change thought or intellectual organization.'),
+)
+
+
+def stage_contract(position, role):
+    name, title, criteria, authority = STAGES[position-1]
+    text = INTELLECTUAL + f"\nSTAGE {position}: {title}\nCRITERIA: {criteria}\nAUTHORITY: {authority}\n"
+    text += "Earlier approvals are permanent. Preserve their consolidated decisions. The writer has already completed the commissioned extent. This stage does not complete duration.\n"
+    if role == 'diagnose':
+        return text + "Diagnose EXCLUSIVELY this stage ONCE. Return stable problem IDs, affected passage IDs, nature, concrete description, cause, necessary intervention and observable resolution condition. Think through the whole connected deficiency so one effective intervention can solve it. No generalized support inventory. Only consistency may request addressed original evidence for a concrete factual doubt; name the doubt and exact references. Never request the full corpus. Return no problems when approved."
+    if role == 'correct':
+        return text + "Understand the diagnosed causes and formulate an effective editorial strategy before executing it. Return strategy and one coordinated set of edits, possibly across connected passages, within stage authority. Preserve all valid text outside edits and earlier approvals. Reconsider strategy using previous confirmations and directed instructions; do not repeat a failed instruction. These are editorial solution notes, not private thinking."
+    if role == 'reconsider':
+        return text + "Two failed interventions end the unsuccessful strategy, NOT production. Decide and EXECUTE autonomously a responsible closure for every known problem. Read causes, failed strategies and confirmation reasons; choose a different intellectual solution. Qualify/reformulate a grave factual claim, replace an invalid argument, or remove dispensable unsupportable content within stage authority. A reasoned not_a_defect decision may reject an excessive/irrelevant verifier objection; style may accept a minor imperfection when more editing harms the work. Supply a concrete reasoned disposition per known problem, coordinated edits when needed and evidence that earlier decisions, authority and completed extent are preserved. Do not return an unresolved problem or another open-ended correction loop. No human editorial direction is required. This is editorial responsibility, not approval by an empty new general verification."
+    return text + "Confirm ONLY the previously diagnosed problem IDs against their observable resolution conditions, prior pertinent text and corrected text. Do not restart general verification or look for new problems. Explain what remains unresolved and WHY to inform the next strategy. Check preservation of earlier approvals and the intervention authority specifically for these changes. Return constraints_preserved and concrete preservation evidence."
+
+
+def within_extent(work, extent):
+    words = len(work.body.split())
+    return 9 * extent.target_words <= 10 * words <= 11 * extent.target_words
+
+
+def dimensioned(plan):
+    ids = [m.movement_id for m in plan.movements]
+    total = sum(m.target_words for m in plan.movements)
+    return bool(ids and len(set(ids)) == len(ids) and
+        9 * plan.extent.target_words <= 10 * total <= 11 * plan.extent.target_words and
+        plan.sufficiency and plan.sufficiency.sufficient and
+        set(plan.sufficiency.movement_evidence) == set(ids) and
+        all(v.strip() for v in plan.sufficiency.movement_evidence.values()) and
+        not plan.sufficiency.deficiencies)
+
+
+def apply_edits(work, correction):
+    from .contracts import GeneratedWork
+    addresses = {p['passage_id']: p for p in passages(work.body)}
+    ranges = []
+    for edit in correction.edits:
+        selected = [addresses[k] for k in edit.passage_ids]
+        ranges.append((min(p['start'] for p in selected), max(p['end'] for p in selected), edit.replacement))
+    ranges.sort()
+    if any(a[1] > b[0] for a,b in zip(ranges,ranges[1:])):
+        raise ValueError('correction edits overlap; use one coordinated replacement for connected passages')
+    body = work.body
+    for start,end,replacement in reversed(ranges):
+        body = body[:start] + replacement + body[end:]
+    if not body.strip():raise ValueError('correction cannot erase the work')
+    support = list({identity(s):s for s in [*work.support,*correction.support]}.values())
+    return GeneratedWork(title=work.title,body=body,support=support)
 
 
 def extent_for(brief):

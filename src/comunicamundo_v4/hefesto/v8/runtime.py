@@ -34,6 +34,12 @@ def public(state):
     data=state.model_dump(mode="json")
     data.pop("internal_plans",None)
     data.pop("review_checkpoint",None)
+    data.pop("planning_checkpoint",None)
+    data.pop("writing_checkpoint",None)
+    data["work_versions"]=[]  # Intermediate manuscripts remain durable, not delivered as completed works.
+    if state.status!="text_ready":data["work"]=None
+    data["editorial_stages"]=[dict(position=v.position,stage_id=v.stage_id,status=v.status,
+        approved_at=v.approval.get("approved_at") if v.approval else None) for v in state.editorial_stages]
     # Text and original addresses remain in durable state; avoid transferring
     # the full corpus and search acquisitions on every polling request.
     data["sources"]=[{k:v for k,v in s.model_dump(mode="json").items() if k not in {"text","metadata"}}
@@ -133,9 +139,11 @@ class Backend:
                     action["base_status"]=state.status
                     if not any(identity(r)==identity(remoque) for r in state.remoque):state.remoque.append(remoque)
                 elif kind in {"approve","produce"}:
-                    from .editorial import linked_planning
+                    from .editorial import linked_planning,dimensioned
                     from datetime import UTC,datetime
                     pe=state.projects[-1];plan=linked_planning(state,pe)
+                    if not dimensioned(plan):
+                        raise ValueError("Planejamento anterior preservado; solicite um remoque para consolidar o dimensionamento antes da aprovação.")
                     if kind=="produce" and not pe.approved_at:
                         raise ValueError("approved PE required")
                     action=dict(kind="approve",version=version,planning_id=str(plan.planning_id))

@@ -88,13 +88,31 @@ def conception(document="A reconsidered narrative.", planning=None):
         "through an example, test an objection and reach a qualified conclusion. Develop these intellectual "
         "moves throughout the requested extent, rather than listing topics. The original documents qualify "
         "the contrast; their order does not set the narrative.")
-    return [{"planning":content}, {"central_idea":document,
+    return [{"planning":content,"movements":[
+        dict(movement_id="opening",purpose="Establish the chosen intellectual entry",development="Develop the opening question through a distinction and an illustrative observation.",relationships="Establish prerequisites for the central argument.",target_words=30,space_justification="The question, distinction and example justify this opening space."),
+        dict(movement_id="development",purpose="Develop and resolve the chosen intellectual progression",development=content,relationships="Connect the mechanism, objection and qualified conclusion.",target_words=120,space_justification="The mechanism, contrasting interpretations, example, objection and synthesis need substantive development.")
+        ]},dict(sufficient=True,reasoning="The allocated explanation, example and objection are executable developments, not nominal topics.",movement_evidence=dict(opening="A concrete question, distinction and observation establish the entry.",development=content),deficiencies=[]), {"central_idea":document,
         "narrative_development":"Establish the question, explain the mechanism, confront an objection and connect the consequences.",
         "intended_conclusion":"A qualified interpretation that the audience can explain."}]
 
 
 def complete_body(prefix="Opening."):
-    return prefix+" " + " ".join(f"Synthetic observation {i} develops a distinct implication for this explanatory argument." for i in range(15))
+    return prefix+" " + " ".join(f"Synthetic observation {i} develops a distinct implication for this explanatory argument." for i in range(13))
+
+
+def review_ok():
+    return [dict(problems=[],evidence_questions=[]) for _ in range(4)]
+
+
+def problem(pid="p",passages=None):
+    return dict(problem_id=pid,passage_ids=passages or ["p1"],nature="consistency",
+        description="A specific attribution is inaccurate.",cause="An uncertain attribution was presented as established.",
+        intervention="Qualify the attribution, preserving valid parts.",resolution_condition="The attribution is qualified and valid surrounding content is preserved.")
+
+
+def confirmed(pid="p",resolved=True):
+    return dict(resolutions=[dict(problem_id=pid,resolved=resolved,explanation="The attribution was qualified." if resolved else "The attribution remains overcertain; use an explicit uncertainty qualification.")],
+        constraints_preserved=True,preservation_evidence="All other arguments, facts and the extent remain unchanged.")
 
 
 async def run(editor,repo,p,s):
@@ -109,7 +127,7 @@ async def test_integrated_supplied_remoque_approval_continuous_write_and_verific
     p=Provider([*conception("Question, contrast, consequences and an ending."),
                 *conception("A reconsidered narrative perspective."),
                 {"title":"Work","body":body,"support":[support(s)]},
-                {"issues":[]}])
+                *review_ok()])
     editor=Editor(repo,p,ing,search)
     await run(editor,repo,p,st)
     assert st.status=="project_proposed" and ing.calls==1
@@ -123,11 +141,11 @@ async def test_integrated_supplied_remoque_approval_continuous_write_and_verific
     st.action=dict(kind="approve",id="approve",version=2)
     await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready" and st.work.body==body
-    assert len(p.prompts)==6
-    assert [v["stage"] for v in st.telemetry][-2:]==["write","verify"]
+    assert len(p.prompts)==11
+    assert [v["stage"] for v in st.telemetry][-4:]==["completeness-diagnose","consistency-diagnose","narrative-diagnose","style-diagnose"]
     assert st.work.support[0].references[0].source_id==s.source_id
     await editor.execute(st,Calls(repo,p,st))
-    assert len(p.prompts)==6
+    assert len(p.prompts)==11
 
 
 @pytest.mark.asyncio
@@ -232,9 +250,9 @@ async def test_verifier_corrects_exact_passage_preserving_other_text():
     st.action=dict(kind="approve",id="approve",version=1)
     ref=dict(source_id=str(s.source_id),location_id="A1")
     p.outputs=[{"title":"Work","body":body,"support":[]},
-        {"issues":[{"kind":"unsupported","problem":"Wrong claim.","target":"Wrong claim.","passage_ids":["p1"],"correction":"Qualify the assertion, preserving valid opening and closing.","references":[ref]}]},
-        {"replacement":body.replace("Wrong claim.","A grounded factual statement."),"support":[support(s)]},
-        {"issues":[]}]
+        dict(problems=[]),dict(problems=[problem()]),
+        dict(strategy="Qualify the inaccurate attribution while preserving the surrounding development.",edits=[dict(passage_ids=["p1"],replacement=body.replace("Wrong claim.","A grounded factual statement."))],support=[support(s)]),
+        confirmed(),dict(problems=[]),dict(problems=[])]
     await editor.execute(st,Calls(repo,p,st))
     assert st.work.body==body.replace("Wrong claim.","A grounded factual statement.")
     assert len(st.work_versions)>=2 and st.status=="text_ready"
@@ -253,7 +271,7 @@ async def test_no_approval_prevents_paid_writing_and_stale_version_rejected():
     repo=Memory();st=state(sources=[source()]);p=Provider(conception("Narrative."));editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
     st.action=dict(kind="produce",id="p",version=1)
     with pytest.raises(ValueError):await editor.execute(st,Calls(repo,p,st))
-    assert len(p.prompts)==2
+    assert len(p.prompts)==3
 
 
 @pytest.mark.asyncio
@@ -394,7 +412,7 @@ async def test_action_checkpoint_prevents_duplicate_pe_after_crash_before_comple
     await editor.plan(st,Calls(repo,p,st));assert len(st.projects)==1
     restored=await repo.get(st.execution_id)
     await editor.execute(restored,Calls(repo,p,restored))
-    assert len(restored.projects)==1 and len(p.prompts)==2
+    assert len(restored.projects)==1 and len(p.prompts)==3
 
 
 def test_v8_acquire_accepts_short_documents_without_changing_legacy_policy():
