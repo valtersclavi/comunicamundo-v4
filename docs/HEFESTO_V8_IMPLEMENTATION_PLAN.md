@@ -6,8 +6,8 @@ O [CONTRATO EDITORIAL CANÔNICO](HEFESTO_V8_EDITORIAL_CONTRACT.md) substitui int
 ## CURRENT STATUS
 Last completed task: entrega canônica integrada implementada, testada, promovida e implantada. CI 216 testes sem skip; imagem/DB/startup/HTTP SUCCESS; pronta para validação editorial do usuário.
 Last commit: 4dd602ab4e3e06a982da84b78cf3c813b15ba920 — proteção de concorrência; entrega integrada em 684d2d98faccd18e7b75134e03184881d31aaa6a; contrato documental em 4b4e97f0095eb8b3c9136e7076f7ad2569c00d63.
-Current task: nenhuma implementação pendente nesta entrega técnica; aguardando teste editorial do usuário.
-Next task: usuário cria projeto novo e valida concepção/PE/remoque/aprovação automática/obra no produto. Não executar teste editorial pago autonomamente. Sessão futura: ler este plano e HEADs reais antes de qualquer alteração.
+Current task: [~] correção canônica: planejamento substantivamente dimensionado antes do PE e revisão hierárquica monotônica em quatro etapas.
+Next task: implementar distribuição/suficiência/checkpoints do planejamento; conclusão da escrita ±10%; diagnóstico/corretor/confirmação especializada, limite duas tentativas, retomada dirigida; testes integrados/CI/deploy/smoke.
 Known blocker: nenhum. Limitações locais de PostgreSQL/Docker/Chromium supridas pelo CI; testes reais passaram.
 Paid validation authorized: no
 Deploy status: DONE — https://github.com/valtersclavi/comunicamundo-v4/actions/runs/37826667585 SUCCESS em 2026-10-08 19:11 UTC. API hefesto-v4-api-00090-7dr, 100% tráfego; worker e API pelo mesmo digest; migration/check/startup/HTTP smoke SUCCESS.
@@ -458,3 +458,12 @@ CI 37825641321 integral SUCCESS: job contracts-build-smoke e production-image-sm
 - Zero geração editorial paga executada nesta entrega. Nenhum teste de luto infantil, A/B ou avaliação de qualidade intelectual real.
 - Projetos anteriores preservados e legíveis. PEs históricos não têm planejamento completo; não se inventa concepção retrospectivamente. Remoque em checkpoint editorial cria novo par canônico. Para o primeiro teste desta entrega, criar projeto novo; qualidade editorial pertence à validação do usuário.
 - Parada: entrega técnica concluída; nenhuma alteração funcional pendente. Próximo passo: teste editorial do usuário. Commits documentais posteriores apenas registram recibos; imagem continua correspondendo ao SHA funcional acima.
+
+## Ordem canônica — planejamento dimensionado e verificação hierárquica (2026-10-08 America/New_York)
+Autoridade funcional adicional: ordem explícita do usuário desta sessão, prevalece sobre revisão circular anterior. HEADs reais main/hefesto-v8: 8fbabcc6b767bec2600182ffacd31fdb1cd47eed; produção funcional 4dd602ab4e3e06a982da84b78cf3c813b15ba920. Inspeção: Conception.planning livre com Extent nominal; nenhuma distribuição materializada ou confirmação de suficiência; produce faz verify amplo/correção/verify novamente carregando corpus. Corrigir somente essas responsabilidades e integração necessária.
+[~] Dimensionamento: movimentos livres definidos pelo LLM com desenvolvimento substantivo, relações/progressão, distribuição aproximada e justificativa; avaliação intelectual antes de consolidar/publicar PE; rascunhos/checkpoints preservados. Convenção operacional existente 150 palavras/minuto; escritor executa integralmente, faixa realizada ±10%, parcial concluída dentro da escrita.
+[~] Hierarquia: completude → coerência/consistência → narrativa → clareza/estilo. Diagnóstico uma vez por etapa; problemas estáveis/localizações/causa/intervenção/condição de resolução; corretor especializado multi-trechos; confirmação apenas de problemas conhecidos. Aprovações persistentes definitivas; autoridade decrescente.
+[~] Recuperação: até duas correções/confirmações por diagnóstico; resultados/versões/estratégias preservados; limite pausa recuperável identificada e retomada explicitamente dirigida, sem repetir etapas aprovadas ou operações pagas concluídas.
+[~] Contexto: verificação sem corpus integral; coerência consulta somente dúvida factual concreta por endereço original; thinking máximo 24576/temperatura1.0/perfis/cache/telemetria/journals preservados.
+[ ] Testes offline/integrados/regressão/PG/build/UI/imagem, CI integrada, promoção/deploy/smokes/recibo. Nenhuma geração editorial paga.
+Persistência aditiva no JSONB atual. Preservar briefing, fontes/ingestão/Hermes/corpus/remoque/PE3campos/aprovação única/escrita contínua/auth/jobs/storage; nenhuma regra temática, billing ou melhoria oportunista.
