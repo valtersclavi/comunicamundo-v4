@@ -17,31 +17,36 @@ jobs:
           workload_identity_provider: projects/30524898837/locations/global/workloadIdentityPools/github-actions-v4/providers/github-v4
           service_account: github-v4-deployer@comunicamundo-v4.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@v3
-      - run: pip install 'psycopg[binary]'
-      - name: Read persisted error without corpus
-        shell: bash
+      - name: SELECT-only runtime diagnostic
         run: |
           set -euo pipefail
-          export DIAG_DB_URL="$(gcloud secrets versions access latest --secret=hefesto-postgres-direct-url --project=comunicamundo-v4)"
-          python - <<'PY'
+          temporary="hefesto-v8-deadline-${GITHUB_RUN_ID}"
+          trap 'gcloud run jobs delete "${temporary}" --project=comunicamundo-v4 --region=us-central1 --quiet' EXIT
+          image="$(gcloud run jobs describe hefesto-v4-rebuild --project=comunicamundo-v4 --region=us-central1 --format='value(spec.template.spec.template.spec.containers[0].image)')"
+          script="$(cat <<'PYTHON'
           import os,json,psycopg
           eid="3e259a8c-c508-5c80-928b-0a0cfbfc9140"
-          with psycopg.connect(os.environ["DIAG_DB_URL"],options="-c default_transaction_read_only=on") as c:
+          with psycopg.connect(os.environ["HEFESTO_POSTGRES_DIRECT_URL"],options="-c default_transaction_read_only=on") as c:
               c.execute("SET TRANSACTION READ ONLY")
               row=c.execute("SELECT payload FROM hefesto_product.v8_projects WHERE execution_id=%s",(eid,)).fetchone()
               d=row[0]
-              result={k:d.get(k) for k in ["execution_id","revision","status","error","updated_at","telemetry","checkpoints","review_checkpoint","planning_checkpoint","writing_checkpoint"]}
+              result={k:d.get(k) for k in ["execution_id","revision","status","error","updated_at","telemetry","checkpoints","review_checkpoint","planning_checkpoint","writing_checkpoint","editorial_stages"]}
               result["state_keys"]=list(d)
-              result["work_summary"]={k:v for k,v in (d.get("work") or {}).items() if k not in ["text","support"]}
-              result["work_characters"]=len((d.get("work") or {}).get("text",""))
+              result["work_summary"]={k:v for k,v in (d.get("work") or {}).items() if k not in ["body","text","support"]}
+              result["work_characters"]=len((d.get("work") or {}).get("body",""))
               result["operations"]=[]
               for key,p in c.execute("SELECT operation_key,payload FROM hefesto_product.v8_operations WHERE execution_id=%s",(eid,)).fetchall():
                   result["operations"].append({"key":key,"stage":p.get("stage"),"errors":p.get("errors"),"in_flight":p.get("in_flight"),"keys":list(p),"responses":[{"keys":list(r),"stage":r.get("stage"),"usage":r.get("usage"),"raw_length":len(r.get("text",""))} for r in p.get("responses",[])]})
-          path=os.path.join(os.environ["RUNNER_TEMP"],"deadline-diagnosis.json")
-          open(path,"w").write(json.dumps(result,ensure_ascii=False,default=str))
-          print("Read-only diagnosis saved; no model calls; no state updates.")
-          PY
+          
+          print("DEADLINE_DIAG "+json.dumps(result,ensure_ascii=False,default=str))
+          
+          PYTHON
+          )"
+          gcloud run jobs deploy "${temporary}" --project=comunicamundo-v4 --region=us-central1 --image="${image}" --service-account=hefesto-v4-sa@comunicamundo-v4.iam.gserviceaccount.com --command=python --args="^@@^-c@@${script}" --set-secrets=HEFESTO_POSTGRES_DIRECT_URL=hefesto-postgres-direct-url:latest --cpu=1 --memory=512Mi --task-timeout=300s --max-retries=0 --quiet
+          gcloud run jobs execute "${temporary}" --project=comunicamundo-v4 --region=us-central1 --wait
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${temporary}\"" --project=comunicamundo-v4 --limit=50 --format=json > "${RUNNER_TEMP}/deadline-diagnosis.json"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: deadline-readonly-diagnosis
           path: ${{ runner.temp }}/deadline-diagnosis.json
