@@ -1,17 +1,25 @@
-// Run after npm install --no-save @electric-sql/pglite @electric-sql/pglite-pgvector
+// Run after npm install --no-save @electric-sql/pglite
 // PostgreSQL WASM executes actual SQL; production multi-session locks are
 // additionally covered by a real PostgreSQL integration test when configured.
 import { PGlite } from '@electric-sql/pglite';
-import { vector } from '@electric-sql/pglite-pgvector';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../migrations');
-const db=new PGlite({extensions:{vector}});
-for(const f of fs.readdirSync(root).filter(f=>f.endsWith('.sql')).sort()){
+const db=new PGlite();
+await db.exec(`CREATE SCHEMA hefesto_product;
+CREATE TABLE hefesto_product.schema_migrations(version text PRIMARY KEY, checksum char(64), applied_at timestamptz DEFAULT now());`);
+const files=fs.readdirSync(root).filter(f=>f.endsWith('.sql')).sort();
+for(const f of files){
   await db.exec(fs.readFileSync(path.join(root,f),'utf8'));
   console.log(`PASS migration ${f}`);
 }
+const expected=['app_credential','app_sessions','schema_migrations','uploads','v8_operations','v8_projects'];
+async function checkTables(){
+  const result=await db.query("SELECT tablename FROM pg_tables WHERE schemaname='hefesto_product' ORDER BY tablename");
+  if(JSON.stringify(result.rows.map(r=>r.tablename))!==JSON.stringify(expected))throw Error('Unexpected schema');
+}
+await checkTables();
 await db.exec(fs.readFileSync(path.join(root,'1008_hefesto_v8.sql'),'utf8'));
 const id='11111111-1111-4111-8111-111111111111';
 await db.query('INSERT INTO hefesto_product.v8_projects(execution_id,owner_id,status,payload) VALUES($1,$2,$3,$4::jsonb)',[id,'u','queued','{}']);
@@ -22,5 +30,18 @@ const updated=await db.query('UPDATE hefesto_product.v8_projects SET revision=1 
 const stale=await db.query('UPDATE hefesto_product.v8_projects SET revision=2 WHERE execution_id=$1 AND revision=0 RETURNING revision',[id]);
 if(updated.rows.length!==1||stale.rows.length!==0)throw Error('Revision CAS failed');
 try{await db.query('INSERT INTO hefesto_product.v8_operations VALUES($1,$2,$3::jsonb,now())',['22222222-2222-4222-8222-222222222222','b'.repeat(64),'{}']);throw Error('Missing FK accepted');}catch(e){if(!String(e).includes('foreign key'))throw e;}
-console.log('PASS additive migration idempotence, FK, stale revision and raw journal persistence');
+// Model a populated previous installation: retired tables and FK dependencies.
+await db.exec(`CREATE TABLE hefesto_product.runs(id integer PRIMARY KEY);
+INSERT INTO hefesto_product.runs VALUES(1);
+CREATE TABLE hefesto_product.paragraphs(id integer PRIMARY KEY, run_id integer REFERENCES hefesto_product.runs);
+INSERT INTO hefesto_product.paragraphs VALUES(1,1);
+CREATE TABLE hefesto_product.sentences(id integer, paragraph_id integer REFERENCES hefesto_product.paragraphs);
+INSERT INTO hefesto_product.sentences VALUES(1,1);
+INSERT INTO hefesto_product.app_sessions(token_hash,owner_id,expires_at) VALUES('preserved','u',now()+interval '1 day');`);
+for(const f of files)await db.exec(fs.readFileSync(path.join(root,f),'utf8'));
+await checkTables();
+if((await db.query('SELECT * FROM hefesto_product.app_sessions')).rows.length!==1)throw Error('Session lost');
+if((await db.query('SELECT * FROM hefesto_product.v8_projects')).rows.length!==1)throw Error('Project lost');
+if((await db.query('SELECT payload FROM hefesto_product.v8_operations')).rows[0].payload.raw!=='preserved malformed {')throw Error('Journal lost');
+console.log('PASS fresh install, populated retirement, idempotence, FK, revision and journal/session preservation');
 await db.close();

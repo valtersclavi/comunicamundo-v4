@@ -5,10 +5,10 @@ import json
 import pytest
 
 from test_v8 import Memory, Provider, Ingestor, Search, source, state, conception, review_ok, run
-from comunicamundo_v4.hefesto.v8.contracts import State, InternalPlanning, identity
-from comunicamundo_v4.hefesto.v8.engine import Editor
-from comunicamundo_v4.hefesto.v8.provider import Calls, Recoverable
-from comunicamundo_v4.hefesto.v8.runtime import public
+from comunicamundo_v8.hefesto.v8.contracts import State, InternalPlanning, identity
+from comunicamundo_v8.hefesto.v8.engine import Editor
+from comunicamundo_v8.hefesto.v8.provider import Calls, Recoverable
+from comunicamundo_v8.hefesto.v8.runtime import public
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_legacy_planning_checkpoint_is_retained_but_assessments_are_not_re
 @pytest.mark.asyncio
 async def test_legacy_persisted_plan_after_synthesis_failure_becomes_a_real_draft():
     from uuid import uuid5
-    from comunicamundo_v4.hefesto.v8.corpus import Builder
+    from comunicamundo_v8.hefesto.v8.corpus import Builder
     st=state(sources=[source()]);repo=Memory();p=Provider(conception())
     st.corpus=await Builder(p).build(st.sources, "")
     old_id=uuid5(st.execution_id,"planning:"+identity([st.action["id"],st.corpus.manifest_id]))

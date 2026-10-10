@@ -3,9 +3,9 @@ import os
 from pathlib import Path
 from uuid import uuid4
 import pytest
-from comunicamundo_v4.hefesto.postgres import ProductRepository
-from comunicamundo_v4.hefesto.v8.repository import Repository, Busy
-from comunicamundo_v4.hefesto.v8.contracts import (Input, State, EditorialProject,
+from comunicamundo_v8.hefesto.postgres import ProductRepository
+from comunicamundo_v8.hefesto.v8.repository import Repository, Busy
+from comunicamundo_v8.hefesto.v8.contracts import (Input, State, EditorialProject,
     InternalPlanning, EditorialFields, Extent, GeneratedWork, EditorialStage, identity)
 from test_v8 import conception
 

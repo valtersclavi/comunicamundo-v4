@@ -3,6 +3,8 @@ on:
   push:
     branches: [hefesto-v8]
     paths-ignore: ["docs/**"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -39,12 +41,12 @@ jobs:
           python -m pip check
           python -m pytest
           python -m compileall -q src tests
-          node --check src/comunicamundo_v4/web/assets/v8.js
+          node --check src/comunicamundo_v8/web/assets/v8.js
           python -m build --wheel
-          python -m comunicamundo_v4.hefesto.worker --help
+          python -m comunicamundo_v8.hefesto.worker --help
       - name: PostgreSQL migrations without production access
         run: |
-          npm install --no-save @electric-sql/pglite@0.5.8 @electric-sql/pglite-pgvector@0.0.9
+          npm install --no-save @electric-sql/pglite@0.5.8
           node scripts/verify_v8_migrations.mjs
       - name: Offline browser flow smoke
         run: |
@@ -62,8 +64,8 @@ jobs:
       - name: Image startup and V8 route smoke (no model calls)
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint python hefesto-v8:technical -m comunicamundo_v4.hefesto.document_smoke
-          container="$(docker run --detach --publish 127.0.0.1:8080:8080 --entrypoint uvicorn hefesto-v8:technical comunicamundo_v4.hefesto.api:app --host 0.0.0.0 --port 8080)"
+          docker run --rm --entrypoint python hefesto-v8:technical -m comunicamundo_v8.hefesto.document_smoke
+          container="$(docker run --detach --publish 127.0.0.1:8080:8080 --entrypoint uvicorn hefesto-v8:technical comunicamundo_v8.hefesto.api:app --host 0.0.0.0 --port 8080)"
           trap 'docker rm --force "${container}" >/dev/null' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health >/tmp/health.json; then break; fi

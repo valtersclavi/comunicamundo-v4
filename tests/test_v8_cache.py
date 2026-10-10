@@ -10,12 +10,12 @@ import pytest
 from google.genai import types
 
 from test_v8 import Provider, Memory, source, state, request, Ingestor, Search, support, vertex_fixture, conception, complete_body, review_ok, problem, confirmed
-from comunicamundo_v4.hefesto.v8.provider import Calls, Recoverable, CapacityError
-from comunicamundo_v4.hefesto.v8.context import Contexts
-from comunicamundo_v4.hefesto.v8.corpus import Builder
-from comunicamundo_v4.hefesto.v8.engine import Editor
-from comunicamundo_v4.hefesto.v8.contracts import Proposal, Remoque, identity
-from comunicamundo_v4.hefesto.v8.runtime import public
+from comunicamundo_v8.hefesto.v8.provider import Calls, Recoverable, CapacityError
+from comunicamundo_v8.hefesto.v8.context import Contexts
+from comunicamundo_v8.hefesto.v8.corpus import Builder
+from comunicamundo_v8.hefesto.v8.engine import Editor
+from comunicamundo_v8.hefesto.v8.contracts import Proposal, Remoque, identity
+from comunicamundo_v8.hefesto.v8.runtime import public
 
 
 class Missing(Exception):
@@ -309,8 +309,8 @@ async def test_large_cache_uses_immutable_gcs_transport(monkeypatch):
 async def test_postgres_explicit_cache_metadata_survives_independent_worker_restart():
     import os
     from pathlib import Path
-    from comunicamundo_v4.hefesto.postgres import ProductRepository
-    from comunicamundo_v4.hefesto.v8.repository import Repository
+    from comunicamundo_v8.hefesto.postgres import ProductRepository
+    from comunicamundo_v8.hefesto.v8.repository import Repository
     url=os.environ.get("V8_TEST_POSTGRES_URL")
     if not url:pytest.skip("isolated PostgreSQL integration database not configured")
     product=ProductRepository(url);await product.open()

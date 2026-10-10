@@ -26,6 +26,7 @@ def install(app,owner,access,dispatcher_factory,backend=None):
         except (Busy,ValueError) as e:raise HTTPException(409,str(e)) from e
         except Exception as e:raise HTTPException(503,str(e)) from e
 
+    @app.get("/",include_in_schema=False)
     @app.get("/v8",include_in_schema=False)
     async def page():
         root=Path(__file__).resolve().parents[2]/"web"

@@ -1,9 +1,9 @@
 # V8 technical operation
 
-V8 is isolated under `hefesto/v8`; legacy parsers, authentication, uploads,
-storage and PostgreSQL infrastructure are reused. There is no A/B runner.
+The editorial engine is under `hefesto/v8`. Parsers, authentication, uploads,
+storage and PostgreSQL access are V8 infrastructure.
 
-The complete UI is `/v8`, with login through the existing shared session.
+The complete UI is `/` (also available at `/v8`), with login through the existing shared session.
 `POST /v8/projects` accepts `{project_id, brief, sources}`. Empty sources means
 Hermes first builds a corpus. The UI can upload original files or accept public
 URLs, view the short PE and its immutable versions, submit remoque, approve the
@@ -12,7 +12,7 @@ current version, produce the work, inspect grounding and resume paused jobs.
 Routes under `/v8/projects/{execution_id}`: GET, POST revise (version,message),
 approve (version), produce (version), resume. Ownership is checked for all
 projects and uploaded GCS sources. API calls enqueue jobs, never generate in the
-HTTP request. Worker: `comunicamundo-v4-worker v8-run --execution-run-id=UUID`.
+HTTP request. Worker: `comunicamundo-v8-worker v8-run --execution-run-id=UUID`.
 Read-only public receipts exclude full corpus bytes but keep source addresses,
 PE/history/work/grounding and telemetry. Full state is in PostgreSQL.
 
@@ -35,14 +35,21 @@ are not included in this provider-usage estimate.
 
 Bind HEFESTO_POSTGRES_DIRECT_URL to both API and job. V8 uses a direct
 PostgreSQL pool because Neon transaction pooling cannot retain session advisory
-locks. The legacy query pool remains unchanged. A Neon -pooler host supplied as
+locks. Authentication and uploads can use the pooled URL. A Neon -pooler host supplied as
 the direct URL is rejected explicitly. See https://neon.com/docs/connect/connection-pooling.
 
-Apply additive migration 1008 with the existing migration runner. It adds only
-v8_projects and v8_operations; it does not migrate or delete legacy project data.
-Deploy the API and job from exactly the same V8 commit. The current main workflow
-only deploys pushes to main; commits on hefesto-v8 do not publish V8. No production
-migration, merge or deploy is implied by a technical commit.
+Apply the migration directory with `comunicamundo-v8-worker migrate-postgres`.
+1008 defines project state and the operation journal. 1009 defines V8 login,
+sessions and uploads without replacing existing records. 1010 permanently drops
+all explicitly identified V4 tables and their data, without CASCADE. It runs in
+one transaction and fails if an unexpected external dependency exists. Existing
+V8 projects, journals, login, sessions and uploads remain intact. Fresh databases
+need an explicitly provisioned credential; no hard-coded password is installed.
+
+Deploy API and worker from the same commit. The production workflow deploys both
+before retiring the database tables, so no old API receives writes afterward.
+Remote GCP resource names still identify the same V8 resources; changing those
+names requires a separate infrastructure migration, not code compatibility.
 
 ## Recovery
 
@@ -67,10 +74,10 @@ worker. PE and work versions are never silently discarded.
 ## Technical validation (no model calls)
 
 `python -m pytest`; `python -m compileall -q src`;
-`node --check src/comunicamundo_v4/web/assets/v8.js`;
+`node --check src/comunicamundo_v8/web/assets/v8.js`;
 `python -m build --wheel --no-isolation`.
 Optional PostgreSQL WASM migration check:
-`npm install --no-save @electric-sql/pglite @electric-sql/pglite-pgvector` then
+`npm install --no-save @electric-sql/pglite` then
 `node scripts/verify_v8_migrations.mjs`.
 Tests use generic documents and mocks, including the supplied/zero-source flows,
 remoque/research, versioned approval, continuous writing, verification and local
@@ -82,12 +89,3 @@ technical delivery does not prove editorial quality or live provider availabilit
 Offline browser smoke: install Playwright/Chromium, then run `node scripts/smoke_v8_ui.cjs`; every HTTP response is a fixture and no model call is made.
 
 Public Cloud Run health endpoint: `/health`; `/healthz` remains a local compatibility alias. Google Frontend reserves some paths ending in z, so public deployment smoke must use `/health`. See https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths.
-
-## Published technical delivery (2026-10-07)
-
-URL: https://hefesto-v4-api-wk5wcgnlua-uc.a.run.app/v8
-API revision: `hefesto-v4-api-00086-rnx`; code commit `e372045fad460f304b3a5e96a7945db40a52b27e`.
-API and worker use `us-central1-docker.pkg.dev/comunicamundo-v4/comunicamundo-v4/hefesto-v4-rebuild@sha256:2ed432caf417ab81aeb1dd07afb4272cd02988d1cf22e9fd6e1cf81bb761d71f`.
-Production run 37637702188 and technical validation run 37637700213 succeeded.
-The existing login is preserved. The user performs the real editorial test; no paid generation was run during implementation/deployment.
-Full execution IDs and continuation instructions are in HEFESTO_V8_IMPLEMENTATION_PLAN.md.

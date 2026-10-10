@@ -22,4 +22,4 @@ RUN docling-tools models download layout tableformer \
     && rm -rf /var/lib/apt/lists/*
 COPY migrations ./migrations
 USER 65532:65532
-ENTRYPOINT ["comunicamundo-v4-worker"]
+ENTRYPOINT ["comunicamundo-v8-worker"]

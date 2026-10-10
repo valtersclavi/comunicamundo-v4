@@ -8,14 +8,14 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from comunicamundo_v4.hefesto.v8.contracts import (Input,State,Source,Location,Remoque,
+from comunicamundo_v8.hefesto.v8.contracts import (Input,State,Source,Location,Remoque,
     Proposal,Reference,SupportReference,GeneratedWork,identity)
-from comunicamundo_v4.hefesto.v8.corpus import Builder,render_range,originals,sanitize_support
-from comunicamundo_v4.hefesto.v8.provider import Calls,Capacity,CapacityError,Recoverable
-from comunicamundo_v4.hefesto.v8.engine import Editor
-from comunicamundo_v4.hefesto.v8.hermes import Hermes
-from comunicamundo_v4.hefesto.v8.runtime import Backend,public
-from comunicamundo_v4.hefesto.v8.repository import Busy
+from comunicamundo_v8.hefesto.v8.corpus import Builder,render_range,originals,sanitize_support
+from comunicamundo_v8.hefesto.v8.provider import Calls,Capacity,CapacityError,Recoverable
+from comunicamundo_v8.hefesto.v8.engine import Editor
+from comunicamundo_v8.hefesto.v8.hermes import Hermes
+from comunicamundo_v8.hefesto.v8.runtime import Backend,public
+from comunicamundo_v8.hefesto.v8.repository import Busy
 
 
 def request(sources=None):
@@ -283,7 +283,7 @@ async def test_two_context_readings_keep_originals_for_single_writer():
     p=Provider([{"reading":"Relevant A","references":[refa]}, {"reading":"Relevant B","references":[refb]}])
     # Force two blocks while keeping merged grounded originals feasible for call
     # envelope: exercise routing separately from a vendor-size fixture.
-    from comunicamundo_v4.hefesto.v8 import engine
+    from comunicamundo_v8.hefesto.v8 import engine
     old=engine.Builder.build
     async def two(builder,sources,envelope):
         c=await old(builder,sources,envelope);c.blocks=[render_range(a),render_range(b)];c.block_tokens=[250,250];return c
@@ -331,7 +331,7 @@ async def test_backend_action_versions_ownership_and_job_idempotence(monkeypatch
     repo=Memory();jobs=[]
     @asynccontextmanager
     async def use_repo():yield repo
-    monkeypatch.setattr("comunicamundo_v4.hefesto.v8.runtime.repository",use_repo)
+    monkeypatch.setattr("comunicamundo_v8.hefesto.v8.runtime.repository",use_repo)
     async def dispatch(args):jobs.append(args);return "job/one"
     backend=Backend(dispatch);req=request();result=await backend.submit(req,"u");eid=next(iter(repo.states))
     assert result["job"]["operation"]=="job/one"
@@ -343,8 +343,8 @@ async def test_backend_action_versions_ownership_and_job_idempotence(monkeypatch
 
 
 def test_routes_ui_and_worker_smoke():
-    from comunicamundo_v4.hefesto.api import create_app
-    from comunicamundo_v4.hefesto.worker import parser
+    from comunicamundo_v8.hefesto.api import create_app
+    from comunicamundo_v8.hefesto.worker import parser
     class Access:
         async def owns_source(self,owner,uri):return uri=="gs://owned/a"
     class BackendFake:
@@ -373,7 +373,7 @@ async def _none():return None
 
 @pytest.mark.asyncio
 async def test_hermes_search_acquire_identity_and_semantic_completion():
-    from comunicamundo_v4.hefesto.contracts import SourceCandidate
+    from comunicamundo_v8.hefesto.contracts import SourceCandidate
     s=source();cid="a"*64
     candidate=SourceCandidate(candidate_id=cid,provider="you",query="query",rank=1,title="A",url=s.origin,acquisition_url=s.origin)
     class SearchProvider:
@@ -415,15 +415,15 @@ async def test_search_network_failure_never_becomes_no_support_and_resumes():
 
 @pytest.mark.asyncio
 async def test_mechanical_ingestor_reuses_original_parser_and_addressing():
-    from comunicamundo_v4.hefesto.v8.ingestion import Ingestor as RealIngestor
+    from comunicamundo_v8.hefesto.v8.ingestion import Ingestor as RealIngestor
     from test_ingestion import Storage,Reader
     from unittest.mock import patch
-    from comunicamundo_v4.hefesto import ingestion as legacy
+    from comunicamundo_v8.hefesto import ingestion as legacy
     s=state(request([dict(uri="gs://input/document.txt",title="Document",content_type="text/plain")]))
     storage=Storage();p=Provider()
     real=legacy.ingest
     def extract(request,**kwargs):return real(request,**kwargs,reader=Reader({"gs://input/document.txt":b"First original paragraph.\n\nSecond original paragraph."}))
-    with patch("comunicamundo_v4.hefesto.v8.ingestion.ingest",extract):
+    with patch("comunicamundo_v8.hefesto.v8.ingestion.ingest",extract):
         result=await RealIngestor(storage,"product",p).extract(s,s.request.sources[0])
     assert result.text=="First original paragraph.\n\nSecond original paragraph."
     assert len(result.locations)==2 and result.original_uri.startswith("gs://product/")
@@ -442,7 +442,7 @@ async def test_completed_stages_survive_cache_loss_and_changed_provider_prefix()
 
 @pytest.mark.asyncio
 async def test_unknown_inflight_requires_ack_then_retries_only_missing_operation():
-    from comunicamundo_v4.hefesto.v8.provider import Uncertain
+    from comunicamundo_v8.hefesto.v8.provider import Uncertain
     repo=Memory();st=state();p=Provider([{"document":"completed"}]);await repo.create(st)
     await Calls(repo,p,st).structured("first","corpus",Proposal)
     # Persisted in-flight operation has no response, simulating a process crash.
@@ -468,7 +468,7 @@ async def test_action_checkpoint_prevents_duplicate_pe_after_crash_before_comple
 
 
 def test_v8_acquire_accepts_short_documents_without_changing_legacy_policy():
-    from comunicamundo_v4.hefesto.source_pipeline import SourceAcquirer
+    from comunicamundo_v8.hefesto.source_pipeline import SourceAcquirer
     from test_source_pipeline import candidate
     class Short(SourceAcquirer):
         def _direct(self,candidate,attempts):return b"Short complete source.","text/plain","Short complete source."
@@ -492,7 +492,7 @@ async def test_large_single_location_with_multiple_sources_is_split_losslessly()
 
 @pytest.mark.asyncio
 async def test_worker_initialization_failure_is_a_persisted_recoverable_pause(monkeypatch):
-    from comunicamundo_v4.hefesto.v8 import runtime
+    from comunicamundo_v8.hefesto.v8 import runtime
     repo=Memory();st=state();await repo.create(st)
     @asynccontextmanager
     async def db():yield repo
@@ -507,7 +507,7 @@ async def test_worker_initialization_failure_is_a_persisted_recoverable_pause(mo
 
 @pytest.mark.asyncio
 async def test_retired_or_unknown_model_is_a_configuration_pause_not_corpus_size(monkeypatch):
-    from comunicamundo_v4.hefesto.v8.provider import Vertex
+    from comunicamundo_v8.hefesto.v8.provider import Vertex
     provider=object.__new__(Vertex);provider.model="fixture";provider._capacity=None
     monkeypatch.delenv("HEFESTO_V8_MODEL_PROFILE",raising=False)
     with pytest.raises(Recoverable,match="verified"):await provider.capacity()
@@ -523,7 +523,7 @@ def vertex_fixture(model="gemini-2.5-flash"):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from google.genai import types
-    from comunicamundo_v4.hefesto.v8.provider import Vertex
+    from comunicamundo_v8.hefesto.v8.provider import Vertex
     response=types.GenerateContentResponse(
         candidates=[types.Candidate(content=types.Content(parts=[
             types.Part(text="Reasoning summary",thought=True),
@@ -543,7 +543,7 @@ def vertex_fixture(model="gemini-2.5-flash"):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model,maximum",[("gemini-2.5-flash",24576),("verified-fixture",32768)])
 async def test_vertex_uses_verified_maximum_thinking_and_native_temperature(monkeypatch,model,maximum):
-    from comunicamundo_v4.hefesto.v8.provider import VERIFIED_PROFILES
+    from comunicamundo_v8.hefesto.v8.provider import VERIFIED_PROFILES
     monkeypatch.delenv("HEFESTO_V8_MODEL_PROFILE",raising=False)
     if model=="verified-fixture":
         profile=dict(VERIFIED_PROFILES["gemini-2.5-flash"],thinking_budget_max=maximum,
@@ -564,7 +564,7 @@ async def test_vertex_uses_verified_maximum_thinking_and_native_temperature(monk
 @pytest.mark.parametrize("budget,source",[(None,"fixture"),(0,"fixture"),(-1,"fixture"),
     (True,"fixture"),("24576","fixture"),(24576,None)])
 async def test_vertex_missing_or_invalid_cognitive_profile_pauses_before_generation(monkeypatch,budget,source):
-    from comunicamundo_v4.hefesto.v8.provider import VERIFIED_PROFILES
+    from comunicamundo_v8.hefesto.v8.provider import VERIFIED_PROFILES
     profile=dict(VERIFIED_PROFILES["gemini-2.5-flash"],thinking_budget_max=budget,
         thinking_source=source,retirement_date=None)
     if budget is None:profile.pop("thinking_budget_max")

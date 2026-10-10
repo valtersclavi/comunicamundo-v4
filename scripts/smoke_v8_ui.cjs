@@ -12,8 +12,8 @@ const fs=require('node:fs');const path=require('node:path');const assert=require
   await page.route('http://localhost/**',async route=>{
     const url=new URL(route.request().url());const method=route.request().method();
     const reply=(data,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(data)});
-    if(url.pathname==='/v8')return route.fulfill({contentType:'text/html',body:fs.readFileSync(path.join(__dirname,'../src/comunicamundo_v4/web/v8.html'),'utf8')});
-    if(url.pathname.startsWith('/assets/'))return route.fulfill({contentType:url.pathname.endsWith('.js')?'text/javascript':'text/css',body:fs.readFileSync(path.join(__dirname,'../src/comunicamundo_v4/web',url.pathname),'utf8')});
+    if(url.pathname==='/v8')return route.fulfill({contentType:'text/html',body:fs.readFileSync(path.join(__dirname,'../src/comunicamundo_v8/web/v8.html'),'utf8')});
+    if(url.pathname.startsWith('/assets/'))return route.fulfill({contentType:url.pathname.endsWith('.js')?'text/javascript':'text/css',body:fs.readFileSync(path.join(__dirname,'../src/comunicamundo_v8/web',url.pathname),'utf8')});
     if(url.pathname==='/v1/me')return reply(auth?{username:'fixture'}:{detail:'login required'},auth?200:401);
     if(url.pathname==='/v1/login'){auth=true;return reply({username:'fixture'});}
     if(url.pathname==='/v8/projects'&&method==='GET')return reply({projects:[]});

@@ -1,6 +1,6 @@
 # V8 provider contract — verified 2026-10-07
 
-The current deployed legacy model is Gemini 2.5 Flash. Official vendor model
+The configured model is Gemini 2.5 Flash. Official vendor model
 reference reports a 1,048,576 context window and 65,536 maximum output tokens:
 https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/2-5-flash
 

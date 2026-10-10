@@ -19,7 +19,6 @@ from .contracts import (
     IngestionReceipt,
     NormalizedSource,
     PlanningRequest,
-    ProvisionalEditorialProject,
     SourceNormalizationFailure,
 )
 from .document_formats import (
@@ -61,7 +60,7 @@ class SourceReader:
         else:
             _validate_public_https(uri)
             opener = build_opener(_SafeRedirects())
-            request = Request(uri, headers={"User-Agent": "Hefesto-V4/1.0"})
+            request = Request(uri, headers={"User-Agent": "Hefesto-V8/1.0"})
             with opener.open(request, timeout=900) as response:
                 data = response.read(MAX_SOURCE_BYTES + 1)
         if not data:
@@ -434,134 +433,6 @@ def _normalize_text_source(
         normalized_text_sha256=text_digest,
         acquisition=acquisition,
     )
-
-
-def ingest_acquired(
-    input_request: EditorialInputRequest,
-    acquisitions: list[object],
-    *,
-    client: storage.Client,
-    bucket_name: str,
-    provisional_project: ProvisionalEditorialProject,
-    supported_subject_indexes: list[int],
-    subject_coverage: dict[str, list[int]],
-) -> IngestionResult:
-    """Redigest successfully acquired public sources into the frozen core input."""
-    # Local import keeps the normalization layer independent of transport routes.
-    from .source_pipeline import AcquisitionPayload
-
-    payloads = [item for item in acquisitions if isinstance(item, AcquisitionPayload)]
-    successful = [item for item in payloads if item.record.status == "acquired"]
-    failures = [item.record for item in payloads if item.record.status != "acquired"]
-    if not successful:
-        raise ValueError("none of the editor-selected sources could be acquired")
-
-    normalized: list[NormalizedSource] = []
-    source_receipts: list[IngestedSource] = []
-    failed_normalizations: list[SourceNormalizationFailure] = []
-    for ordinal, payload in enumerate(successful, start=1):
-        record = payload.record
-        text = record.normalized_text or ""
-        original = payload.original_bytes or text.encode("utf-8")
-        content_type = payload.original_content_type or record.content_type or "text/markdown"
-        file_name = source_file_name(
-            record.candidate.url, record.candidate.title, content_type
-        )
-        document_format = None
-        try:
-            document_format = resolve_document_format(file_name, content_type)
-        except ValueError:
-            document_format = None
-        if text and record.selected_route != "direct":
-            document_format = None
-        binary_digest = sha256(original).hexdigest()
-        source_id = uuid5(
-            input_request.project_id,
-            f"acquired:{record.candidate.candidate_id}:{binary_digest}",
-        )
-        try:
-            if document_format is not None and is_docling_format(document_format):
-                value, source_receipt = _normalize_document_source(
-                    input_request=input_request,
-                    source_id=source_id,
-                    source_ordinal=len(normalized) + 1,
-                    input_uri=record.candidate.url,
-                    title=record.candidate.title,
-                    language=input_request.brief.output_language,
-                    original=original,
-                    file_name=file_name,
-                    content_type=document_format.content_type,
-                    client=client,
-                    bucket_name=bucket_name,
-                    acquisition=record,
-                )
-            else:
-                value, source_receipt = _normalize_text_source(
-                    input_request=input_request,
-                    source_id=source_id,
-                    source_ordinal=len(normalized) + 1,
-                    input_uri=record.candidate.url,
-                    title=record.candidate.title,
-                    language=input_request.brief.output_language,
-                    text=text,
-                    original=original,
-                    file_name=file_name,
-                    content_type=content_type,
-                    client=client,
-                    bucket_name=bucket_name,
-                    acquisition=record,
-                )
-            value = value.model_copy(update={"metadata": {
-                **value.metadata,
-                "covered_subject_indexes": subject_coverage.get(
-                    record.candidate.candidate_id, []
-                ),
-            }})
-            normalized.append(value)
-            source_receipts.append(source_receipt)
-        except Exception as error:
-            failed_normalizations.append(SourceNormalizationFailure(
-                input_uri=record.candidate.url,
-                title=record.candidate.title,
-                error_class=type(error).__name__,
-                error_message=str(error)[:2000],
-            ))
-
-    if not normalized:
-        raise ValueError("none of the acquired sources could be normalized")
-
-    request = PlanningRequest(
-        project_id=input_request.project_id,
-        brief=input_request.brief,
-        sources=normalized,
-        provisional_project=provisional_project,
-        supported_provisional_subject_indexes=supported_subject_indexes,
-    )
-    request_uri = persist_json_immutable(
-        client,
-        bucket_name=bucket_name,
-        name=f"hefesto-product/projects/{input_request.project_id}/normalized-request.json",
-        payload=request.model_dump(mode="json"),
-    )
-    receipt = IngestionReceipt(
-        status="redigested",
-        project_id=input_request.project_id,
-        normalized_request_uri=request_uri,
-        source_count=len(source_receipts),
-        paragraph_count=sum(item.paragraphs for item in source_receipts),
-        sentence_count=sum(item.sentences for item in source_receipts),
-        model_invocations=0,
-        sources=source_receipts,
-        failed_acquisitions=failures,
-        failed_normalizations=failed_normalizations,
-    )
-    receipt_uri = persist_json_immutable(
-        client,
-        bucket_name=bucket_name,
-        name=f"hefesto-product/projects/{input_request.project_id}/ingestion-receipt.json",
-        payload=receipt.model_dump(mode="json"),
-    )
-    return IngestionResult(request=request, receipt=receipt, receipt_uri=receipt_uri)
 
 
 def _validate_public_https(uri: str) -> None:

@@ -5,8 +5,8 @@ import re
 
 import pytest
 
-from comunicamundo_v4.hefesto.api import UploadRequest
-from comunicamundo_v4.hefesto.document_formats import (
+from comunicamundo_v8.hefesto.api import UploadRequest
+from comunicamundo_v8.hefesto.document_formats import (
     FORMATS_BY_EXTENSION,
     resolve_document_format,
     source_file_name,
@@ -38,21 +38,14 @@ def test_extension_and_declared_type_must_agree() -> None:
         )
 
 
-def test_frozen_input_formats_match_picker_and_client_validation() -> None:
+def test_v8_upload_formats_match_document_readers() -> None:
     expected = {
         ".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".xhtml",
         ".epub", ".md", ".txt", ".jpg", ".jpeg", ".png", ".tif",
         ".tiff", ".webp", ".aac", ".mp3", ".wav", ".avi", ".mov",
         ".mp4", ".webm",
     }
-    root = Path(__file__).resolve().parents[1] / "src/comunicamundo_v4/web"
-    html = (root / "index.html").read_text()
-    app = (root / "assets/app.js").read_text()
-    picker = re.search(r'<input id="files"[^>]*accept="([^"]+)"', html)
-    assert picker is not None
-    assert set(picker.group(1).split(",")) == set(FORMATS_BY_EXTENSION) == expected
-    client = app.split("const sourceFormats = {", 1)[1].split("};", 1)[0]
-    assert {f".{key}" for key in re.findall(r"\b(\w+): \[", client)} == expected
+    assert set(FORMATS_BY_EXTENSION) == expected
 
     for extension in (".bmp", ".markdown", ".m4a", ".ogg", ".flac", ".mkv"):
         with pytest.raises(ValueError, match="unsupported source format"):

@@ -2,11 +2,11 @@
 import pytest
 from test_ingestion import Storage
 from test_v8 import Provider, Memory, state, request, Search, source, conception
-from comunicamundo_v4.hefesto.contracts import SourceInput
-from comunicamundo_v4.hefesto.v8.ingestion import Ingestor
-from comunicamundo_v4.hefesto.v8.provider import Calls
-from comunicamundo_v4.hefesto.v8.engine import Editor
-from comunicamundo_v4.hefesto.v8.contracts import identity
+from comunicamundo_v8.hefesto.contracts import SourceInput
+from comunicamundo_v8.hefesto.v8.ingestion import Ingestor
+from comunicamundo_v8.hefesto.v8.provider import Calls
+from comunicamundo_v8.hefesto.v8.engine import Editor
+from comunicamundo_v8.hefesto.v8.contracts import identity
 
 
 def setup():
@@ -23,8 +23,8 @@ def setup():
 async def test_real_multi_source_adapter_does_not_collide_with_project_snapshots():
     storage,inputs,st,p,ingestor=setup()
     # Reproduce exactly the former shared project snapshot collision.
-    from comunicamundo_v4.hefesto.ingestion import ingest
-    from comunicamundo_v4.hefesto.contracts import EditorialInputRequest
+    from comunicamundo_v8.hefesto.ingestion import ingest
+    from comunicamundo_v8.hefesto.contracts import EditorialInputRequest
     ingest(EditorialInputRequest(project_id=st.request.project_id,brief=st.request.brief,sources=[inputs[0]]),
            client=storage,bucket_name='product')
     old_path=f'hefesto-product/projects/{st.request.project_id}/normalized-request.json'
