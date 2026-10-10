@@ -6,12 +6,12 @@ import pytest
 
 from test_v8 import (Memory, Provider, Ingestor, Search, source, state, request,
                      conception, complete_body, review_ok, problem, confirmed, support, run)
-from comunicamundo_v4.hefesto.v8.contracts import (EditorialFields,
+from comunicamundo_v8.hefesto.v8.contracts import (EditorialFields,
     EditorialProject, GeneratedWork, Review, Remoque, State, identity)
-from comunicamundo_v4.hefesto.v8.engine import Editor
-from comunicamundo_v4.hefesto.v8.provider import Calls, Recoverable
-from comunicamundo_v4.hefesto.v8.runtime import Backend, public
-from comunicamundo_v4.hefesto.v8.editorial import linked_planning, passages
+from comunicamundo_v8.hefesto.v8.engine import Editor
+from comunicamundo_v8.hefesto.v8.provider import Calls, Recoverable
+from comunicamundo_v8.hefesto.v8.runtime import Backend, public
+from comunicamundo_v8.hefesto.v8.editorial import linked_planning, passages
 
 
 @pytest.mark.asyncio
@@ -100,7 +100,7 @@ async def test_one_approval_persists_both_artifacts_dispatches_once_and_writes_f
     await run(editor,repo,p,st);jobs=[]
     @asynccontextmanager
     async def db():yield repo
-    monkeypatch.setattr("comunicamundo_v4.hefesto.v8.runtime.repository",db)
+    monkeypatch.setattr("comunicamundo_v8.hefesto.v8.runtime.repository",db)
     async def dispatch(args):
         saved=await repo.get(st.execution_id)
         assert saved.projects[-1].approved_at==saved.internal_plans[-1].approved_at
@@ -130,7 +130,7 @@ async def test_approval_cannot_replace_an_active_revision(monkeypatch):
     st.status="planning";await repo.save(st)
     @asynccontextmanager
     async def db():yield repo
-    monkeypatch.setattr("comunicamundo_v4.hefesto.v8.runtime.repository",db)
+    monkeypatch.setattr("comunicamundo_v8.hefesto.v8.runtime.repository",db)
     async def dispatch(args):pytest.fail("approval must not replace an active revision")
     with pytest.raises(ValueError,match="awaiting approval"):
         await Backend(dispatch).action(st.execution_id,"u","approve",1)
@@ -142,7 +142,7 @@ async def test_approval_dispatch_failure_retries_only_scheduling(monkeypatch):
     st=state(sources=[source()]);repo=Memory();p=Provider(conception());await run(Editor(repo,p,Ingestor([]),Search(source())),repo,p,st)
     @asynccontextmanager
     async def db():yield repo
-    monkeypatch.setattr("comunicamundo_v4.hefesto.v8.runtime.repository",db)
+    monkeypatch.setattr("comunicamundo_v8.hefesto.v8.runtime.repository",db)
     jobs=[]
     async def dispatch(args):
         jobs.append(args)

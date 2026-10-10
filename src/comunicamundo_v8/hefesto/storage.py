@@ -20,10 +20,6 @@ def parse_gs_uri(uri: str) -> tuple[str, str]:
     return bucket, name
 
 
-def load_request(client: storage.Client, uri: str) -> PlanningRequest:
-    bucket, name = parse_gs_uri(uri)
-    data = client.bucket(bucket).blob(name).download_as_bytes()
-    return PlanningRequest.model_validate_json(data)
 
 
 def load_input_request(
@@ -87,17 +83,4 @@ def persist_bytes_immutable(
     return f"gs://{bucket_name}/{name}"
 
 
-def persist_receipt(
-    client: storage.Client,
-    *,
-    bucket_name: str,
-    execution_run_id: UUID,
-    payload: dict[str, Any],
-) -> str:
-    name = f"hefesto-product/executions/{execution_run_id}/receipt.json"
-    data = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
-    client.bucket(bucket_name).blob(name).upload_from_string(
-        data, content_type="application/json"
-    )
-    return f"gs://{bucket_name}/{name}"
 

@@ -1,2 +1,0 @@
-"""ComunicAmundo V4."""
-

@@ -5,11 +5,11 @@ from uuid import uuid4
 import pytest
 from test_v8 import (Memory, Provider, Ingestor, Search, source, state, conception,
                      complete_body, review_ok, problem, confirmed, run)
-from comunicamundo_v4.hefesto.v8.engine import Editor
-from comunicamundo_v4.hefesto.v8.provider import Calls, Recoverable
-from comunicamundo_v4.hefesto.v8.contracts import InternalPlanning
-from comunicamundo_v4.hefesto.v8.editorial import has_intellectual_draft
-from comunicamundo_v4.hefesto.v8.runtime import public
+from comunicamundo_v8.hefesto.v8.engine import Editor
+from comunicamundo_v8.hefesto.v8.provider import Calls, Recoverable
+from comunicamundo_v8.hefesto.v8.contracts import InternalPlanning
+from comunicamundo_v8.hefesto.v8.editorial import has_intellectual_draft
+from comunicamundo_v8.hefesto.v8.runtime import public
 
 
 async def prepared(outputs=(), text="Original corpus exclusively for conception and writing."):

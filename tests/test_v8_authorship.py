@@ -3,8 +3,8 @@ import pytest
 
 from test_v8 import complete_body, review_ok, problem, confirmed
 from test_v8_hierarchy import prepared, correction
-from comunicamundo_v4.hefesto.v8.editorial import AUTHORSHIP, CONSISTENCY, stage_contract
-from comunicamundo_v4.hefesto.v8.provider import Calls
+from comunicamundo_v8.hefesto.v8.editorial import AUTHORSHIP, CONSISTENCY, stage_contract
+from comunicamundo_v8.hefesto.v8.provider import Calls
 
 
 @pytest.mark.asyncio

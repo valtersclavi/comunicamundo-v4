@@ -1,6 +1,6 @@
 # HEFESTO V8 — CONTRATO CANÔNICO DE IMPLEMENTAÇÃO
 
-Autoridade funcional: ordem de correção do planejador de 2026-10-09. Substitui as instruções anteriores de dimensionamento abstrato e avaliação de suficiência. Nesta entrega: alterações integradas e testes sem inferência paga; nenhuma alteração de produção, promoção para main ou deploy sem autorização explícita.
+Autoridade editorial única do Hefesto V8. Descreve o comportamento atual, preservado na aposentadoria do V4. Ajustes editoriais exigem instrução explícita do usuário.
 
 ## 1. Matéria intelectual antes do PE
 
@@ -50,7 +50,7 @@ O contrato `CONSISTENCY` vale no diagnóstico, correção, confirmação e recon
 
 `Calls.structured` solicita a capacidade máxima de saída do perfil verificado do modelo, com preflight do contexto real. Não criar teto de conteúdo a partir de uma estimativa arbitrária de tokens por palavra. Se ocorrer interrupção técnica de saída, usar a continuação já existente com bytes preservados. JSON malformado aciona reparo técnico do transporte, não replanejamento editorial.
 
-Persistir resposta bruta antes de parsing/validação; recuperar resultados completos do journal sem repetir chamadas. Timeout mantém checkpoints e progresso. Não alterar modelo, limites cognitivos, timeout, preço, caching, ingestão, fontes originais, autenticação, banco ou infraestrutura nesta correção.
+Persistir resposta bruta antes de parsing/validação; recuperar resultados completos do journal sem repetir chamadas. Timeout mantém checkpoints e progresso. A limpeza do V4 não altera modelo, limites cognitivos, timeout, preço, caching ou comportamento editorial.
 
 Cada chamada mantém etapa, tokens, latência, custo e motivo de término. A medição do rascunho é um evento de artefato e não aumenta o contador de chamadas físicas.
 

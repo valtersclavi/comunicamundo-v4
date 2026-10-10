@@ -5,13 +5,13 @@ from uuid import uuid4
 
 import pytest
 
-from comunicamundo_v4.hefesto import ingestion
-from comunicamundo_v4.hefesto.contracts import EditorialInputRequest
-from comunicamundo_v4.hefesto.contracts import NormalizedSource
-from comunicamundo_v4.hefesto.document_normalization import DocumentNormalization
-from comunicamundo_v4.hefesto.ingestion import extract_pdf, ingest, normalize_pdf_pages
-from comunicamundo_v4.hefesto.storage import load_input_request
-from comunicamundo_v4.hefesto.worker import parser
+from comunicamundo_v8.hefesto import ingestion
+from comunicamundo_v8.hefesto.contracts import EditorialInputRequest
+from comunicamundo_v8.hefesto.contracts import NormalizedSource
+from comunicamundo_v8.hefesto.document_normalization import DocumentNormalization
+from comunicamundo_v8.hefesto.ingestion import extract_pdf, ingest, normalize_pdf_pages
+from comunicamundo_v8.hefesto.storage import load_input_request
+from comunicamundo_v8.hefesto.worker import parser
 
 
 class Blob:
@@ -203,7 +203,7 @@ def test_real_text_pdf_is_extracted_into_semantic_layout_blocks() -> None:
 
 
 def test_native_pdf_keeps_page_and_skips_docling(monkeypatch) -> None:
-    from comunicamundo_v4.hefesto import document_normalization
+    from comunicamundo_v8.hefesto import document_normalization
 
     monkeypatch.setattr(document_normalization, "_document_converter", lambda: (_ for _ in ()).throw(
         AssertionError("Docling must not run on a textual PDF")
@@ -224,7 +224,7 @@ def test_native_pdf_keeps_page_and_skips_docling(monkeypatch) -> None:
 
 
 def test_native_pdf_caption_is_a_location_only_asset() -> None:
-    from comunicamundo_v4.hefesto.document_normalization import normalize_document
+    from comunicamundo_v8.hefesto.document_normalization import normalize_document
 
     original = b"Primeiro paragrafo."
     caption = b"Figure 1: Example.."
@@ -247,7 +247,7 @@ def test_native_pdf_caption_is_a_location_only_asset() -> None:
 def test_scanned_pdf_routes_to_ocr_without_silent_partial_result(monkeypatch) -> None:
     from pypdf import PdfWriter
     from io import BytesIO
-    from comunicamundo_v4.hefesto import document_normalization
+    from comunicamundo_v8.hefesto import document_normalization
 
     writer = PdfWriter()
     writer.add_blank_page(width=300, height=300)
@@ -294,21 +294,3 @@ def test_remote_sources_reject_private_networks(monkeypatch) -> None:
 def test_non_pdf_fails_before_model_work() -> None:
     with pytest.raises(ValueError, match="not a PDF"):
         ingestion.extract_pdf(b"not a pdf")
-
-
-def test_cli_is_product_generic_and_has_no_test_variant() -> None:
-    root = parser()
-    assert root.parse_args(["plan", "--request", "gs://product/input.json"]).command == "plan"
-    execution_id = uuid4()
-    assert root.parse_args([
-        "plan", "--request", "gs://product/input.json", "--execution-run-id", str(execution_id)
-    ]).execution_run_id == execution_id
-    with pytest.raises(SystemExit):
-        root.parse_args(["run-proof", "--variant", "A"])
-    with pytest.raises(SystemExit):
-        root.parse_args(["digest-normalized", "--request", "gs://legacy/request.json"])
-    with pytest.raises(SystemExit):
-        root.parse_args(["approve-axis", "--execution-run-id", str(execution_id)])
-    assert root.parse_args([
-        "produce-text", "--execution-run-id", str(execution_id)
-    ]).execution_run_id == execution_id

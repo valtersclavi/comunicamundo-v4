@@ -3,7 +3,7 @@ requires = ["setuptools>=80"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "comunicamundo-v4"
+name = "comunicamundo-v8"
 version = "2.0.0"
 description = "Hefesto editorial planning product"
 requires-python = ">=3.12,<3.13"
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-comunicamundo-v4-worker = "comunicamundo_v4.hefesto.worker:main"
+comunicamundo-v8-worker = "comunicamundo_v8.hefesto.worker:main"
 
 [project.optional-dependencies]
 dev = ["pytest==8.4.2", "pytest-asyncio==1.1.0"]
@@ -33,7 +33,7 @@ document = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-comunicamundo_v4 = ["web/*.html", "web/assets/*.css", "web/assets/*.js"]
+comunicamundo_v8 = ["web/*.html", "web/assets/*.css", "web/assets/*.js"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
