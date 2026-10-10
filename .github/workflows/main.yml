@@ -79,6 +79,7 @@ jobs:
           gcloud run jobs deploy "${JOB_NAME}" \
             --project="${PROJECT_ID}" --region="${REGION}" \
             --image="${PINNED_IMAGE}" --service-account="${RUNTIME_SA}" \
+            --command=comunicamundo-v8-worker \
             --args=--help \
             --cpu=4 --memory=8Gi --task-timeout=7200s --max-retries=0 \
             --set-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},HEFESTO_GCS_BUCKET=${BUCKET},HEFESTO_V8_MODEL=gemini-2.5-flash,HEFESTO_VERTEX_LOCATION=global" \
@@ -114,8 +115,23 @@ jobs:
       - name: Migrate PostgreSQL
         run: |
           set -euo pipefail
-          migration="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=migrate-postgres --wait --format='value(metadata.name)')"
-          check="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=check-postgres --wait --format='value(metadata.name)')"
+          dump_job_failure() {
+            local execution
+            execution="$(gcloud run jobs executions list --job="${JOB_NAME}" \
+              --project="${PROJECT_ID}" --region="${REGION}" --limit=1 \
+              --format='value(metadata.name)' || true)"
+            if [[ -n "${execution}" ]]; then
+              gcloud run jobs executions describe "${execution}" \
+                --project="${PROJECT_ID}" --region="${REGION}" --format=json || true
+            fi
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"${JOB_NAME}\" AND timestamp>=\"$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)\"" \
+              --project="${PROJECT_ID}" --limit=100 --format='value(textPayload)' || true
+          }
+          migration="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=migrate-postgres --wait --format='value(metadata.name)')" \
+            || { dump_job_failure; exit 1; }
+          check="$(gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --args=check-postgres --wait --format='value(metadata.name)')" \
+            || { dump_job_failure; exit 1; }
           test -n "${migration}${check}"
           echo "MIGRATION_EXECUTION=${migration}" >> "${GITHUB_ENV}"
           echo "DATABASE_CHECK_EXECUTION=${check}" >> "${GITHUB_ENV}"
