@@ -283,12 +283,17 @@ Falha técnica deve permitir a retomada descrita acima.
 Prazos impostos pelo provedor/infraestrutura precisam ser identificados separadamente;
 mudar o temporizador local não garante removê-los.
 
-**Pendente de definição técnica:** duração da janela de inatividade e tratamento temporal
-da primeira resposta. Nenhum novo número foi aprovado. Verificar semântica real do SDK
-e do provedor antes de codificar; não renomear 240 segundos e manter o mesmo problema.
+**Definição técnica aprovada em 12/10/2026:** a geração usa streaming. Qualquer
+evento/trecho recebido do provedor (incluindo partes de pensamento, quando
+existirem) renova a observação de atividade. Esperar no máximo **60 segundos**
+pelo primeiro evento. Depois do primeiro evento, **30 segundos** sem novo evento
+contam como inatividade. Não fabricar progresso local. Não manter os 240 segundos
+como teto total da chamada no cliente; prazos reais do provedor/infraestrutura
+continuam distintos e devem ser tratados como tal.
 
-**Verificação:** chamada com atividade além de 240 segundos não é cancelada por duração
-total local; silêncio real, espera inicial e erro do provedor são distinguíveis.
+**Verificação:** chamada com atividade além de 240 segundos não é cancelada por
+duração total local; silêncio de 30 segundos após atividade, ausência do primeiro
+evento em 60 segundos e erro do provedor são distinguíveis.
 
 ## 13. Cache obrigatório NO LLM
 
@@ -455,5 +460,13 @@ não altera arquitetura editorial ou Hermes. Conferir o resultado do deploy.
   agrupamento e máximo de dois recursos ativos. Sem inferência paga.
 
 Próximos trabalhos: obter aprovação de CI e fazer merge desta etapa; prosseguir
-com D/E (encomenda, dimensão, prompts e correção integral), mantendo a definição
-numérica do timeout por inatividade explicitamente pendente. Não inventar prazo.
+com D/E (encomenda, dimensão, prompts e correção integral). A definição numérica
+do timeout por inatividade foi aprovada (60s primeiro evento / 30s silêncio) e
+ainda precisa ser implementada em código com streaming; não confundir registro
+com implementação.
+
+12/10/2026 — definição aprovada pelo usuário para o item 12: streaming observável;
+60 segundos até o primeiro evento (“psiu”); 30 segundos de silêncio após atividade;
+qualquer evento do provedor renova os 30s; sem heartbeat local; retirar o teto
+total de 240 segundos no cliente. Somente registro documental nesta entrada;
+implementação do streaming/inatividade permanece pendente.
