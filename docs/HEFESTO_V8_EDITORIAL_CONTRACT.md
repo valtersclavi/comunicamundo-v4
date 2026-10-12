@@ -3,7 +3,7 @@
 Decisões do usuário consolidadas em 12/10/2026.
 Autoridade editorial única, referenciada pelo README e AGENTS.md.
 
-**Estado: especificação registrada; implementação destas correções pendente.**
+**Estado: implementação iniciada; consultar o registro de sessões e a branch indicada.**
 Este documento define o comportamento exigido. Não afirma que o código atual já o executa.
 Substitui as orientações anteriores deste arquivo que preservavam writing completion,
 correções por patches, continuação de resposta cortada ou restrições contrariadas abaixo.
@@ -324,7 +324,7 @@ Verificar também alternativas de busca/aquisição diante de falha de um proved
 
 ## 15. Implantação em sessões: checklist e evidências
 
-Todos os itens abaixo estão **pendentes de implementação/verificação** neste registro.
+Os itens abaixo só podem ser marcados concluídos com as evidências do registro de sessões.
 Ordem de trabalho proposta por dependência técnica; não muda a arquitetura aprovada.
 
 - [ ] A. Conferir main, deploy e arquivos ativos; mapear resíduos V4 e testes que preservam
@@ -365,3 +365,51 @@ Confirmar nomes e chamadas na revisão efetivamente usada, sem assumir que perma
 
 12/10/2026 — decisões consolidadas neste contrato. Somente documentação.
 Nenhuma correção funcional desta lista implementada nesta rodada.
+
+12/10/2026 — primeira implementação, branch fix/v8-recovery-contract, baseada na
+main 917cdb6646b29b59789ce18ae9eded8d23cd3e73. Escopo: transporte e recuperação
+do bloco B. Alteração funcional ainda não implantada em produção.
+
+Implementado e verificado localmente:
+
+- Reparação determinística de vírgula estrutural excedente, preservando pontuação
+  dentro de strings e resposta bruta. Nenhuma chamada ao LLM para esse reparo simples.
+- Resposta inválida/incompleta recebe nova chamada da operação original integral,
+  com os mesmos insumos e cache disponível. Retirados prompts de reparo por modelo,
+  geração de sufixos e concatenação de fragmentos.
+- Journal de falha não aprisiona a retomada: tentativas rejeitadas ficam como
+  diagnóstico; a retomada executa uma tentativa nova. Resposta completa já salva
+  antes de uma interrupção continua recuperável sem repetir a chamada.
+- Chamada interrompida sem resposta persistida pode ser refeita pelo caminho normal
+  de retomada; custo desconhecido permanece registrado, sem confirmação adicional.
+- Recibos de respostas e erros são reconciliados após interrupção sem duplicar
+  recibos antigos de custo desconhecido.
+- Revisão do estado em memória só avança após gravação confirmada no PostgreSQL;
+  falha na gravação não contamina a próxima tentativa com revisão inexistente.
+- Teste integrado usa a ação resume do Backend e confirma preservação do rascunho,
+  PE, escrita e revisão aprovada antes da falha; o fluxo chega a text_ready.
+
+Verificação: suíte local sem inferência paga, 165 testes aprovados e 2 ignorados
+por ausência de PostgreSQL isolado. Testes reais de banco e qualidade editorial
+não foram executados. Não houve deploy nem mudança em Hermes.
+
+Limites deste bloco, que NÃO devem ser apresentados como conclusão de todo o V8:
+
+- MAX_TOKENS preserva diagnóstico e interrompe a tentativa sem montar fragmentos.
+  A retomada refaz a operação integral. O dimensionamento/capacidade para evitar
+  essa falha continua no bloco D; não foi resolvido por este commit.
+- Repetição idêntica de resposta inválida na mesma execução interrompe o transporte
+  sem loop infinito; a retomada permite nova tentativa. Isso não é o limite de
+  duas correções editoriais, que ainda precisa ser removido no bloco E.
+- Validações editoriais de endereços/extensão ainda existentes em Calls.validate
+  serão retiradas com os contratos e a hierarquia no bloco E. A separação completa
+  entre transporte e decisões editoriais ainda NÃO está concluída.
+- Writing completion, patches por parágrafos, limite de duas correções, prioridades
+  dos prompts, restrição de 100 minutos, cache dos materiais editoriais e timeout
+  por inatividade ainda estão pendentes. Não confundir reutilização do cache atual
+  durante regeneração com atendimento ao novo requisito de cache completo.
+
+Próxima retomada: conferir a branch fix/v8-recovery-contract e sua revisão remota;
+prosseguir pelo bloco C (cache dos materiais por versão) sem alterar modelo ou
+temperatura. Prazo de inatividade e espera inicial continuam sem número aprovado.
+Os blocos D/E devem seguir este contrato integralmente. Hermes permanece posterior.

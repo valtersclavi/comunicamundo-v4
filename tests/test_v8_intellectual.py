@@ -202,7 +202,7 @@ async def test_extent_expansion_develops_planned_ideas_and_keeps_other_parts():
 
 
 @pytest.mark.asyncio
-async def test_review_repair_has_existing_work_and_planning_without_reconsulting_corpus():
+async def test_review_regeneration_retains_original_context_work_and_planning():
     st=state(sources=[source()]);repo=Memory();p=Provider(conception());editor=Editor(repo,p,Ingestor([]),Search(source()))
     await run(editor,repo,p,st)
     st.work=GeneratedWork(title="Work",body=complete_body());st.internal_plans[0].approved_at=st.projects[0].approved_at="now"
@@ -210,7 +210,8 @@ async def test_review_repair_has_existing_work_and_planning_without_reconsulting
     await Calls(repo,p,st).structured("review-probe",st.corpus.blocks[0],Review,
         repair_context=st.work.body+st.internal_plans[0].content)
     assert st.work.body in p.prompts[-1][0] and st.internal_plans[0].content in p.prompts[-1][0]
-    assert st.corpus.blocks[0] not in p.prompts[-1][0]
+    assert st.corpus.blocks[0] in p.prompts[-1][0]
+    assert p.prompts[-1]==p.prompts[-2]
 
 
 @pytest.mark.asyncio

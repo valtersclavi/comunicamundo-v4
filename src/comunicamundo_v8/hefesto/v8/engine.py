@@ -100,7 +100,7 @@ class Editor:
             state.error=dict(type=type(error).__name__,message=str(error),recoverable=False)
             await self.checkpoint(state,"project_too_large")
         except Exception as error:
-            state.error=dict(type=type(error).__name__,message=str(error),recoverable=True,requires_retry_ack=getattr(error,"requires_retry_ack",False))
+            state.error=dict(type=type(error).__name__,message=str(error),recoverable=True)
             await self.checkpoint(state,"paused")
             raise
 
@@ -137,7 +137,7 @@ class Editor:
         draft_target=(extent.target_words*130+99)//100
         # Calls uses the full verified model output capacity and exact input
         # preflight. Do not turn an estimated tokens/word ratio into a content
-        # ceiling. Technical MAX_TOKENS recovery retains every returned byte.
+        # ceiling. Incomplete responses are diagnostic data, not draft fragments.
         current_pe=state.projects[-1] if state.projects else None
         current_plan=None
         if current_pe and current_pe.planning_id:

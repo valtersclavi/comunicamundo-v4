@@ -63,20 +63,23 @@ async def test_draft_precedes_pe_without_sufficiency_or_regeneration(approach):
 
 
 @pytest.mark.asyncio
-async def test_draft_technical_continuation_preserves_partial_output_after_restart():
+async def test_draft_restart_regenerates_integral_draft_after_truncation_and_timeout():
     st=state(sources=[source()]);repo=Memory();good=conception()
     body=good[0]["body"];raw=json.dumps(good[0]);cut=len(raw)//2
-    p=Provider([(raw[:cut],"MAX_TOKENS"),TimeoutError("service"),(raw[cut:],"STOP"),good[1]])
+    p=Provider([(raw[:cut],"MAX_TOKENS"),TimeoutError("service"),good[0],good[1]])
     editor=Editor(repo,p,Ingestor([]),Search(source()))
     await repo.create(st)
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
     saved=await repo.get(st.execution_id)
     journal=next(iter(repo.ops.values()))
-    assert journal["assembled"]==raw[:cut] and not saved.projects
+    assert journal["attempts"][0]["text"]==raw[:cut] and not saved.projects
+    with pytest.raises(Recoverable,match="service"):
+        await editor.execute(saved,Calls(repo,p,saved))
+    saved=await repo.get(st.execution_id)
     await editor.execute(saved,Calls(repo,p,saved))
     assert saved.status=="project_proposed" and saved.internal_plans[0].content==body
     assert not saved.planning_checkpoint
-    assert p.prompts[2][0].endswith(raw[:cut])
+    assert p.prompts[0]==p.prompts[1]==p.prompts[2]
 
 
 @pytest.mark.asyncio

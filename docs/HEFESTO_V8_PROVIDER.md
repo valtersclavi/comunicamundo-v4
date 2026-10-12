@@ -66,7 +66,8 @@ One-block PE/support/revised PE/write/verify/localized correction share one cach
 Two-block readings use exactly their respective two caches. The existing final
 combination of grounded readings and necessary original support stays inline;
 there is no third cache/context and no change to editorial compression. Response
-syntax repair does not consult the corpus and therefore does not read its cache.
+packaging repair is deterministic and makes no model call. When a response must
+be regenerated, the original operation reuses the same available context cache.
 Preflight uses cache metadata token count + counted dynamic contents + full
 output reservation, without counting cache tokens twice. Actual provider read
 counts, uncached input, output, reasoning and generation costs remain recorded.

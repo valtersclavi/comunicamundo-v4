@@ -84,13 +84,13 @@ async def test_malformed_draft_json_repairs_transport_without_discarding_body():
     st=state(sources=[source()]);repo=Memory()
     draft="Complete explanation and relationships.\n\nPreserved conclusion."
     malformed=json.dumps(dict(body=draft))[:-1]+",}"
-    p=Provider([(malformed,"STOP"),dict(body=draft),conception()[1]])
+    p=Provider([(malformed,"STOP"),conception()[1]])
     await run(Editor(repo,p,Ingestor([]),Search(source())),repo,p,st)
     raw=next(iter(repo.ops.values()))
     assert raw["attempts"][0]["text"]==malformed
-    assert raw["attempts"][1]["mode"]=="repair"
+    assert len(raw["attempts"])==1
     assert st.internal_plans[0].content==draft
-    assert "Preserve substantive content" in p.prompts[1][1]
+    assert len(p.prompts)==2
 
 
 @pytest.mark.asyncio
