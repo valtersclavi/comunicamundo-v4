@@ -19,7 +19,7 @@ class StrictModel(BaseModel):
 class EditorialBrief(StrictModel):
     theme: str = Field(min_length=1)
     approach: str = Field(min_length=1)
-    duration_minutes: int = Field(ge=1)
+    duration_minutes: int = Field(ge=1, le=90)
     output_language: str = Field(min_length=2)
     audience: str = Field(min_length=1)
     product: str = Field(min_length=1)

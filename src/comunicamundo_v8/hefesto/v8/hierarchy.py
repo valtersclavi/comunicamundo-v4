@@ -1,9 +1,9 @@
-"""Progressive editorial authority with durable diagnoses and autonomous resolution."""
+"""Progressive editorial authority with durable diagnoses and integral correction."""
 from datetime import UTC, datetime
 import json
 from .contracts import (EditorialStage, Diagnosis, Correction, Confirmation,
-                        GeneratedWork, Reconsideration, identity)
-from .editorial import STAGES, stage_contract, work_context, apply_edits, within_extent
+                        GeneratedWork, identity)
+from .editorial import STAGES, stage_contract, work_context, apply_correction, within_extent
 from .corpus import originals
 from .provider import Recoverable
 
@@ -36,8 +36,7 @@ class Hierarchy:
             approved_at=datetime.now(UTC).isoformat(),work_hash=identity(state.work),
             consolidated_work=state.work.model_dump(mode='json'),
             criteria=STAGES[stage.position-1][2],authority=STAGES[stage.position-1][3],
-            confirmations=[a.get('confirmation') for a in stage.attempts],
-            editorial_decision=stage.reconsideration.get('decision'))
+            confirmations=[a.get('confirmation') for a in stage.attempts])
         await self.editor.checkpoint(state)
 
     async def run(self,state,calls,planning,pe):
@@ -50,7 +49,9 @@ class Hierarchy:
             if stage.status=='approved':continue
             if any(s.status!='approved' for s in state.editorial_stages if s.position<stage.position):
                 raise Recoverable('earlier editorial approval is missing')
-            if stage.status=='paused':stage.status='correcting'
+            if stage.status in {'paused','reconsidering'}:
+                # Old reconsider checkpoints resume as ordinary correction.
+                stage.status='correcting'
             if stage.diagnosis is None:
                 if stage.examined_work is None:stage.examined_work=state.work.model_copy(deep=True)
                 stage.status='diagnosing';await self.editor.checkpoint(state)
@@ -81,9 +82,6 @@ class Hierarchy:
             while stage.status!='approved':
                 active=stage.attempts[-1] if stage.attempts and 'confirmation' not in stage.attempts[-1] else None
                 if active is None:
-                    if len(stage.attempts)>=2:
-                        await self.reconsider(state,calls,planning,pe,stage)
-                        break
                     active=dict(number=len(stage.attempts)+1,before=state.work.model_dump(mode='json'))
                     stage.attempts.append(active)
                     stage.status='correcting';await self.editor.checkpoint(state)
@@ -96,7 +94,7 @@ class Hierarchy:
                         Correction,system=stage_contract(stage.position,'correct'),repair_context=prompt,
                         cache_prefix=self.cached_context(state,planning,pe,stage))
                     active['correction']=correction.model_dump(mode='json')
-                    active['candidate']=apply_edits(state.work,correction).model_dump(mode='json')
+                    active['candidate']=apply_correction(state.work,correction).model_dump(mode='json')
                     stage.status='confirming';await self.editor.checkpoint(state)
                 stage.status='confirming';await self.editor.checkpoint(state)
                 candidate=GeneratedWork.model_validate(active['candidate'])
@@ -112,7 +110,7 @@ class Hierarchy:
                 valid=confirmation.constraints_preserved and within_extent(candidate,planning.extent)
                 active['valid']=valid
                 if not within_extent(candidate,planning.extent):
-                    active['preservation_failure']='intervention exceeded the realized extent tolerance; preserve substantive extent, do not dimension the work in quality review'
+                    active['preservation_failure']='intervention left the work below or above the commissioned extent band; restore substantive commissioned extent'
                 if valid:
                     state.work_versions.append(state.work.model_copy(deep=True));state.work=candidate
                 resolved=valid and all(r.resolved for r in confirmation.resolutions)
@@ -121,25 +119,3 @@ class Hierarchy:
                 else:
                     stage.status='correcting';await self.editor.checkpoint(state)
         return True
-
-    async def reconsider(self,state,calls,planning,pe,stage):
-        stage.status='reconsidering'
-        if not stage.reconsideration:
-            stage.reconsideration=dict(before=state.work.model_dump(mode='json'))
-        await self.editor.checkpoint(state)
-        prompt=self.context(state,planning,pe,stage,state.work)
-        prompt+='\nAPPROVED PLANNING AND PE:\n'+planning.model_dump_json()+pe.fields.model_dump_json()
-        prompt+='\nORIGINAL KNOWN DIAGNOSIS:\n'+stage.diagnosis.model_dump_json()
-        prompt+='\nFAILED INTERVENTIONS AND EXPLANATIONS:\n'+json.dumps(stage.attempts,ensure_ascii=False)
-        decision=await calls.structured(f'{stage.stage_id}-reconsider',prompt,Reconsideration,
-            system=stage_contract(stage.position,'reconsider'),repair_context=prompt,
-            cache_prefix=self.cached_context(state,planning,pe,stage))
-        candidate=apply_edits(state.work,decision) if decision.edits else state.work.model_copy(deep=True)
-        stage.reconsideration.update(decision=decision.model_dump(mode='json'),
-                                    candidate=candidate.model_dump(mode='json'))
-        if not within_extent(candidate,planning.extent):
-            # This is a malformed execution of the operator contract, not a
-            # request for human editorial help. Repair the candidate expression.
-            raise Recoverable('provider reconsideration violated the preserved completed extent; response and work retained')
-        state.work_versions.append(state.work.model_copy(deep=True));state.work=candidate
-        await self.approve(state,stage)

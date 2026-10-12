@@ -229,11 +229,12 @@ async def test_cache_transport_uses_sdk_resource_without_system_or_corpus_duplic
     assert config.contents=="Stable addressed corpus" and config.system_instruction is None and config.ttl=="3600s"
     await p.cache_get(cache["resource"]);await p.cache_renew(cache["resource"],3600)
     result=await p.generate("Brief + PE + schema", "Editorial instructions",cap.output_tokens,cached_context=cache)
-    args=models.generate_content.await_args.kwargs;config=args["config"]
+    args=models.generate_content_stream.await_args.kwargs;config=args["config"]
     assert config.cached_content==cache["resource"] and config.system_instruction is None
     assert "Stable addressed corpus" not in args["contents"]
     assert "Editorial instructions" in args["contents"] and "Brief + PE + schema" in args["contents"]
-    assert config.thinking_config.thinking_budget==24576 and config.temperature==1.0
+    assert config.thinking_config.thinking_budget==24576 and config.thinking_config.include_thoughts is True
+    assert config.temperature==1.0
     assert result["usage"]["reasoning_tokens"]==2048 and result["usage"]["uncached_input_tokens"]==600
     assert Decimal(result["usage"]["cost_usd"])==Decimal("0.005512")
 
@@ -258,22 +259,22 @@ async def test_unverified_cache_profile_pauses_without_generation():
 
 
 @pytest.mark.asyncio
-async def test_localized_correction_uses_same_cache_and_preserves_other_passages():
+async def test_integral_correction_uses_same_cache_and_preserves_other_passages():
     p,repo,st=await setup(CachedProvider(conception("Narrative.",planning="Intellectual material. "*1950),output_tokens=65536))
     st.request.brief.duration_minutes=20
     s=st.sources[0];editor=Editor(repo,p,Ingestor([]),Search(s))
     await editor.execute(st,Calls(repo,p,st))
     st.action=dict(kind="approve",id="produce",version=1)
-    ref=dict(source_id=str(s.source_id),location_id=s.locations[0].location_id)
     opening="Complete narrative text. "*1000;body=opening+"\n\nWrong claim.\n\nClosing."
+    fixed=opening+"\n\nEvidence.\n\nClosing."
     p.outputs=[{"title":"Work","body":body,"support":[]},review_ok()[0],
         dict(problems=[problem(passages=["p2"])],evidence_questions=[]),
         dict(strategy="Qualify the specific claim while preserving the surrounding work.",
-             edits=[dict(passage_ids=["p2"],replacement="Evidence.")],
+             title="Work",body=fixed,
              support=[support(s,"Documentary contribution, not a literal quote.")]),
         confirmed(),*review_ok()[2:]]
     await editor.execute(st,Calls(repo,p,st))
-    assert st.work.body==opening+"\n\nEvidence.\n\nClosing." and st.status=="text_ready"
+    assert st.work.body==fixed and st.status=="text_ready"
     assert len(p.creations)==5 and all(p.reads)
     assert len({x["resource"] for x in p.reads[3:-1]})==1
 

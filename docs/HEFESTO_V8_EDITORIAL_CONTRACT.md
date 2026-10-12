@@ -505,3 +505,21 @@ implementação do streaming/inatividade permanece pendente.
 3. Rascunho abaixo de 130% não é desfecho aceitável. O planejador completa a
    matéria com conhecimento próprio inequívoco, mesmo sem constar literalmente
    das fontes, sem inventar estudo/dado/depoimento/acontecimento/bibliografia.
+
+12/10/2026 — terceira etapa, branch cursor/v8-editorial-de-stream-2484:
+implementação de C (streaming/inatividade), D e E sobre a base do cache.
+
+- Streaming com include_thoughts; 60s até o primeiro evento; 30s de silêncio;
+  teto HTTP local de 240s retirado (substituído por teto longo de transporte).
+- Encomenda máxima 90 minutos na entrada (API/UI); removidos writing-completion
+  e bloqueio target_words×4; prioridade rascunho>briefing>fontes no escritor;
+  within_extent exige cumprir a referência ( +10% só no teto).
+- Correção integral (title+body); removidos patches por passage_id na esteira
+  ativa e o encerramento automático após duas correções/reconsider.
+- Prompts de completude/consistência/narrativa/estilo alinhados ao contrato.
+- Inclui o fix de migrate 1010 (restos da matriz) para desbloquear deploy.
+- Verificação local: pytest completo sem inferência paga; verify_v8_migrations.
+  CI/deploy e avaliação editorial real do usuário permanecem pendentes.
+
+Próximo: merge após CI; conferir deploy; marcar A/B/C/D/E no checklist só com
+evidência de merge/deploy; F/G depois.

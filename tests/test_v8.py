@@ -95,7 +95,9 @@ def conception(document="A reconsidered narrative.", planning=None):
 
 
 def complete_body(prefix="Opening."):
-    return prefix+" " + " ".join(f"Synthetic observation {i} develops a distinct implication for this explanatory argument." for i in range(13))
+    # Keep commissioned one-minute fixtures inside the [target, target+10%] band.
+    filler = [f"observation{i}" for i in range(154)]
+    return " ".join([prefix, *filler])
 
 
 def review_ok():
@@ -301,17 +303,18 @@ async def test_two_context_readings_keep_originals_for_single_writer():
 
 
 @pytest.mark.asyncio
-async def test_verifier_corrects_exact_passage_preserving_other_text():
+async def test_verifier_returns_integral_corrected_work():
     s=source();repo=Memory();st=state(sources=[s]);body=complete_body("Opening. Wrong claim. Closing.")
+    fixed=body.replace("Wrong claim.","A grounded factual statement.")
     p=Provider(conception("Narrative."));editor=Editor(repo,p,Ingestor([]),Search(s));await run(editor,repo,p,st)
     st.action=dict(kind="approve",id="approve",version=1)
-    ref=dict(source_id=str(s.source_id),location_id="A1")
     p.outputs=[{"title":"Work","body":body,"support":[]},
         dict(problems=[]),dict(problems=[problem()]),
-        dict(strategy="Qualify the inaccurate attribution while preserving the surrounding development.",edits=[dict(passage_ids=["p1"],replacement=body.replace("Wrong claim.","A grounded factual statement."))],support=[support(s)]),
+        dict(strategy="Qualify the inaccurate attribution while preserving the surrounding development.",
+             title="Work",body=fixed,support=[support(s)]),
         confirmed(),dict(problems=[]),dict(problems=[])]
     await editor.execute(st,Calls(repo,p,st))
-    assert st.work.body==body.replace("Wrong claim.","A grounded factual statement.")
+    assert st.work.body==fixed
     assert len(st.work_versions)>=2 and st.status=="text_ready"
 
 
@@ -536,10 +539,16 @@ def vertex_fixture(model="gemini-2.5-flash"):
         usage_metadata=types.GenerateContentResponseUsageMetadata(
             prompt_token_count=1000,cached_content_token_count=400,
             candidates_token_count=80,thoughts_token_count=2048))
+    async def stream(*args,**kwargs):
+        async def chunks():
+            yield response
+        return chunks()
     models=SimpleNamespace(generate_content=AsyncMock(return_value=response),
+        generate_content_stream=AsyncMock(side_effect=stream),
         count_tokens=AsyncMock(return_value=types.CountTokensResponse(total_tokens=1000)))
     provider=object.__new__(Vertex)
     provider.model=model;provider._capacity=None
+    provider.first_event_timeout_s=60;provider.silence_timeout_s=30
     provider.client=SimpleNamespace(aio=SimpleNamespace(models=models))
     return provider,models
 
@@ -557,8 +566,9 @@ async def test_vertex_uses_verified_maximum_thinking_and_native_temperature(monk
     cap=await provider.capacity()
     assert cap.thinking_budget_max==maximum
     await provider.generate("corpus","editorial contract",cap.output_tokens)
-    config=models.generate_content.await_args.kwargs["config"]
+    config=models.generate_content_stream.await_args.kwargs["config"]
     assert config.thinking_config.thinking_budget==cap.thinking_budget_max>0
+    assert config.thinking_config.include_thoughts is True
     assert config.temperature==1.0
     assert config.max_output_tokens==cap.output_tokens
     assert config.top_p is None and config.top_k is None
@@ -576,7 +586,7 @@ async def test_vertex_missing_or_invalid_cognitive_profile_pauses_before_generat
     provider,models=vertex_fixture("unverified-fixture")
     with pytest.raises(Recoverable,match="verified.*thinking_budget_max"):
         await provider.generate("corpus","editorial contract",65536)
-    models.generate_content.assert_not_awaited()
+    models.generate_content_stream.assert_not_awaited()
     assert provider._capacity is None
 
 
@@ -594,9 +604,37 @@ async def test_vertex_actual_thought_tokens_are_journaled_and_priced(monkeypatch
     assert usage["output_tokens"]==80 and usage["reasoning_tokens"]==2048
     assert Decimal(usage["cost_usd"])==Decimal("0.005512")
     journal=next(iter(repo.ops.values()))
-    assert journal["attempts"][0]["raw"]["usage_metadata"]["thoughts_token_count"]==2048
-    calls_before=models.generate_content.await_count
+    assert journal["attempts"][0]["raw"]["stream"][0]["usage_metadata"]["thoughts_token_count"]==2048
+    calls_before=models.generate_content_stream.await_count
     await Calls(repo,provider,st).structured("proposal","corpus",Proposal)
-    assert models.generate_content.await_count==calls_before
+    assert models.generate_content_stream.await_count==calls_before
     assert len(st.telemetry)==1
+
+
+@pytest.mark.asyncio
+async def test_stream_inactivity_before_first_event_is_recoverable():
+    import asyncio
+    from unittest.mock import AsyncMock
+    from types import SimpleNamespace
+    from comunicamundo_v8.hefesto.v8.provider import Vertex
+    async def hang(*args,**kwargs):
+        async def chunks():
+            await asyncio.sleep(10)
+            yield None
+        return chunks()
+    provider=object.__new__(Vertex)
+    provider.model="gemini-2.5-flash";provider._capacity=None
+    provider.first_event_timeout_s=0.01;provider.silence_timeout_s=30
+    provider.client=SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(
+        generate_content_stream=AsyncMock(side_effect=hang))))
+    with pytest.raises(Recoverable,match="inactivity"):
+        await provider.generate("corpus","contract",100)
+
+
+def test_commission_rejects_duration_above_ninety_minutes():
+    from pydantic import ValidationError
+    from comunicamundo_v8.hefesto.contracts import EditorialBrief
+    EditorialBrief(theme="t",approach="a",duration_minutes=90,output_language="pt",audience="a",product="podcast")
+    with pytest.raises(ValidationError):
+        EditorialBrief(theme="t",approach="a",duration_minutes=91,output_language="pt",audience="a",product="podcast")
 
