@@ -33,6 +33,7 @@ class CachedProvider(Provider):
             cache_ttl_seconds=3600, cache_storage_price="1", cache_source="official-fixture",
             input_price="0.30", cached_price="0.03", output_price="2.50")
         self.resources = {}; self.creations = []; self.renewals = []; self.reads = []
+        self.peak_resources = 0
         self.create_error = None
 
     async def cache_create(self, text, display_name, cap):
@@ -43,6 +44,7 @@ class CachedProvider(Provider):
         meta = dict(resource=resource, model=self.model, token_count=await self.count(text),
             created_at=now.isoformat(), expire_at=(now+timedelta(seconds=cap.cache_ttl_seconds)).isoformat())
         self.resources[resource] = dict(meta, display_name=display_name)
+        self.peak_resources = max(self.peak_resources, len(self.resources))
         return deepcopy(meta)
 
     async def cache_get(self, name):
@@ -78,10 +80,15 @@ async def setup(p=None, text="Evidence. "*1400):
 
 
 @pytest.mark.asyncio
-async def test_entire_editorial_cycle_reuses_one_cache_without_reingestion():
+async def test_entire_editorial_cycle_caches_materials_by_version_without_reingestion():
     s=source("Evidence. "*1400); repo=Memory(); st=state(request([dict(uri=s.origin)]))
-    p=CachedProvider([*conception("A narrative."), *conception("A new direction."),
-        {"title":"Work","body":complete_body(),"support":[support(s,"Evidence.")]}, *review_ok()])
+    st.request.brief.duration_minutes=20
+    first_draft="Original intellectual material. "*1300
+    revised_draft="Revised intellectual material. "*1300
+    p=CachedProvider([*conception("A narrative.",planning=first_draft),
+        *conception("A new direction.",planning=revised_draft),
+        {"title":"Work","body":"Complete narrative text. "*1000,"support":[support(s,"Evidence.")]},
+        *review_ok()],output_tokens=65536)
     ing=Ingestor([s]); editor=Editor(repo,p,ing,Search(source(name="B")))
     await repo.create(st); await editor.execute(st,Calls(repo,p,st))
     r=Remoque(message="Change the direction",base_version=1);st.remoque.append(r)
@@ -89,15 +96,20 @@ async def test_entire_editorial_cycle_reuses_one_cache_without_reingestion():
     await editor.execute(st,Calls(repo,p,st))
     st.action=dict(kind="approve",id="a",version=2);await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready" and ing.calls==1
-    assert len(p.creations)==1 and len(p.reads)==9
-    assert len({v["resource"] for v in p.reads if v})==1
+    assert len(p.creations)==7 and len(p.reads)==9
+    assert all(p.reads)
+    assert p.reads[5]["resource"]==p.reads[6]["resource"]==p.reads[7]["resource"]
     assert all("ORIGINAL TEXT" not in prompt for prompt,_ in p.prompts)
-    assert p.creations[0][0]==st.corpus.blocks[0]
+    assert p.creations[0][0].startswith(st.corpus.blocks[0])
+    assert first_draft in p.creations[1][0] and revised_draft in p.creations[3][0]
+    assert "A new direction." in p.creations[4][0]
+    assert revised_draft not in p.prompts[4][0]
     assert all(ttl==3600 for _,ttl in p.renewals)
     usage=public(st)["usage"]
-    assert usage["cache_creations"]==1 and usage["cache_reuses"]==2
-    assert usage["reasoning_tokens"]==60 and usage["uncached_input_tokens"]==90
-    assert usage["cached_tokens"]==3*st.corpus.block_tokens[0]
+    assert usage["cache_creations"]==7 and usage["cache_reuses"]==2
+    assert usage["reasoning_tokens"]==180 and usage["uncached_input_tokens"]==90
+    assert usage["cached_tokens"]==sum(v["token_count"] for v in p.reads)
+    assert len(p.resources)==1
 
 
 @pytest.mark.asyncio
@@ -130,12 +142,11 @@ async def test_lost_cache_recreated_from_persistent_corpus_after_restart(loss):
 
 
 @pytest.mark.asyncio
-async def test_small_corpus_is_explicitly_not_eligible():
+async def test_below_provider_cache_minimum_cannot_fall_back_to_uncached_generation():
     p,repo,st=await setup(CachedProvider([{"document":"Plan"}]),text="Small evidence.")
-    await Calls(repo,p,st).structured("pe",st.corpus.blocks[0]+"\nDirection",Proposal)
-    assert not p.creations and p.reads==[None]
-    assert st.telemetry[-1]["cache_mode"]=="inline-not-eligible"
-    assert st.telemetry[-1]["cache_status"]=="not_eligible" and "2048" in st.telemetry[-1]["cache_reason"]
+    with pytest.raises(Recoverable,match="provider minimum 2048"):
+        await Calls(repo,p,st).structured("pe",st.corpus.blocks[0]+"\nDirection",Proposal)
+    assert not p.creations and not p.reads and not p.prompts
 
 
 @pytest.mark.asyncio
@@ -164,7 +175,7 @@ async def test_model_or_endpoint_change_never_reuses_cache(change):
 
 
 @pytest.mark.asyncio
-async def test_two_blocks_get_only_two_resources_and_no_third_synthesis_cache():
+async def test_two_reading_caches_are_replaced_by_merged_cache_without_third_active_context():
     p,repo,st=await setup()
     blocks=[st.corpus.blocks[0],"Second block. "*1000]
     st.corpus=st.corpus.model_copy(update=dict(blocks=blocks,block_tokens=[await p.count(x) for x in blocks]))
@@ -175,8 +186,11 @@ async def test_two_blocks_get_only_two_resources_and_no_third_synthesis_cache():
             context,dynamic,_=await manager.prepare(block+"\nRead", "reading")
             assert dynamic=="\nRead";resources.append(context["resource"])
     assert len(set(resources))==2 and len(p.creations)==2
-    context,_,_=await manager.prepare("GROUNDED READINGS:\nA + B + original support", "pe")
-    assert context is None and len(p.creations)==2
+    merged="GROUNDED READINGS:\n"+"Combined reading and original support. "*400
+    context,dynamic,_=await manager.prepare(merged+"\nPlan", "pe",cache_prefix=merged)
+    assert context and dynamic=="\nPlan" and len(p.creations)==3
+    assert p.peak_resources==2 and len(p.resources)==1
+    assert all(resource not in p.resources for resource in resources)
 
 
 @pytest.mark.asyncio
@@ -245,12 +259,13 @@ async def test_unverified_cache_profile_pauses_without_generation():
 
 @pytest.mark.asyncio
 async def test_localized_correction_uses_same_cache_and_preserves_other_passages():
-    p,repo,st=await setup(CachedProvider(conception("Narrative.")))
+    p,repo,st=await setup(CachedProvider(conception("Narrative.",planning="Intellectual material. "*1950),output_tokens=65536))
+    st.request.brief.duration_minutes=20
     s=st.sources[0];editor=Editor(repo,p,Ingestor([]),Search(s))
     await editor.execute(st,Calls(repo,p,st))
     st.action=dict(kind="approve",id="produce",version=1)
     ref=dict(source_id=str(s.source_id),location_id=s.locations[0].location_id)
-    opening=complete_body("Opening.");body=opening+"\n\nWrong claim.\n\nClosing."
+    opening="Complete narrative text. "*1000;body=opening+"\n\nWrong claim.\n\nClosing."
     p.outputs=[{"title":"Work","body":body,"support":[]},review_ok()[0],
         dict(problems=[problem(passages=["p2"])],evidence_questions=[]),
         dict(strategy="Qualify the specific claim while preserving the surrounding work.",
@@ -259,7 +274,8 @@ async def test_localized_correction_uses_same_cache_and_preserves_other_passages
         confirmed(),*review_ok()[2:]]
     await editor.execute(st,Calls(repo,p,st))
     assert st.work.body==opening+"\n\nEvidence.\n\nClosing." and st.status=="text_ready"
-    assert len(p.creations)==1 and len({x["resource"] for x in p.reads if x})==1
+    assert len(p.creations)==5 and all(p.reads)
+    assert len({x["resource"] for x in p.reads[3:-1]})==1
 
 
 
@@ -304,6 +320,58 @@ async def test_large_cache_uses_immutable_gcs_transport(monkeypatch):
     cfg=p.client.aio.caches.create.await_args.kwargs["config"]
     assert cfg.contents[0].parts[0].file_data.file_uri=="gs://fixture-bucket/hefesto-v8/context/cache-key.txt"
     assert cfg.contents[0].parts[0].file_data.mime_type=="text/plain"
+
+
+@pytest.mark.asyncio
+async def test_small_reusable_material_is_grouped_with_existing_call_content():
+    p,repo,st=await setup()
+    brief="BRIEF: Explain the commissioned question.\n"
+    prompt=brief+"WHOLE TEXT:\n"+"The existing complete commissioned text. "*500
+    context,dynamic,_=await Contexts(repo,p,st).prepare(prompt,"style",cache_prefix=brief)
+    assert context and not dynamic
+    assert p.creations[0][0]==prompt
+    assert "ORIGINAL TEXT" not in p.creations[0][0]
+
+
+@pytest.mark.asyncio
+async def test_editorial_cache_identity_includes_current_material_version():
+    p,repo,st=await setup()
+    old="BRIEF + DRAFT + PE: original material. "*400
+    new="BRIEF + DRAFT + PE: revised material. "*400
+    manager=Contexts(repo,p,st)
+    first,_,_=await manager.prepare(old+"\nDiagnose", "completeness",cache_prefix=old)
+    reused,_,_=await manager.prepare(old+"\nCorrect", "completeness",cache_prefix=old)
+    revised,_,_=await manager.prepare(new+"\nDiagnose", "completeness",cache_prefix=new)
+    assert first["resource"]==reused["resource"]!=revised["resource"]
+    assert len(p.creations)==2 and first["resource"] not in p.resources
+    assert p.peak_resources==1 and p.creations[-1][0]==new
+
+
+@pytest.mark.asyncio
+async def test_cache_disappearing_between_get_and_renew_is_recreated_in_same_operation():
+    p,repo,st=await setup();manager=Contexts(repo,p,st)
+    prefix=st.corpus.blocks[0]+"\nBRIEFING: existing commission"
+    first,_,_=await manager.prepare(prefix,"draft",cache_prefix=prefix)
+    async def lost(resource,ttl):
+        p.resources.pop(resource,None)
+        raise Missing()
+    p.cache_renew=lost
+    recovered,_,_=await manager.prepare(prefix,"draft",cache_prefix=prefix)
+    assert first["resource"]!=recovered["resource"] and len(p.creations)==2
+    assert p.creations[0][0]==p.creations[1][0]
+
+
+@pytest.mark.asyncio
+async def test_recreated_editorial_cache_contains_same_brief_draft_and_pe_after_restart():
+    p,repo,st=await setup()
+    prefix="BRIEF + DRAFT + PE: preserved editorial content. "*300
+    first,_,_=await Contexts(repo,p,st).prepare(prefix+"\nDiagnose","review",cache_prefix=prefix)
+    p.resources.clear()
+    restored=await repo.get(st.execution_id)
+    second,_,_=await Contexts(repo,p,restored).prepare(prefix+"\nVerify","review",cache_prefix=prefix)
+    assert first["resource"]!=second["resource"]
+    assert p.creations[0][0]==p.creations[1][0]==prefix
+    assert not p.prompts  # Recreating cache never regenerates the materials.
 
 
 @pytest.mark.asyncio

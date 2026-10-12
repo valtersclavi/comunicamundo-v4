@@ -44,10 +44,12 @@ class Editor:
             return corpus.blocks[0]
         readings=[]
         for i,block in enumerate(corpus.blocks):
+            cached=block+"\nBRIEFING AND EDITORIAL DIRECTION:\n"+direction
             reading=await calls.structured("reading-"+identity([identity(block),direction]),
-                block+"\nBRIEFING AND EDITORIAL DIRECTION:\n"+direction+
+                cached+
                 "\nProduce a grounded editorial reading of this block: relevant ideas/facts, relationships, tensions, contradictions, nuances and indispensable elements. Not a proportional summary. Preserve original references.",
-                Reading,corpus.source_ids,EDITOR)
+                Reading,corpus.source_ids,EDITOR,cache_prefix=cached,
+                cache_slot=i,cache_kind="source-reading")
             validate_references(reading.references,state.sources)
             readings.append(reading)
         refs=[r for v in readings for r in v.references]
@@ -164,7 +166,8 @@ class Editor:
                     prompt+="\nPRESERVED EARLIER WORK:\n"+json.dumps(previous,ensure_ascii=False)
             draft=await calls.structured("intellectual-draft",prompt,IntellectualDraft,
                 [s.source_id for s in state.sources],DRAFT.format(
-                    palavras_contratadas=extent.target_words,palavras_rascunho=draft_target))
+                    palavras_contratadas=extent.target_words,palavras_rascunho=draft_target),
+                cache_prefix=prompt)
             if (kind=="revise" and current_plan and has_intellectual_draft(current_plan)
                     and draft.body==current_plan.content):
                 state.notice="O remoque já está contemplado no rascunho vigente; o texto foi preservado."
@@ -182,9 +185,9 @@ class Editor:
                 planning_id=str(plan.planning_id),target_words=draft_target,
                 measured_words=plan.measured_words,contracted_words=extent.target_words))
             await self.checkpoint(state)  # Entire draft durable BEFORE PE synthesis.
-        fields=await calls.structured("editorial-project",
-            "COMMISSION:\n"+self.direction(state)+"\nCOMPLETE PERSISTED INTELLECTUAL DRAFT:\n"+plan.model_dump_json(),
-            EditorialFields,system=SYNTHESIZE)
+        synthesis="COMMISSION:\n"+self.direction(state)+"\nCOMPLETE PERSISTED INTELLECTUAL DRAFT:\n"+plan.model_dump_json()
+        fields=await calls.structured("editorial-project",synthesis,
+            EditorialFields,system=SYNTHESIZE,cache_prefix=synthesis)
         state.projects.append(EditorialProject(version=len(state.projects)+1,fields=fields,
             planning_id=plan.planning_id,planning_version=plan.version,
             corpus_manifest_id=plan.corpus_manifest_id))
@@ -218,7 +221,7 @@ class Editor:
             context=await self.context(state,calls,"Writing with full planning; target "+str(extent.target_words)+" words")
             work=await calls.structured("write",context+common+
                 f"\nQUANTITATIVE TARGET: {extent.target_words} words; {extent.duration_minutes} minutes at {extent.words_per_minute} words/minute. Select, reorganize, condense and rewrite the surplus draft into the commissioned final work and ending.",
-                GeneratedWork,[s.source_id for s in state.sources],WRITE)
+                GeneratedWork,[s.source_id for s in state.sources],WRITE,cache_prefix=context+common)
             self.validate_work(work,state)
             state.work=work;state.work_versions.append(work.model_copy(deep=True))
             await self.checkpoint(state)  # Never repeat valid writing after review failure.
@@ -232,7 +235,7 @@ class Editor:
                 "\nPREVIOUS EXECUTION STRATEGIES AND RESULTS:\n"+json.dumps(state.writing_checkpoint.get("attempts",[]),ensure_ascii=False)+
                 "\nPRESERVED WRITING:\n"+work_context(state.work,extent)+
                 f"\nACTUAL WORDS: {len(state.work.body.split())}; target {extent.target_words}, acceptable ±10%. Finish realization of the approved conception, including deeper relationships and explanations where pertinent; if overlong, condense expression without losing planned substance. Preserve valid text. Do not introduce unrelated themes, invented evidence or padding. Reconsider failed execution strategies and their causes; choose a materially different faithful realization rather than repeating an ineffective intervention. Return coordinated edits and execution strategy.",
-                Correction,[s.source_id for s in state.sources],WRITE)
+                Correction,[s.source_id for s in state.sources],WRITE,cache_prefix=context+common)
             before=state.work.model_copy(deep=True)
             candidate=apply_edits(before,completion)
             state.writing_checkpoint.setdefault("attempts",[]).append(dict(before=before.model_dump(mode="json"),completion=completion.model_dump(mode="json"),candidate=candidate.model_dump(mode="json")))

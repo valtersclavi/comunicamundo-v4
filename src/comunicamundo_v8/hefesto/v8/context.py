@@ -1,4 +1,4 @@
-"""Expendable context resources; persistent corpus and editorial identity stay intact."""
+"""Versioned LLM caches for reusable corpus and editorial materials."""
 from datetime import UTC, datetime
 from decimal import Decimal
 from time import perf_counter
@@ -6,7 +6,7 @@ from time import perf_counter
 from .contracts import identity
 from .provider import Recoverable, CapacityError
 
-FORMAT_VERSION = "addressed-corpus-v1"
+FORMAT_VERSION = "editorial-context-v2"
 
 
 def timestamp(value):
@@ -18,7 +18,7 @@ class Contexts:
         self.repository, self.provider, self.state = repository, provider, state
 
     async def retire_previous(self, key, info):
-        """Keep only current manifest/model/block resources after replacement exists."""
+        """Retire superseded resources while preserving up to two current slots."""
         index_key=identity(["explicit-context-index"])
         index=await self.repository.operation(self.state.execution_id,index_key) or {"keys":[]}
         if key not in index["keys"]:
@@ -29,6 +29,7 @@ class Contexts:
             old=await self.repository.operation(self.state.execution_id,old_key)
             previous=old["identity"]
             changed=any(previous[v]!=info[v] for v in ("provider","model","location","provider_project","corpus_manifest","format_version"))
+            changed=changed or previous.get("context_kind","corpus")!=info["context_kind"]
             replaced=previous["block_index"]==info["block_index"] and previous["block_identity"]!=info["block_identity"]
             if not changed and not replaced:continue
             if old.get("resource") and old.get("status")!="retired":
@@ -52,34 +53,51 @@ class Contexts:
             index["keys"].remove(old_key)
             await self.repository.save_operation(self.state.execution_id,index_key,index)
 
-    async def prepare(self, prompt, stage, block=None, *, use_prefix=True):
+    async def prepare(self, prompt, stage, block=None, *, use_prefix=True,
+                      cache_prefix=None, cache_slot=0, cache_kind="editorial"):
         corpus = self.state.corpus
-        if not corpus or not hasattr(self.provider, "cache_create"):
+        if not hasattr(self.provider, "cache_create"):
             return None, prompt, {}
-        if len(corpus.blocks) not in (1, 2):
+        if corpus and len(corpus.blocks) not in (1, 2):
             raise CapacityError("explicit context supports at most two corpus blocks")
-        if block is None and use_prefix:
-            block = next((i for i, text in enumerate(corpus.blocks) if prompt.startswith(text)), None)
-        if block is None:
-            return None, prompt, {"cache_mode": "inline", "cache_reason": "operation does not consult a complete corpus block"}
-        if block not in range(len(corpus.blocks)):
-            raise CapacityError("unknown corpus block")
-        text = corpus.blocks[block]
+        if cache_prefix is not None:
+            if not cache_prefix or not prompt.startswith(cache_prefix):
+                raise ValueError("cached editorial context must be an exact nonempty prompt prefix")
+            if cache_slot not in (0, 1):
+                raise CapacityError("explicit context supports at most two slots")
+            text, block = cache_prefix, cache_slot
+        else:
+            if not corpus:
+                return None, prompt, {}
+            if block is None and use_prefix:
+                block = next((i for i, text in enumerate(corpus.blocks) if prompt.startswith(text)), None)
+            if block is None:
+                return None, prompt, {"cache_mode": "inline", "cache_reason": "operation has no declared reusable context"}
+            if block not in range(len(corpus.blocks)):
+                raise CapacityError("unknown corpus block")
+            text, cache_kind = corpus.blocks[block], "corpus"
+            if not prompt.startswith(text):
+                raise ValueError("cached corpus must be an exact prompt prefix")
         cap = await self.provider.capacity()
         for field in ("cache_min_tokens", "cache_inline_max_bytes", "cache_ttl_seconds"):
             if type(getattr(cap, field)) is not int or getattr(cap, field) <= 0:
                 raise Recoverable("explicit cache requires verified " + field)
         if not cap.cache_source or cap.cache_storage_price is None or Decimal(cap.cache_storage_price) < 0:
             raise Recoverable("explicit cache requires verified limits and storage pricing")
+        tokens = await self.provider.count(text)
+        if tokens < cap.cache_min_tokens and text != prompt:
+            # Group only material already supplied to this operation. Never pad
+            # with invented text or import irrelevant sources to meet a minimum.
+            text = prompt
+            tokens = await self.provider.count(text)
+        if tokens < cap.cache_min_tokens:
+            raise Recoverable(f"Required LLM cache contains {tokens} tokens, below provider minimum "
+                              f"{cap.cache_min_tokens} ({cap.cache_source}); no uncached fallback")
         info = dict(provider=self.provider.provider, model=cap.model,
                     location=self.provider.location, provider_project=self.provider.project,
-                    corpus_manifest=corpus.manifest_id, block_identity=identity(text),
-                    block_index=block, format_version=FORMAT_VERSION)
-        tokens = corpus.block_tokens[block]
-        if tokens < cap.cache_min_tokens:
-            reason = f"corpus block {tokens} tokens below verified model minimum {cap.cache_min_tokens} ({cap.cache_source})"
-            return None, prompt, dict(cache_mode="inline-not-eligible", cache_status="not_eligible",
-                cache_reason=reason, cache_token_count=tokens, **info)
+                    corpus_manifest=corpus.manifest_id if corpus else None,
+                    block_identity=identity(text), block_index=block,
+                    context_kind=cache_kind, format_version=FORMAT_VERSION)
         # Scope includes the project execution; no cross-owner/context reuse.
         key = identity(["explicit-context", str(self.state.execution_id), info])
         record = await self.repository.operation(self.state.execution_id, key) or dict(
@@ -140,10 +158,20 @@ class Contexts:
                             recreate = True
                         else:
                             account_storage(now)
-                            remote = await self.provider.cache_renew(record["resource"], cap.cache_ttl_seconds)
-                            record.update(remote)
-                            event("reused", cache_token_count=record["token_count"])
+                            try:
+                                remote = await self.provider.cache_renew(record["resource"], cap.cache_ttl_seconds)
+                            except Exception as error:
+                                if getattr(error,"code",None)!=404:raise
+                                event("missing")
+                                record.pop("resource")
+                                recreate=True
+                            else:
+                                record.update(remote)
+                                event("reused", cache_token_count=record["token_count"])
             if not record.get("resource"):
+                # Retire replaced slots before creating a resource, including the
+                # transition from two source readings to a single editorial context.
+                await self.retire_previous(key, info)
                 remote = None
                 display = "hefesto-v8-" + key
                 if record.get("creating"):
@@ -152,7 +180,8 @@ class Contexts:
                     record["creating"] = True
                     await flush()  # persisted before the costly creation request
                     remote = await self.provider.cache_create(text, display, cap)
-                if (not remote.get("resource") or remote["token_count"] <= 0
+                if (not remote.get("resource") or remote["token_count"] < cap.cache_min_tokens
+                        or timestamp(remote["expire_at"]) <= datetime.now(UTC)
                         or remote["model"].split("/models/")[-1] != cap.model):
                     raise Recoverable("invalid explicit cache metadata")
                 record.update(remote, creating=False, status="active", generation=record["generation"]+1)

@@ -3,7 +3,7 @@
 Decisões do usuário consolidadas em 12/10/2026.
 Autoridade editorial única, referenciada pelo README e AGENTS.md.
 
-**Estado: implementação iniciada; consultar o registro de sessões e a branch indicada.**
+**Estado: implementação em etapas, com merge após verificação; consultar o registro de sessões.**
 Este documento define o comportamento exigido. Não afirma que o código atual já o executa.
 Substitui as orientações anteriores deste arquivo que preservavam writing completion,
 correções por patches, continuação de resposta cortada ou restrições contrariadas abaixo.
@@ -21,6 +21,12 @@ Instruções explícitas posteriores do usuário prevalecem.
 - Toda pendência de interpretação deve ser apresentada ao usuário antes de virar regra.
 - Esta rodada autoriza o registro documental. Não confundir esse registro com início da
   implementação, deploy ou autorização para inferências pagas.
+
+Atualização de autorização em 12/10/2026: o usuário autorizou iniciar a implementação,
+depois determinou fazer merge ao concluir cada etapa e começar a seguinte. Não deixar
+etapas concluídas em PR rascunho nem depender de testes intermediários dele.
+Executar os testes técnicos sem inferência paga e os gates de CI antes dos merges.
+O workflow existente da main inicia implantação automática após merge de código.
 
 ## 2. Limpeza radical e preservação do V8
 
@@ -413,3 +419,41 @@ Próxima retomada: conferir a branch fix/v8-recovery-contract e sua revisão rem
 prosseguir pelo bloco C (cache dos materiais por versão) sem alterar modelo ou
 temperatura. Prazo de inatividade e espera inicial continuam sem número aprovado.
 Os blocos D/E devem seguir este contrato integralmente. Hermes permanece posterior.
+
+12/10/2026 — PR #145 incorporado à main em
+122106449dcdcf92abafe9467e9d99b4fc16ed70. CI 38312817672 aprovado integralmente:
+testes com PostgreSQL isolado, migrações, navegador offline e imagem de produção.
+Assim, os dois testes de banco anteriormente ignorados localmente também foram
+executados no ambiente de CI. Deploy automático 38313445514 disparado pelo merge.
+
+Foi revisado e incorporado também o PR #144, já existente, com CI 38085620058
+aprovado: comando explícito comunicamundo-v8-worker no Cloud Run Job e diagnóstico
+de falha de migração. Merge d42dcff20c34db3e1eb88682e6a5e3bb375f67cf.
+Esse ajuste elimina a possibilidade de conservar o comando V4 no recurso remoto;
+não altera arquitetura editorial ou Hermes. Conferir o resultado do deploy.
+
+12/10/2026 — segunda etapa, branch fix/v8-editorial-cache: cache NO LLM.
+
+- Chamadas editoriais declaram o prefixo reutilizável com os insumos de sua etapa.
+  Fontes/corpus, briefing, rascunho e PE passam a participar efetivamente do cache,
+  sem cópia desses prefixos na parte dinâmica da mesma chamada.
+- Revisões compartilham material estável conforme sua competência; esta mudança
+  não altera seus critérios, que continuam pendentes no bloco E.
+- Identidade do cache inclui conteúdo exato e versão dos materiais. Remoque e PE
+  novos não reutilizam um conjunto anterior por engano.
+- Cache perdido ou expirado é reconstruído sem nova geração intelectual. Perda
+  entre consulta e renovação é recuperada na mesma preparação.
+- Recursos substituídos são retirados antes de criar seus sucessores. Após duas
+  leituras, o contexto editorial combinado recebe cache e os anteriores são
+  retirados, sem terceiro contexto ativo nem mudança da leitura editorial.
+- Prefixos pequenos são agrupados com o restante dos insumos daquela chamada.
+  Se o conjunto inteiro não atingir o mínimo real do provedor (2.048 tokens no
+  perfil vigente), informar a limitação. Não preencher com material inventado,
+  acrescentar fontes irrelevantes ou executar sem cache silenciosamente.
+- Verificação local após incorporar #144: 170 testes aprovados; os 2 de PostgreSQL real dependem do CI.
+  Inclui versão alterada, perda, expiração, renovação, reconstrução sem regeneração,
+  agrupamento e máximo de dois recursos ativos. Sem inferência paga.
+
+Próximos trabalhos: obter aprovação de CI e fazer merge desta etapa; prosseguir
+com D/E (encomenda, dimensão, prompts e correção integral), mantendo a definição
+numérica do timeout por inatividade explicitamente pendente. Não inventar prazo.

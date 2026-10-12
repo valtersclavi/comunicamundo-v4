@@ -14,18 +14,21 @@ class Hierarchy:
     def protected(self,state,position):
         return [{k:v for k,v in s.approval.items() if k!="consolidated_work"} for s in state.editorial_stages if s.position < position]
 
-    def context(self,state,planning,pe,stage,work):
-        data=dict(brief=state.request.brief.model_dump(mode='json'),
-                  work=json.loads(work_context(work,planning.extent)),
-                  earlier_approvals=self.protected(state,stage.position))
+    def cached_context(self,state,planning,pe,stage):
+        data=dict(brief=state.request.brief.model_dump(mode='json'))
         if stage.position < 4:
             data.update(approved_planning=planning.model_dump(mode='json'),
                         approved_pe=pe.fields.model_dump(mode='json'))
+        return "STABLE EDITORIAL MATERIAL:\n"+json.dumps(data,ensure_ascii=False)
+
+    def context(self,state,planning,pe,stage,work):
+        data=dict(work=json.loads(work_context(work,planning.extent)),
+                  earlier_approvals=self.protected(state,stage.position))
         if stage.position == 2:
             data['address_catalog']=[dict(source_id=str(s.source_id),title=s.title,
                 locations=[l.model_dump(mode='json') for l in s.locations]) for s in state.sources]
             data['specific_documentary_evidence']=stage.evidence
-        return json.dumps(data,ensure_ascii=False)
+        return self.cached_context(state,planning,pe,stage)+"\nCURRENT EDITORIAL STATE:\n"+json.dumps(data,ensure_ascii=False)
 
     async def approve(self,state,stage):
         stage.status='approved'
@@ -56,7 +59,8 @@ class Hierarchy:
                     if stage.evidence:
                         prompt+='\nResolve ONLY the recorded concrete factual questions with their addressed evidence and complete this same diagnosis; do not start a new general verification.'
                     diagnosis=await calls.structured(f'{stage.stage_id}-diagnose',prompt,Diagnosis,
-                        system=stage_contract(stage.position,'diagnose'),repair_context=prompt)
+                        system=stage_contract(stage.position,'diagnose'),repair_context=prompt,
+                        cache_prefix=self.cached_context(state,planning,pe,stage))
                     if not diagnosis.evidence_questions:break
                     if stage.position!=2:
                         raise Recoverable('only consistency may request specific documentary evidence')
@@ -89,7 +93,8 @@ class Hierarchy:
                     prompt+='\nKNOWN DIAGNOSIS:\n'+stage.diagnosis.model_dump_json()
                     prompt+='\nPREVIOUS STRATEGIES AND SPECIFIC RESULTS:\n'+json.dumps(stage.attempts[:-1],ensure_ascii=False)
                     correction=await calls.structured(f'{stage.stage_id}-correct-{active["number"]}',prompt,
-                        Correction,system=stage_contract(stage.position,'correct'),repair_context=prompt)
+                        Correction,system=stage_contract(stage.position,'correct'),repair_context=prompt,
+                        cache_prefix=self.cached_context(state,planning,pe,stage))
                     active['correction']=correction.model_dump(mode='json')
                     active['candidate']=apply_edits(state.work,correction).model_dump(mode='json')
                     stage.status='confirming';await self.editor.checkpoint(state)
@@ -100,7 +105,8 @@ class Hierarchy:
                 prompt+='\nPERTINENT PRIOR VERSION:\n'+json.dumps(active['before'],ensure_ascii=False)
                 prompt+='\nEXECUTED STRATEGY:\n'+json.dumps(active['correction'],ensure_ascii=False)
                 confirmation=await calls.structured(f'{stage.stage_id}-confirm-{active["number"]}',prompt,
-                    Confirmation,system=stage_contract(stage.position,'confirm'),repair_context=prompt)
+                    Confirmation,system=stage_contract(stage.position,'confirm'),repair_context=prompt,
+                    cache_prefix=self.cached_context(state,planning,pe,stage))
                 # Confirmation and candidate promotion share one durable save.
                 active['confirmation']=confirmation.model_dump(mode='json')
                 valid=confirmation.constraints_preserved and within_extent(candidate,planning.extent)
@@ -126,7 +132,8 @@ class Hierarchy:
         prompt+='\nORIGINAL KNOWN DIAGNOSIS:\n'+stage.diagnosis.model_dump_json()
         prompt+='\nFAILED INTERVENTIONS AND EXPLANATIONS:\n'+json.dumps(stage.attempts,ensure_ascii=False)
         decision=await calls.structured(f'{stage.stage_id}-reconsider',prompt,Reconsideration,
-            system=stage_contract(stage.position,'reconsider'),repair_context=prompt)
+            system=stage_contract(stage.position,'reconsider'),repair_context=prompt,
+            cache_prefix=self.cached_context(state,planning,pe,stage))
         candidate=apply_edits(state.work,decision) if decision.edits else state.work.model_copy(deep=True)
         stage.reconsideration.update(decision=decision.model_dump(mode='json'),
                                     candidate=candidate.model_dump(mode='json'))

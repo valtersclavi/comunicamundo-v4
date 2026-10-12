@@ -1,6 +1,6 @@
 """Provider transport, verified capacities and durable generation journal.
 
-The persistent corpus is reused through explicit, expendable context caches.
+Reusable source and editorial materials use explicit, expendable context caches.
 No SDK response_schema: the SDK must
 not parse a generated response before our durable raw-response journal.
 """
@@ -172,7 +172,7 @@ class Vertex:
         cap = await self.capacity()
         started = perf_counter()
         # Cached requests cannot set system_instruction. The unchanged operation
-        # contract/schema travels dynamically; only documentary text is cached.
+        # contract/schema travels dynamically; reusable operation inputs are cached.
         if cached_context:
             prompt = "OPERATION INSTRUCTIONS:\n" + system + "\nDYNAMIC INPUT:\n" + prompt
         r = await self.client.aio.models.generate_content(
@@ -322,7 +322,8 @@ class Calls:
             if len(actual)!=len(expected) or set(actual)!=expected:
                 raise ValueError("confirmation may examine only all previously diagnosed problem IDs, no new problems")
 
-    async def structured(self, stage: str, prompt: str, schema, source_ids=(), system="", *, corpus_block=None, repair_context=""):
+    async def structured(self, stage: str, prompt: str, schema, source_ids=(), system="", *, corpus_block=None, repair_context="",
+                         cache_prefix=None, cache_slot=0, cache_kind="editorial"):
         cap = await self.provider.capacity()
         schema_text = json.dumps(schema.model_json_schema(), ensure_ascii=False)
         system = (system + "\nReturn exactly one complete JSON object according to this schema. "
@@ -423,11 +424,12 @@ class Calls:
             # Always execute the original task in full. Failed JSON and fragment
             # contents are never prompts for a patch or suffix-generation operation.
             current = prompt
-            if repair_context:
+            if repair_context and repair_context != prompt:
                 current += "\nOPERATION CONTEXT:\n" + repair_context
             mode = "regenerate" if journal["attempts"] else "initial"
             context, dynamic, cache_usage = await self.contexts.prepare(
-                current, stage, corpus_block)
+                current, stage, corpus_block, cache_prefix=cache_prefix,
+                cache_slot=cache_slot, cache_kind=cache_kind)
             if context:
                 count = context["token_count"] + await self.provider.count(
                     "OPERATION INSTRUCTIONS:\n" + system + "\nDYNAMIC INPUT:\n" + dynamic)

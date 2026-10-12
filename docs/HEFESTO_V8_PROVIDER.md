@@ -24,9 +24,13 @@ count prompts, schema, instructions and history. No arbitrary corpus margin.
 Structured responses are requested as JSON without an SDK parsing schema so raw
 candidate output and metadata can be durably journaled before parsing.
 
-Context provider uses explicit Vertex caches for eligible stable addressed corpus
-blocks. Only corpus text is cached; briefing, PE, remoque, operation contract and
-schema remain dynamic. `aio.caches.create/get/update/list/delete` and
+Context provider uses mandatory explicit Vertex caches for the reusable material
+declared by each editorial operation: addressed sources/corpus, briefing, draft
+and PE, according to the operation's existing inputs. Source readings cache their
+block and briefing; planning caches its working input; PE synthesis caches briefing
+and the persisted draft; writing caches corpus, briefing, draft and PE; reviews
+reuse their stable editorial material. Operation instructions/schema stay dynamic.
+`aio.caches.create/get/update/list/delete` and
 `GenerateContentConfig(cached_content=resource)` are the Google Gen AI SDK APIs.
 The cache has no system instruction. Google forbids setting system_instruction
 on cached generation requests, so the unchanged operation instructions/schema
@@ -50,22 +54,32 @@ own verified minimum, inline limit, TTL, storage price and cache source; no
 invented profile fallback.
 
 Resource identity includes execution/project ownership, provider, exact model,
-provider project, location, corpus manifest, block content identity/index and
-addressed-corpus-v1 format. PE/remoque/stage/instructions are absent from that
-identity. Metadata/events live in the existing v8_operations journal; no schema
+provider project, location, corpus manifest, exact cached material identity, slot,
+context kind and editorial-context-v2 format. Changes to briefing/draft/PE that
+affect the input change this identity; stage instructions do not. A completed
+operation remains reusable independently of its former cache. Metadata/events
+live in the existing v8_operations journal; no schema
 or migration change. Completed editorial operation identity excludes the cache
 resource and can resume even if the resource disappeared. Raw output journal
 still precedes parsing. Failed eligible cache creation/reuse pauses recoverably,
 without inline fallback. A lost create response is reconciled by exact display
 identity via caches.list before creation is repeated. Expired/deleted caches are
-rebuilt solely from persistent corpus blocks, never extraction. Superseded
-manifest/model/block resources are deleted after replacement exists; idle caches
+rebuilt from the exact reusable material, never re-extraction or new editorial
+generation. A resource disappearing between lookup and renewal is recreated in
+the same preparation. Superseded resources are retired before replacement to keep
+at most two active slots, including the transition from source readings to the
+merged editorial context. Idle caches
 expire without background renewal.
 
-One-block PE/support/revised PE/write/verify/localized correction share one cache.
-Two-block readings use exactly their respective two caches. The existing final
-combination of grounded readings and necessary original support stays inline;
-there is no third cache/context and no change to editorial compression. Response
+Two-block readings use their respective two slots. After those readings, the
+existing combination of grounded readings and necessary original support is
+cached with the relevant briefing/material; the reading resources are retired,
+so no third active context is introduced. No change to editorial compression.
+Small reusable prefixes are grouped with the remaining input already supplied
+to that operation. If even that complete input is below the verified provider
+minimum, report the real cache constraint; never silently generate uncached or
+invent padding. These provider limits were rechecked on 2026-10-12 at the official
+overview/create/update pages linked above. Response
 packaging repair is deterministic and makes no model call. When a response must
 be regenerated, the original operation reuses the same available context cache.
 Preflight uses cache metadata token count + counted dynamic contents + full
