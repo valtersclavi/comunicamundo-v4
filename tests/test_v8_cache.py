@@ -274,13 +274,14 @@ async def test_reuse_permission_failure_never_falls_back_to_inline():
 
 
 @pytest.mark.asyncio
-async def test_raw_response_repair_does_not_reconsult_cached_corpus():
+async def test_invalid_response_restarts_original_operation_reusing_cached_corpus():
     p,repo,st=await setup(CachedProvider(["{malformed",{"document":"Repaired"}]))
     # Provider fixture serializes strings, so this is valid JSON of wrong schema;
-    # deterministic validation fails and the existing repair journal is exercised.
+    # Validation fails, so regenerate the original task with the same cache.
     result=await Calls(repo,p,st).structured("pe",st.corpus.blocks[0]+"\nDirection",Proposal)
     assert result.document=="Repaired" and len(p.creations)==1
-    assert p.reads[0] and p.reads[1] is None
+    assert p.reads[0]["resource"]==p.reads[1]["resource"]
+    assert p.prompts[0]==p.prompts[1]
     assert st.corpus.blocks[0] not in p.prompts[1][0]
 
 

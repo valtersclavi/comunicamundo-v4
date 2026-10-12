@@ -123,8 +123,6 @@ class Backend:
                 if kind=="resume":
                     if state.status not in {"paused","queued","ingesting","planning","searching_sources","writing","verifying"}:
                         raise ValueError("this state does not need resume")
-                    if (state.error or {}).get("requires_retry_ack"):
-                        state.action["retry_unknown_response"]=True
                     # Keep exact action/input identity; completed provider work
                     # stays in the journal and cannot be duplicated accidentally.
                     return await self._dispatch(repo,state)
@@ -198,8 +196,7 @@ async def run(execution_id: UUID):
                 await editor.execute(state,calls)
             except Exception as error:
                 state.status="paused"
-                state.error=dict(type=type(error).__name__,message=str(error),recoverable=True,
-                    requires_retry_ack=bool(getattr(error,"requires_retry_ack",False)))
+                state.error=dict(type=type(error).__name__,message=str(error),recoverable=True)
             finally:
                 state.job["status"]="completed" if state.status not in {"paused","project_too_large"} else "paused"
                 await repo.save(state)

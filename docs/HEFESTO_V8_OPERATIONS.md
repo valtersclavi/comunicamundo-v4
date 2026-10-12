@@ -55,18 +55,25 @@ names requires a separate infrastructure migration, not code compatibility.
 
 Operation identity includes model, prompt version, stage, full prompt/schema and
 system instruction. Raw SDK response, text, finish reason and usage are committed
-before JSON/semantic parsing. Complete calls are reused; interrupted JSON repairs
-use only the response and address index, not the corpus. MAX_TOKENS continuations
-append to persisted output. Cache loss never loses project truth.
+before JSON/semantic parsing. Complete calls are reused. Unambiguous packaging
+errors (wrappers and trailing structural commas) are fixed locally without a
+model call. Invalid/incomplete answers are regenerated through the original
+complete operation, with its full input and available context cache. Failed
+answers remain diagnostic records; they are never prompts for suffix generation
+or joined into a completed answer. MAX_TOKENS is recorded as a capacity failure,
+without an automatic unchanged retry loop. A subsequent resume retries the
+whole operation. Cache loss never loses project truth.
 
 A source extraction failure, rate limit or timeout pauses the action; it is not
 no_reliable_support. Resume keeps the same pending action and completed expensive
 operations. Unknown in-flight responses (crash before any response was journaled)
-are explicitly surfaced; repeating the unresolved request needs an acknowledged
-retry, since the provider cannot promise that the first request was not billed.
+are recorded with unknown cost; the normal resume path retries the missing
+operation without an additional acknowledgment or repeating completed stages.
 No claim of exactly-once external network effects is possible across that gap.
 PostgreSQL session advisory locks prevent overlapping project jobs; revision CAS
-also protects against stale saves. Locks automatically release on disconnected
+also protects against stale saves. The in-memory revision advances only after
+successful persistence, so a failed write does not poison the next save.
+Locks automatically release on disconnected
 sessions. The UI also offers resume while a job was left in an active/queued state
 after a process crash; the advisory lock rejects overlap with a still-running
 worker. PE and work versions are never silently discarded.
@@ -81,7 +88,10 @@ Optional PostgreSQL WASM migration check:
 `node scripts/verify_v8_migrations.mjs`.
 Tests use generic documents and mocks, including the supplied/zero-source flows,
 remoque/research, versioned approval, continuous writing, verification and local
-patches, JSON repair, MAX_TOKENS, 429, timeout, restart, cache loss and ownership.
+patches (pending replacement under the editorial contract), deterministic JSON
+repair, whole-operation regeneration, MAX_TOKENS, 429, timeout, restart, cache
+loss and ownership. Recovery tests include interruption before/after raw capture,
+rejected historical journals, failed database writes and the normal resume action.
 
 The final editorial paid test is exclusively the user's responsibility. This
 technical delivery does not prove editorial quality or live provider availability.

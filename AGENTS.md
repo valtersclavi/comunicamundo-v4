@@ -8,8 +8,9 @@ prevalecem sobre documentação. Não inferir novas decisões editoriais.
   liberdade intelectual e narrativa implementada no V8.
 - Planejamento produz rascunho intelectual e depois PE de três campos. Remoque
   atualiza essa concepção. Aprovação vincula PE e rascunho e inicia a produção.
-- Nesta limpeza, preservar os prompts, a escrita e a esteira editorial atuais.
-  Ajustes de pensamento são trabalho posterior, expressamente solicitado.
+- Aplicar exclusivamente as correções autorizadas no contrato editorial canônico.
+  Conferir seu registro de sessões antes de retomar; não preservar comportamentos
+  atuais expressamente rejeitados pelo usuário nem inventar decisões pendentes.
 - Ingestão, normalização, segmentação, aquisição, login, uploads e armazenamento
   usados pelo V8 são infraestrutura V8. Preservar seu funcionamento.
 - Persistir fontes originais, endereços, versões, checkpoints, respostas brutas,

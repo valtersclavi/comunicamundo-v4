@@ -54,16 +54,19 @@ class Repository:
 
     async def save(self, state: State):
         old = state.revision
-        state.revision += 1
-        state.updated_at = datetime.now(UTC).isoformat()
+        # A failed write must not advance the in-memory revision. Otherwise the
+        # next save uses a revision that never existed in PostgreSQL.
+        pending = state.model_copy(update=dict(revision=old+1,
+                                              updated_at=datetime.now(UTC).isoformat()))
         async with self.product._pool.connection() as c:
             cur = await c.execute(
                 """UPDATE hefesto_product.v8_projects SET revision=%s,status=%s,
                 payload=%s::jsonb,updated_at=now() WHERE execution_id=%s AND revision=%s""",
-                (state.revision, state.status, state.model_dump_json(), state.execution_id, old))
+                (pending.revision, pending.status, pending.model_dump_json(), state.execution_id, old))
             if cur.rowcount != 1:
-                state.revision = old
                 raise Busy("stale V8 state revision")
+        state.revision = pending.revision
+        state.updated_at = pending.updated_at
 
     async def list(self, owner_id: str):
         async with self.product._pool.connection() as c:
