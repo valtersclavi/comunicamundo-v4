@@ -59,18 +59,22 @@ dependências e uso real; funcionalidades de infraestrutura usadas pelo V8 conti
 
 ## 4. Encomenda, duração e capacidade de saída
 
-- Limite comercial aprovado: encomenda de até **100 minutos (1h40)**.
+- Limite comercial aprovado: encomenda de até **90 minutos (1h30)**.
+  Em 12/10/2026 o usuário substituiu o teto anterior de 100 minutos por 90 minutos,
+  por ser o limite que o produto aceita e o que dimensiona a capacidade efetiva.
 - Conversão de referência mantida: **150 palavras por minuto**.
-- Assim, 100 minutos correspondem a **15.000 palavras de referência**.
-- O adicional permitido de 10% leva a **16.500 palavras de texto final**.
-  O usuário confirmou expressamente que esse é o significado das 16.500 palavras.
+- Assim, 90 minutos correspondem a **13.500 palavras de referência**.
+- O adicional permitido de 10% leva a **14.850 palavras de texto final**.
 - A obra deve cumprir a extensão encomendada, com liberdade de desenvolvimento até o
   adicional de 10%. Não tratar texto 10% menor como automaticamente aceitável:
   a regra combinada não é uma tolerância simétrica de ±10%.
 - Exibir e validar o limite na encomenda, antes de começar a produção intelectual.
-  Não aceitar silenciosamente a encomenda e só rejeitá-la depois do PE.
+  Não aceitar encomenda acima de 90 minutos. Não aceitar silenciosamente uma encomenda
+  válida e só rejeitá-la depois do PE.
 - Remover a proibição de escrita baseada em target_words × 4 comparado à saída máxima.
   Quatro tokens por palavra é uma estimativa, não prova de impossibilidade.
+  O teto comercial de 90 minutos é o mecanismo de produto que cabe na capacidade;
+  não reintroduzir um bloqueio por fórmula de tokens.
 - Fontes grandes são entrada/contexto. Não aplicar a elas o limite de palavras da obra.
 - O limite físico de saída do provedor continua real. A implementação deve conferir
   capacidade para texto, envelope e rascunho excedente sem fingir que a remoção da fórmula
@@ -80,11 +84,12 @@ dependências e uso real; funcionalidades de infraestrutura usadas pelo V8 conti
   a autoria silenciosamente.
 
 **Exemplos:** 20 min → referência 3.000; final até 3.300; rascunho 3.900.
-100 min → referência 15.000; final até 16.500; rascunho 19.500.
+90 min → referência 13.500; final até 14.850; rascunho 17.550.
 Os 30% do rascunho incidem na referência, não no teto final já acrescido de 10%.
 
-**Verificação:** encomenda máxima aceita na entrada não é bloqueada depois pela fórmula
-de quatro tokens; extensão é conhecida desde o planejamento e conferida na completude.
+**Verificação:** encomenda acima de 90 minutos é recusada na entrada; encomenda máxima
+aceita não é bloqueada depois pela fórmula de quatro tokens; extensão é conhecida desde
+o planejamento e conferida na completude.
 
 ## 5. Planejador: matéria intelectual antes do PE
 
@@ -101,17 +106,21 @@ Não produzir apenas um roteiro de tópicos no lugar do rascunho desenvolvido.
 
 Preservar autoria intelectual: briefing orienta a encomenda; fontes lastreiam fatos;
 conhecimento confiável e elaboração intelectual são permitidos.
+O planejador tem liberdade de completar intelectualmente o rascunho com conhecimento
+próprio inequívoco, mesmo que esse desenvolvimento não exista literalmente nas fontes.
 Não inventar estudos, dados, depoimentos, acontecimentos ou bibliografia.
 Uma fonte não ganha peso editorial proporcional ao seu tamanho.
 
 O rascunho é uma unidade intelectual integral. Não criar uma chamada por assunto,
 nem substituir o trabalho por relatório de suficiência ou conversa do modelo consigo.
+Rascunho abaixo dos 130% **não é um desfecho aceitável** do planejamento: o planejador
+deve atingir a matéria exigida pela encomenda, usando a liberdade intelectual acima.
 Registrar alvo e extensão observada sem transformar diferença de contagem em um novo
 revisor ou loop de complementação não aprovado.
 
-**Verificação:** rascunho integral vem antes do PE, usa o alvo de 130%, é persistido e
+**Verificação:** rascunho integral vem antes do PE, atinge o alvo de 130%, é persistido e
 entregue integralmente ao escritor. Um alvo no prompt, sozinho, não prova atendimento
-do dimensionamento; divergências devem ser explicitadas, não consideradas sucesso por conveniência.
+do dimensionamento; rascunho curto não pode ser tratado como sucesso por conveniência.
 
 ## 6. PE, remoque e aprovação
 
@@ -173,12 +182,16 @@ Não exigir que tudo no texto tenha sido previamente enumerado no PE.
 Não exigir todos os detalhes do rascunho excedente.
 Material adicional pertinente, dentro da encomenda, não é defeito por ser adicional.
 Tamanho não pode ficar escondido em validação final do JSON.
+O prompt desta etapa deve ser estrito o bastante para não caçar divergências cosméticas
+entre PE e texto: espera-se poucas correções necessárias, não uma caça a detalhe.
 
 ### 8.2 Consistência
 
 Referências: fontes e conhecimento confiável/bom senso do LLM, incorporado à elaboração
 intelectual. O critério central é **contradição**, e não equivalência literal.
 Apontar erros factuais, contradições efetivas, invenções e inferências tratadas como fatos.
+Exemplo do critério: se o texto afirma que a Terra é plana e a fonte afirma que é redonda,
+isso é defeito a corrigir. Detalhe sem contradição real não é defeito.
 Não exigir uma passagem documental para cada ideia, analogia, interpretação ou conexão.
 Não tratar divergências entre fontes como se todas dissessem a mesma coisa.
 Distinguir erro factual de discussão explícita e fundamentada de uma posição.
@@ -187,13 +200,17 @@ Distinguir erro factual de discussão explícita e fundamentada de uma posição
 
 Aplicar boas práticas do produto solicitado: progressão das ideias, relações,
 transições, ritmo, clareza e unidade. Combater a lista de assuntos apenas disfarçada
-de prosa. Trata-se de polimento de uma obra que o escritor já deveria conceber bem.
+de prosa. Trata-se de polimento de uma obra que o escritor já deveria conceber bem;
+as premissas narrativas devem constar do prompt do escritor. Esperam-se ajustes
+pequenos e necessários, não reescrita por preferência.
 
 ### 8.4 Estilo
 
 Aplicar boas práticas de redação adequadas a público, formato, idioma e tom:
 clareza, fluidez, precisão, oralidade quando aplicável e retirada de redundância.
 Preservar a matéria intelectual e a narrativa válida.
+As premissas de estilo devem constar do prompt do escritor; a revisão espera mudanças
+pequenas e necessárias.
 
 Narrativa e estilo não são uma segunda autoria independente nem licença para trocar
 a tese por preferência do revisor. Não inventar defeitos para justificar uma chamada.
@@ -220,16 +237,19 @@ Não fazer uma chamada por defeito ou parágrafo. Não montar a obra a partir de
 A verificação não reabre automaticamente toda a pauta como uma nova auditoria irrestrita.
 
 Remover a regra de desistir/reconsiderar automaticamente após duas correções malsucedidas.
-Completude e consistência podem precisar de mais de duas chamadas de correção.
+Não se espera um grande volume de divergências PE↔texto nem caça a defeito inventado:
+os prompts de revisão devem ser escritos para apontar falhas reais e pontuais.
+Se, mesmo assim, forem necessárias mais de duas correções, podem ocorrer.
 Nova correção recebe a versão integral vigente e as pendências concretas.
 Narrativa e estilo são polimento; não transformar preferência repetida em ciclo sem fim.
 
 Não inventar outro número fixo de tentativas para substituir o dois.
-Se houver falha técnica, aplicar recuperação técnica. Critério novo de encerramento
-editorial por falta de progresso exige discussão; não está autorizado neste registro.
+O freio editorial é a qualidade do prompt e a restrição a defeitos reais, não um teto
+artificial de tentativas. Falha técnica usa recuperação técnica.
 
-**Verificação:** simular mais de duas correções necessárias; verificar texto integral
-em todas as chamadas e ausência de aplicação de patches por endereços.
+**Verificação:** permitir mais de duas correções quando houver defeito real; verificar
+texto integral em todas as chamadas, ausência de patches por endereço e prompts que
+não fabriquem pauta.
 
 ## 10. JSON é transporte
 
@@ -343,9 +363,10 @@ Ordem de trabalho proposta por dependência técnica; não muda a arquitetura ap
 - [ ] B. Corrigir estado, checkpoints e retomada; separar falha de transporte de sucesso;
   retirar reaproveitamento de tentativas inválidas e continuação de resposta cortada.
 - [ ] C. Implementar cache no LLM e tratamento de inatividade, preservando configuração.
-  Resolver explicitamente as definições técnicas pendentes do item 12.
+  Definições do item 12 aprovadas (60s/30s); falta implementar streaming/inatividade
+  e mergear/verificar o cache por versão.
 - [ ] D. Ajustar encomenda, capacidade, planejador, PE, remoque e escritor:
-  100 minutos, referência/10%, rascunho 130%, prioridades e autoria integral;
+  90 minutos, referência/10%, rascunho 130% efetivo, prioridades e autoria integral;
   retirar writing completion e bloqueio por quatro tokens.
 - [ ] E. Ajustar os quatro revisores e o ciclo diagnóstico/correção/verificação;
   remover patches endereçados e limite de duas correções.
@@ -470,3 +491,17 @@ com implementação.
 qualquer evento do provedor renova os 30s; sem heartbeat local; retirar o teto
 total de 240 segundos no cliente. Somente registro documental nesta entrada;
 implementação do streaming/inatividade permanece pendente.
+
+12/10/2026 — clarificações editoriais do usuário, registradas sem implementação:
+
+1. Correções: não se espera volume grande de divergências PE↔texto. Completude
+   cobre promessa/entrega; consistência cobre contradição real (ex.: texto plana /
+   fonte redonda). Narrativa e estilo são polimentos pequenos, com premissas já no
+   prompt do escritor. Pode haver mais de duas correções se necessário; o freio é
+   prompt bem escrito, não teto artificial de tentativas.
+2. Encomenda máxima: **90 minutos (1h30)**, não 100. Referência 13.500; final até
+   14.850; rascunho 17.550. O teto comercial dimensiona a capacidade; remover o
+   bloqueio por target_words×4.
+3. Rascunho abaixo de 130% não é desfecho aceitável. O planejador completa a
+   matéria com conhecimento próprio inequívoco, mesmo sem constar literalmente
+   das fontes, sem inventar estudo/dado/depoimento/acontecimento/bibliografia.
