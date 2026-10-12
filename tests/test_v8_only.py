@@ -29,3 +29,14 @@ def test_retired_editorial_modules_cannot_return():
     assert 'v8-run' in help_text
     for command in ['resume-plan','produce-text','approve-project','source-search']:
         assert command not in help_text
+
+
+def test_production_job_pins_v8_worker_command():
+    repo = Path(__file__).parents[1]
+    dockerfile = (repo / 'Dockerfile').read_text(encoding='utf-8')
+    workflow = (repo / '.github/workflows/main.yml').read_text(encoding='utf-8')
+    assert 'ENTRYPOINT ["comunicamundo-v8-worker"]' in dockerfile
+    assert '--command=comunicamundo-v8-worker' in workflow
+    assert 'comunicamundo-v4-worker' not in dockerfile
+    assert 'comunicamundo-v4-worker' not in workflow
+    assert 'comunicamundo_v4.hefesto.api' not in workflow
