@@ -1,59 +1,367 @@
-# HEFESTO V8 — CONTRATO CANÔNICO DE IMPLEMENTAÇÃO
+# HEFESTO V8 — CONTRATO E PLANO DE IMPLEMENTAÇÃO
 
-Autoridade editorial única do Hefesto V8. Descreve o comportamento atual, preservado na aposentadoria do V4. Ajustes editoriais exigem instrução explícita do usuário.
+Decisões do usuário consolidadas em 12/10/2026.
+Autoridade editorial única, referenciada pelo README e AGENTS.md.
 
-## 1. Matéria intelectual antes do PE
+**Estado: especificação registrada; implementação destas correções pendente.**
+Este documento define o comportamento exigido. Não afirma que o código atual já o executa.
+Substitui as orientações anteriores deste arquivo que preservavam writing completion,
+correções por patches, continuação de resposta cortada ou restrições contrariadas abaixo.
+Instruções explícitas posteriores do usuário prevalecem.
 
-O briefing encomenda uma obra intelectual. Fontes aprofundam, qualificam, contradizem e fundamentam; não determinam a ordem narrativa nem uma distribuição proporcional do texto. Conhecimento geral confiável, interpretação, raciocínio e exemplos ilustrativos são admitidos, distinguidos de informação documental. Nunca inventar estudos, dados, acontecimentos, depoimentos ou bibliografia.
+## 1. Escopo, sequência e disciplina
 
-A operação principal de planejamento recebe briefing, fontes disponíveis e extensão contratada. O contrato existente converte duração em palavras a 150 palavras/minuto. O alvo do rascunho é inicialmente 130% da extensão contratada, arredondado para cima: 20 minutos → 3.000 palavras finais → aproximadamente 3.900 palavras de rascunho.
+- Corrigir e deixar funcionando o Hefesto V8 antes de alterar Hermes.
+- Implementar somente as decisões deste documento. Não criar nova arquitetura, novos
+  revisores, aprovações, limites editoriais, mecanismos de fragmentação ou melhorias oportunistas.
+- A implantação pode acontecer em várias sessões, mas deve convergir para um único
+  funcionamento integrado. Não declarar concluído um item só porque seu prompt mudou.
+- Em cada retomada, ler este contrato, conferir o código e o estado dos commits.
+  Não reconstruir decisões pela memória de uma conversa.
+- Toda pendência de interpretação deve ser apresentada ao usuário antes de virar regra.
+- Esta rodada autoriza o registro documental. Não confundir esse registro com início da
+  implementação, deploy ou autorização para inferências pagas.
 
-O planejador produz diretamente o rascunho intelectual desenvolvido, usando o núcleo de instruções fornecido pelo usuário em `v8/editorial.py:DRAFT`: começar pela matéria central, aprofundar explicações por causas/mecanismos/consequências, relacionar ideias, explorar implicações, incorporar exemplos pertinentes, nuances e contrapontos. O desenvolvimento progressivo acontece dentro dessa tarefa. Não pedir acabamento estilístico nem relatórios sobre o processo. Proibidos repetição, paráfrases redundantes, exemplos decorativos, digressões e assuntos artificiais para aumentar volume.
+## 2. Limpeza radical e preservação do V8
 
-O princípio `AUTHORSHIP`, compartilhado pelo planejador e escritor, estabelece o briefing como direção da obra e as fontes como sustentação do conhecimento e limites factuais. O autor concebe a linha narrativa e pode formular relações, analogias e interpretações originais, distinguindo-as de fatos estabelecidos. Não reproduzir obrigatoriamente a sequência, classificações ou importância relativa dos documentos. Não inventar fatos ou evidências.
+Remover resíduos claros de arquitetura editorial V4, caminhos mortos e compatibilidades
+sem função no V8. Não conservar código duvidoso apenas por receio de removê-lo.
+O que veio do V4 e efetivamente pertence ao V8 deve ser preservado como V8.
 
-Uma chamada principal `intellectual-draft`, não chamadas por assunto nem ciclos de escrever/avaliar/aprofundar. A resposta contém apenas `body`, com o próprio rascunho integral. O envelope JSON reutiliza transporte e recuperação existentes; não acrescenta análise de suficiência.
+Preservar ingestão, normalização, segmentação, aquisição, originais e endereçamento das
+fontes, uploads, autenticação e armazenamento necessários ao produto. Não refazer
+ingestão nem substituir ferramentas no âmbito desta correção editorial.
+Identificadores remotos contendo v4 são endereços operacionais; não renomear infraestrutura
+ou repositório por estética.
 
-## 2. Persistência e Projeto Editorial
+**Verificação:** caminhos editoriais ativos pertencem ao V8; remoções são justificadas por
+dependências e uso real; funcionalidades de infraestrutura usadas pelo V8 continuam válidas.
 
-O rascunho ocupa `InternalPlanning.content`, no estado existente, identificado como `content_kind=intellectual_draft`. Preservar identificação, versão, briefing, manifesto, vínculo anterior, remoque e aprovação. `draft_target_words` e `measured_words` registram alvo e contagem determinística. A contagem não aprova/reprova o rascunho nem dispara chamadas adicionais.
+## 3. Proteções e configurações mantidas
 
-Persistir integralmente antes da síntese `editorial-project`. O PE descreve o conteúdo efetivamente desenvolvido, exclusivamente em três campos:
+- Preservar propriedade dos projetos, controle de acesso e proteção contra execução
+  simultânea indevida por workers.
+- Preservar vínculo técnico entre aprovação, versão do PE e versão do rascunho.
+  Rejeitar aprovação de versão obsoleta é proteção de estado, não julgamento editorial.
+- Manter temperatura 1 e a configuração de capacidade cognitiva máxima usada no teste.
+  Não alterar modelo, temperatura ou thinking budget por iniciativa desta implementação.
+- Manter no máximo dois contextos, com fronteiras naturais quando houver divisão.
+  Isso não autoriza dividir a autoria em duas obras nem escrever por assunto.
+- Preservar integridade, identificação e proveniência das fontes.
 
-- `central_idea`: uma ou duas frases.
-- `narrative_development`: progressão concisa e relações intelectuais importantes.
-- `intended_conclusion`: destino intelectual/comunicativo.
+**Verificação:** essas proteções continuam operantes sem introduzir novas restrições de autoria.
 
-O PE permanece vinculado à versão exata do rascunho e é o checkpoint apresentado ao usuário. O rascunho interno não vira um quarto campo nem aparece na UI.
+## 4. Encomenda, duração e capacidade de saída
 
-## 3. Remoque e aprovação
+- Limite comercial aprovado: encomenda de até **100 minutos (1h40)**.
+- Conversão de referência mantida: **150 palavras por minuto**.
+- Assim, 100 minutos correspondem a **15.000 palavras de referência**.
+- O adicional permitido de 10% leva a **16.500 palavras de texto final**.
+  O usuário confirmou expressamente que esse é o significado das 16.500 palavras.
+- A obra deve cumprir a extensão encomendada, com liberdade de desenvolvimento até o
+  adicional de 10%. Não tratar texto 10% menor como automaticamente aceitável:
+  a regra combinada não é uma tolerância simétrica de ±10%.
+- Exibir e validar o limite na encomenda, antes de começar a produção intelectual.
+  Não aceitar silenciosamente a encomenda e só rejeitá-la depois do PE.
+- Remover a proibição de escrita baseada em target_words × 4 comparado à saída máxima.
+  Quatro tokens por palavra é uma estimativa, não prova de impossibilidade.
+- Fontes grandes são entrada/contexto. Não aplicar a elas o limite de palavras da obra.
+- O limite físico de saída do provedor continua real. A implementação deve conferir
+  capacidade para texto, envelope e rascunho excedente sem fingir que a remoção da fórmula
+  aumenta essa capacidade.
+- Se a capacidade efetiva não comportar o contrato, apresentar o conflito antes de
+  inventar uma solução: não truncar, reduzir a encomenda, trocar modelo ou fragmentar
+  a autoria silenciosamente.
 
-Remoque recebe texto anterior completo, PE, briefing, fontes/contexto e instrução persistida. A mesma operação principal atualiza a matéria intelectual afetada e suas consequências, preservando o que continua válido, e entrega o rascunho inteiro. Persistir nova versão antes do novo PE. Se o texto retornar exatamente igual ao rascunho vigente, preservar versão/PE e informar que não houve alteração; o resultado bruto continua no journal.
+**Exemplos:** 20 min → referência 3.000; final até 3.300; rascunho 3.900.
+100 min → referência 15.000; final até 16.500; rascunho 19.500.
+Os 30% do rascunho incidem na referência, não no teto final já acrescido de 10%.
 
-A aprovação única do PE aprova também o rascunho vinculado e mantém o agendamento automático e idempotente da produção. Nenhuma nova aprovação editorial ou agente de fiscalização.
+**Verificação:** encomenda máxima aceita na entrada não é bloqueada depois pela fórmula
+de quatro tokens; extensão é conhecida desde o planejamento e conferida na completude.
 
-Planejamentos históricos permanecem legíveis com `content_kind=abstract_plan`, sem fingir que são rascunhos. Um remoque os transforma no novo contrato. Checkpoints e journals anteriores ficam preservados. Ao retomar planejamento antigo interrompido, reutilizar seu material disponível na tarefa de rascunho, sem reabrir avaliações antigas.
+## 5. Planejador: matéria intelectual antes do PE
 
-## 4. Escritor e qualidade
+O planejador deve produzir um **rascunho extremamente robusto intelectualmente**,
+dimensionado para **130% da extensão de referência**, antes de sintetizar o PE.
+O usuário corrigiu explicitamente a orientação anterior e manteve os 30% excedentes
+para dar matéria suficiente ao escritor e eliminar a necessidade de writing completion.
 
-O escritor recebe rascunho integral, encomenda original, PE aprovado, fontes/contexto e instruções editoriais de público, formato, idioma e tom. O rascunho excedente é matéria-prima: liberdade explícita para selecionar, reorganizar, condensar e reescrever, sem preservar literalmente redação, ordem dos parágrafos ou todos os detalhes ilustrativos. A meta final continua sendo a encomenda original, não os 130%.
+O prompt deve exigir desenvolvimento da matéria: explicações, relações entre ideias,
+causas, consequências, nuances, contrapontos e exemplos pertinentes.
+O planejador não tem obrigação de acabamento narrativo ou estilístico.
+Não preencher extensão com repetição, paráfrase redundante ou assunto decorativo.
+Não produzir apenas um roteiro de tópicos no lugar do rascunho desenvolvido.
 
-Dentro da concepção aprovada, o escritor também pode ampliar relações e melhorar explicações. Essa liberdade permanece nas instruções da complementação de extensão, sem alterar seu mecanismo, metas ou tolerância. Classificações e enumerações do rascunho não são obrigatórias.
+Preservar autoria intelectual: briefing orienta a encomenda; fontes lastreiam fatos;
+conhecimento confiável e elaboração intelectual são permitidos.
+Não inventar estudos, dados, depoimentos, acontecimentos ou bibliografia.
+Uma fonte não ganha peso editorial proporcional ao seu tamanho.
 
-Preservar a produção e recuperação existentes, incluindo o tratamento da extensão da obra final dentro da escrita. Esse tratamento não chama novamente o planejador. A contagem do rascunho é somente telemetria.
+O rascunho é uma unidade intelectual integral. Não criar uma chamada por assunto,
+nem substituir o trabalho por relatório de suficiência ou conversa do modelo consigo.
+Registrar alvo e extensão observada sem transformar diferença de contagem em um novo
+revisor ou loop de complementação não aprovado.
 
-A esteira hierárquica posterior permanece: completude → coerência/consistência → narrativa → estilo. A completude respeita a seleção e condensação autorizadas do material excedente; não exige incorporar todos os detalhes do rascunho. Permanecem diagnósticos, correções, confirmações, reconsideração autônoma e preservação das aprovações anteriores.
+**Verificação:** rascunho integral vem antes do PE, usa o alvo de 130%, é persistido e
+entregue integralmente ao escritor. Um alvo no prompt, sozinho, não prova atendimento
+do dimensionamento; divergências devem ser explicitadas, não consideradas sucesso por conveniência.
 
-O contrato `CONSISTENCY` vale no diagnóstico, correção, confirmação e reconsideração: protege coerência e responsabilidade factual, sem exigir passagem documental equivalente para cada argumento ou conexão, nem fidelidade à organização das fontes. Originalidade não constitui defeito. Contradições efetivas, erros factuais, inferências apresentadas como fatos e conclusões injustificadas continuam verificáveis; a consulta documental existente atende somente dúvida factual específica e relevante. A narrativa avalia qualidade efetiva, não conformidade documental; estilo preserva pensamento e ordem narrativa consolidada. Todas as etapas aprovam diretamente quando não há defeito concreto dentro de sua competência.
+## 6. PE, remoque e aprovação
 
-## 5. Capacidade, recuperação e observabilidade
+- PE é uma síntese curta do rascunho efetivamente produzido.
+- Preservar os três campos atuais: ideia central, desenvolvimento narrativo e
+  conclusão pretendida. Não acrescentar matriz de fontes ou quarto campo.
+- Persistir o rascunho antes de produzir a síntese.
+- Não criar fiscal de alinhamento/fidelidade entre PE e rascunho.
+- PE e rascunho ficam vinculados por versão; a aprovação única aprova esse conjunto.
+- Remoque recebe a concepção anterior e a instrução do usuário, atualiza o rascunho
+  como um todo e depois o PE correspondente, preservando o que permanece válido.
+- Preservar agendamento da produção após aprovação e sua idempotência.
+- Uma proteção contra clique/aprovação obsoleta não pode virar restrição editorial.
 
-`Calls.structured` solicita a capacidade máxima de saída do perfil verificado do modelo, com preflight do contexto real. Não criar teto de conteúdo a partir de uma estimativa arbitrária de tokens por palavra. Se ocorrer interrupção técnica de saída, usar a continuação já existente com bytes preservados. JSON malformado aciona reparo técnico do transporte, não replanejamento editorial.
+**Verificação:** aprovação usa a versão correta; remoque não deixa PE e rascunho
+descasados; não existe julgamento editorial adicional de fidelidade.
 
-Persistir resposta bruta antes de parsing/validação; recuperar resultados completos do journal sem repetir chamadas. Timeout mantém checkpoints e progresso. A limpeza do V4 não altera modelo, limites cognitivos, timeout, preço, caching ou comportamento editorial.
+## 7. Escritor: autoria da obra inteira
 
-Cada chamada mantém etapa, tokens, latência, custo e motivo de término. A medição do rascunho é um evento de artefato e não aumenta o contador de chamadas físicas.
+A prioridade das fontes de trabalho do escritor é, explicitamente:
 
-## 6. Verificação
+1. Rascunho.
+2. Briefing.
+3. Fontes.
 
-Testar sem inferência real: uma chamada principal seguida de síntese do PE; meta 130%; ausência de avaliação de suficiência e de regeneração por contagem; persistência antes do PE; resposta bruta recuperável; retomada após falhas; remoque do texto; escritor recebendo rascunho completo e liberdade editorial; vínculos/versionamento; fontes, caching e quatro estágios de qualidade. Qualidade literária e consumo real dependem de teste pago posterior autorizado, não de fixtures.
+O PE aprovado informa o compromisso editorial. Essa prioridade não autoriza inventar
+fatos nem ignorar a encomenda.
+
+O escritor deve produzir um excelente texto completo, concebido como narrativa:
+relações entre assuntos, progressão, transições e destino intelectual.
+Pode selecionar, reorganizar, condensar e reescrever a matéria excedente do rascunho.
+Não é obrigado a manter sua ordem, redação, enumerações ou todos os exemplos.
+
+Pode introduzir material intelectualmente bom e pertinente, sem alucinação, respeitando
+a encomenda e sua extensão. Ausência literal nas fontes não torna uma elaboração inválida.
+
+A produção deve ocorrer como obra inteira em uma chamada de escrita, dentro da capacidade
+do produto. Não gerar parágrafos ou assuntos separadamente para o código montar.
+Streaming transporta a resposta de uma chamada; não altera essa unidade de autoria.
+
+Eliminar a etapa/loop separado de **writing completion**.
+O escritor já recebe a obrigação de extensão. Deficiência de tamanho pertence à
+completude e usa o mecanismo editorial de correção integral, não um apêndice de preenchimento.
+
+**Verificação:** prompt explicita a prioridade; uma chamada escreve o texto integral;
+não existe caminho ativo de writing completion ou montagem por blocos editoriais.
+
+## 8. Quatro revisões e seus critérios
+
+As quatro etapas são revisões por modelo, nesta ordem:
+completude → consistência → narrativa → estilo.
+
+### 8.1 Completude
+
+Modelo de comparação: **PE aprovado**. Direção: **PE → texto**.
+Pergunta: o que prometemos no PE foi efetivamente entregue no texto?
+Verificar também a especificação de extensão conhecida desde a encomenda.
+Não exigir que tudo no texto tenha sido previamente enumerado no PE.
+Não exigir todos os detalhes do rascunho excedente.
+Material adicional pertinente, dentro da encomenda, não é defeito por ser adicional.
+Tamanho não pode ficar escondido em validação final do JSON.
+
+### 8.2 Consistência
+
+Referências: fontes e conhecimento confiável/bom senso do LLM, incorporado à elaboração
+intelectual. O critério central é **contradição**, e não equivalência literal.
+Apontar erros factuais, contradições efetivas, invenções e inferências tratadas como fatos.
+Não exigir uma passagem documental para cada ideia, analogia, interpretação ou conexão.
+Não tratar divergências entre fontes como se todas dissessem a mesma coisa.
+Distinguir erro factual de discussão explícita e fundamentada de uma posição.
+
+### 8.3 Narrativa
+
+Aplicar boas práticas do produto solicitado: progressão das ideias, relações,
+transições, ritmo, clareza e unidade. Combater a lista de assuntos apenas disfarçada
+de prosa. Trata-se de polimento de uma obra que o escritor já deveria conceber bem.
+
+### 8.4 Estilo
+
+Aplicar boas práticas de redação adequadas a público, formato, idioma e tom:
+clareza, fluidez, precisão, oralidade quando aplicável e retirada de redundância.
+Preservar a matéria intelectual e a narrativa válida.
+
+Narrativa e estilo não são uma segunda autoria independente nem licença para trocar
+a tese por preferência do revisor. Não inventar defeitos para justificar uma chamada.
+Preservar decisões anteriores válidas; erro real não se torna intocável por ter passado
+por uma etapa anterior.
+
+**Verificação:** cada prompt define sua referência e competência; completude mede
+promessa/entrega; consistência admite autoria responsável; polimento preserva a obra.
+
+## 9. Diagnóstico, correção integral e verificação
+
+Fluxo obrigatório em cada etapa com defeitos:
+
+1. Uma chamada de diagnóstico lê a obra e entrega uma lista pontual dos defeitos.
+2. Uma chamada de correção recebe **o texto inteiro e a lista de defeitos** e devolve
+   **o texto inteiro corrigido**, preservando unidade e o que está válido.
+3. Uma chamada de verificação lê a correção e verifica a resolução dos defeitos
+   apontados e a preservação do que não deveria ser prejudicado.
+
+O revisor aponta a falha; não entrega um catálogo de substituições para o programa aplicar.
+Pode citar um trecho para explicar o problema. Isso não é um endereço obrigatório de patch.
+Eliminar correções dependentes de p8, p6 ou outros IDs de parágrafos.
+Não fazer uma chamada por defeito ou parágrafo. Não montar a obra a partir de remendos.
+A verificação não reabre automaticamente toda a pauta como uma nova auditoria irrestrita.
+
+Remover a regra de desistir/reconsiderar automaticamente após duas correções malsucedidas.
+Completude e consistência podem precisar de mais de duas chamadas de correção.
+Nova correção recebe a versão integral vigente e as pendências concretas.
+Narrativa e estilo são polimento; não transformar preferência repetida em ciclo sem fim.
+
+Não inventar outro número fixo de tentativas para substituir o dois.
+Se houver falha técnica, aplicar recuperação técnica. Critério novo de encerramento
+editorial por falta de progresso exige discussão; não está autorizado neste registro.
+
+**Verificação:** simular mais de duas correções necessárias; verificar texto integral
+em todas as chamadas e ausência de aplicação de patches por endereços.
+
+## 10. JSON é transporte
+
+- Validação estrutural não julga extensão, qualidade editorial, fidelidade ao PE
+  ou legitimidade das ideias.
+- Corrigir automaticamente erro simples de embalagem quando a correção for inequívoca
+  e não exigir inventar conteúdo.
+- Resposta cortada/incompleta não é reparada juntando sufixos nem completando pontuação:
+  refazer integralmente a operação que falhou, preservando as etapas anteriores válidas.
+- Não reaproveitar conteúdo defeituoso como resultado concluído.
+- Não continuar bytes de uma resposta truncada como mecanismo de autoria.
+- Se a causa for limite físico de saída, tratar a causa; repetir a mesma chamada
+  impossível indefinidamente não é recuperação.
+- Metadados auxiliares de localização não podem destruir um texto válido nem restabelecer
+  a correção editorial por endereços. Preservar conteúdo válido e distinguir o problema
+  de transporte/metadados de uma falha da obra.
+
+**Verificação:** embalagem reparável, resposta truncada e metadados inválidos têm
+tratamentos distintos; nenhum deles cria julgamento editorial no parser.
+
+## 11. Persistência e retomada efetiva
+
+Persistir etapas terminadas e seus resultados completos.
+Na falha, manter essas etapas e refazer **do início ao fim a etapa falhada**, usando
+o último estado concluído e válido. Depois, seguir o fluxo até a entrega.
+
+Resposta bruta e erro podem permanecer para diagnóstico, mas não são checkpoint de sucesso.
+Journal não pode devolver eternamente a mesma tentativa inválida e bloquear toda retomada.
+Não repetir planejamento, ingestão, escrita ou revisão já concluídos sem necessidade
+decorrente de mudança efetiva da encomenda/versão.
+
+Não basta dizer que os dados estão guardados. A recuperação precisa funcionar pelo
+caminho normal do produto, sem intervenção manual no banco.
+
+**Verificação:** interromper uma etapa simulada após anteriores concluídas; retomar;
+confirmar nova tentativa integral, preservação dos resultados anteriores e avanço.
+Cobrir falha antes/depois da persistência e repetição de acionamento sem produção duplicada.
+
+## 12. Timeout por inatividade observável
+
+Retirar os 240 segundos como regra geral de desistência de uma chamada longa.
+Usar a atividade recebida por streaming para distinguir resposta em andamento de silêncio.
+Recebimento de novos eventos/trechos renova a observação de atividade.
+
+Distinguir espera inicial de interrupção depois que a resposta começou.
+Silêncio de rede não prova inatividade interna do pensamento do modelo.
+Não fabricar progresso por heartbeat local e tratá-lo como atividade do LLM.
+Streaming continua sendo transporte de uma única geração integral.
+
+Falha técnica deve permitir a retomada descrita acima.
+Prazos impostos pelo provedor/infraestrutura precisam ser identificados separadamente;
+mudar o temporizador local não garante removê-los.
+
+**Pendente de definição técnica:** duração da janela de inatividade e tratamento temporal
+da primeira resposta. Nenhum novo número foi aprovado. Verificar semântica real do SDK
+e do provedor antes de codificar; não renomear 240 segundos e manter o mesmo problema.
+
+**Verificação:** chamada com atividade além de 240 segundos não é cancelada por duração
+total local; silêncio real, espera inicial e erro do provedor são distinguíveis.
+
+## 13. Cache obrigatório NO LLM
+
+O usuário explicitou: cache significa **carregamento/reutilização de contexto no
+provedor do LLM**, não armazenamento no banco.
+
+Cobrir materiais reutilizados: **fontes, corpus principal, briefing, rascunho e PE**,
+conforme os insumos de cada etapa e as versões vigentes.
+Não se limitar ao corpus documental deixando sempre os outros materiais como entrada
+integral repetida fora do cache.
+
+O código deve garantir uso do cache, renovar validade quando possível e recuperar
+ou recriar o carregamento quando necessário.
+Recriar cache não significa regerar briefing, PE ou rascunho.
+Após remoque ou outra alteração, usar o contexto correspondente à nova versão.
+Não reutilizar cache de uma versão anterior por conveniência.
+Não criar fallback silencioso para execução sem cache.
+
+Respeitar o máximo de dois contextos e requisitos reais do provedor.
+Cache obrigatório de cada material não exige um cache independente para cada pequeno
+documento; a organização deve permitir sua reutilização sem multiplicar contextos.
+Indisponibilidade externa pode impedir uma chamada naquele momento, mas não pode deixar
+o projeto permanentemente preso a um identificador de cache vencido.
+
+**Verificação:** chamadas fazem referência efetiva ao cache; insumos reutilizados estão
+nele; expiração/recriação, versão alterada, falha transitória e reinício são recuperáveis.
+Dados salvos no banco, isoladamente, não satisfazem nenhum desses critérios de cache.
+
+## 14. Hermes e o fluxo sem fontes: etapa posterior
+
+Depois de concluir as correções do V8, retomar a falha auditada do fluxo
+“não tenho fontes”. Fluxo pretendido: briefing → Hermes → corpus → V8 normal.
+Não implementar suas correções junto destas mudanças editoriais.
+
+Ponto de retomada da auditoria: decisão pendente inválida podia ser persistida antes
+da validação de sucesso e reaproveitada em toda retomada. Revalidar o código atual e
+corrigir a causa posteriormente, sem tratar a tentativa inválida como resultado concluído.
+Verificar também alternativas de busca/aquisição diante de falha de um provedor.
+
+## 15. Implantação em sessões: checklist e evidências
+
+Todos os itens abaixo estão **pendentes de implementação/verificação** neste registro.
+Ordem de trabalho proposta por dependência técnica; não muda a arquitetura aprovada.
+
+- [ ] A. Conferir main, deploy e arquivos ativos; mapear resíduos V4 e testes que preservam
+  comportamentos agora rejeitados. Não confundir nome de recurso com legado editorial.
+- [ ] B. Corrigir estado, checkpoints e retomada; separar falha de transporte de sucesso;
+  retirar reaproveitamento de tentativas inválidas e continuação de resposta cortada.
+- [ ] C. Implementar cache no LLM e tratamento de inatividade, preservando configuração.
+  Resolver explicitamente as definições técnicas pendentes do item 12.
+- [ ] D. Ajustar encomenda, capacidade, planejador, PE, remoque e escritor:
+  100 minutos, referência/10%, rascunho 130%, prioridades e autoria integral;
+  retirar writing completion e bloqueio por quatro tokens.
+- [ ] E. Ajustar os quatro revisores e o ciclo diagnóstico/correção/verificação;
+  remover patches endereçados e limite de duas correções.
+- [ ] F. Concluir limpeza e validar o fluxo integrado com simulações sem inferência paga;
+  registrar o que depende de avaliação editorial real do usuário.
+- [ ] G. Após V8 concluído, tratar Hermes/“não tenho fontes” em trabalho próprio.
+
+Em cada sessão registrar aqui: itens alterados, commit, verificações realizadas,
+resultado, pendências concretas e próximo passo. Não marcar concluído por intenção.
+Não executar testes pagos ou deploy apenas para documentar decisões.
+
+### Mapa inicial de código para retomada
+
+Confirmar nomes e chamadas na revisão efetivamente usada, sem assumir que permaneceram iguais:
+
+- src/comunicamundo_v8/hefesto/v8/editorial.py: instruções de planejamento/escrita/revisão.
+- src/comunicamundo_v8/hefesto/v8/engine.py: fluxo, extensão e bloqueio de capacidade.
+- src/comunicamundo_v8/hefesto/v8/hierarchy.py: diagnóstico, correção, verificação e patches.
+- src/comunicamundo_v8/hefesto/v8/provider.py: chamadas, JSON, journal, timeout e SDK.
+- src/comunicamundo_v8/hefesto/v8/context.py: contexto e cache.
+- src/comunicamundo_v8/hefesto/v8/contracts.py: estruturas e validações.
+- src/comunicamundo_v8/hefesto/v8/repository.py e runtime.py: persistência e execução.
+- src/comunicamundo_v8/hefesto/v8/routes.py e web/: entrada, limite e retomada visível.
+- tests/test_v8*.py: alinhar testes ao contrato, sem perpetuar comportamento rejeitado.
+- src/comunicamundo_v8/hefesto/v8/hermes.py: somente na etapa posterior.
+
+### Registro de sessões
+
+12/10/2026 — decisões consolidadas neste contrato. Somente documentação.
+Nenhuma correção funcional desta lista implementada nesta rodada.
