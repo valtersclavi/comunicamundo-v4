@@ -7,7 +7,7 @@ import pytest
 from test_v8 import (Memory, Provider, Ingestor, Search, source, state, request,
                      conception, complete_body, review_ok, problem, confirmed, support, run)
 from comunicamundo_v8.hefesto.v8.contracts import (EditorialFields,
-    EditorialProject, GeneratedWork, Review, Remoque, State, identity)
+    EditorialProject, EditorialStage, GeneratedWork, Remoque, State, identity)
 from comunicamundo_v8.hefesto.v8.engine import Editor
 from comunicamundo_v8.hefesto.v8.provider import Calls, Recoverable
 from comunicamundo_v8.hefesto.v8.runtime import Backend, public
@@ -183,58 +183,65 @@ async def test_nonliteral_documentary_support_general_knowledge_and_inference_ar
 
 
 @pytest.mark.asyncio
-async def test_extent_expansion_develops_planned_ideas_and_keeps_other_parts():
+async def test_extent_shortfall_is_fixed_by_completeness_integral_correction():
     st=state(sources=[source()]);repo=Memory()
     short="Valid opening.\n\nA mechanism requires explanation.\n\nValid ending."
-    expansion=complete_body("Explain the mechanism through its causes, consequences and an objection.")
+    finished=complete_body("Explain the mechanism through its causes, consequences and an objection.")
     p=Provider([*conception(),dict(title="Work",body=short),
-        dict(strategy="Complete the approved mechanism and objection before quality review.",
-             edits=[dict(passage_ids=["p2"],replacement=expansion)]),*review_ok()])
+        dict(problems=[problem(pid="extent",passages=[])]),
+        dict(strategy="Complete the approved mechanism and objection integrally.",
+             title="Work",body=finished),
+        confirmed(pid="extent"),*review_ok()[1:]])
     editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
     st.action=dict(kind="approve",id="a",version=1);await editor.execute(st,Calls(repo,p,st))
-    assert st.work.body=="Valid opening.\n\n"+expansion+"\n\nValid ending."
-    assert 135<=len(st.work.body.split())<=165 and st.status=="text_ready"
-    assert st.writing_checkpoint["complete"] and st.writing_checkpoint["attempts"]
-    completion_prompt=next(prompt for prompt,_ in p.prompts if "ACTUAL WORDS:" in prompt)
-    assert st.internal_plans[0].content in completion_prompt
-    assert expansion in next(prompt for prompt,system in p.prompts if "STAGE 1:" in system)
+    assert st.work.body==finished
+    assert len(st.work.body.split())>=150 and st.status=="text_ready"
+    assert st.writing_checkpoint["complete"] and not st.writing_checkpoint.get("attempts")
+    assert "writing-completion" not in {v.get("stage") for v in repo.ops.values()}
+    assert st.work.body==finished
 
 
 
 @pytest.mark.asyncio
-async def test_review_regeneration_retains_original_context_work_and_planning():
+async def test_diagnosis_regeneration_retains_work_context():
+    from comunicamundo_v8.hefesto.v8.contracts import Diagnosis
     st=state(sources=[source()]);repo=Memory();p=Provider(conception());editor=Editor(repo,p,Ingestor([]),Search(source()))
     await run(editor,repo,p,st)
     st.work=GeneratedWork(title="Work",body=complete_body());st.internal_plans[0].approved_at=st.projects[0].approved_at="now"
-    p.outputs=[dict(issues=[dict(kind="factual",passage_ids=["unknown"],problem="A specific fact is uncertain",correction="Qualify the fact")]),dict(issues=[])]
-    await Calls(repo,p,st).structured("review-probe",st.corpus.blocks[0],Review,
+    st.editorial_stages=[EditorialStage(position=1,stage_id="completeness",status="diagnosing")]
+    before=len(p.prompts)
+    p.outputs=[dict(problems=[dict(problem_id="a"),dict(problem_id="a")],evidence_questions=[]),
+               dict(problems=[],evidence_questions=[])]
+    await Calls(repo,p,st).structured("diagnose-probe","work context "+st.work.body,Diagnosis,
         repair_context=st.work.body+st.internal_plans[0].content)
-    assert st.work.body in p.prompts[-1][0] and st.internal_plans[0].content in p.prompts[-1][0]
-    assert st.corpus.blocks[0] in p.prompts[-1][0]
-    assert p.prompts[-1]==p.prompts[-2]
+    diagnose_prompts=p.prompts[before:]
+    assert len(diagnose_prompts)>=1
+    assert all(st.work.body in prompt for prompt,_ in diagnose_prompts)
 
 
 @pytest.mark.asyncio
-async def test_disjoint_corrections_resume_after_failure_without_repeating_done_patch():
-    st=state(sources=[source()]);repo=Memory();prefix=complete_body();body=prefix+"\n\nFirst inaccurate attribution.\n\nValid bridge.\n\nSecond unsupported number."
-    problems=[problem("attribution",["p2"]),problem("number",["p4"])]
+async def test_integral_correction_resumes_after_confirmation_failure():
+    st=state(sources=[source()]);repo=Memory()
+    body=complete_body().replace("observation152","bad_fact").replace("observation153","bad_number")
+    fixed=complete_body().replace("observation152","qualified_fact").replace("observation153","qualified_number")
+    problems=[problem("attribution"),problem("number")]
     confirmation=dict(resolutions=[dict(problem_id=k,resolved=True,explanation="Specific defect resolved.") for k in ("attribution","number")],
-        constraints_preserved=True,preservation_evidence="Both edits preserve all other content and duration.")
+        constraints_preserved=True,preservation_evidence="The integral correction preserves all other content and duration.")
     p=Provider([*conception(),dict(title="Work",body=body),review_ok()[0],
-        dict(problems=problems),dict(strategy="Qualify both related specific claims in one coordinated intervention.",
-            edits=[dict(passage_ids=["p2"],replacement="Qualified attribution."),dict(passage_ids=["p4"],replacement="Qualified number.")]),
+        dict(problems=problems),dict(strategy="Qualify both related specific claims in one integral correction.",
+            title="Work",body=fixed),
         TimeoutError("confirmation"),confirmation,*review_ok()[2:]])
     editor=Editor(repo,p,Ingestor([]),Search(source()));await run(editor,repo,p,st)
     st.action=dict(kind="approve",id="a",version=1)
     with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
     saved=await repo.get(st.execution_id)
     attempt=saved.editorial_stages[1].attempts[0]
-    assert "Qualified number." in attempt["candidate"]["body"] and saved.work.body==body
+    assert "qualified_number" in attempt["candidate"]["body"] and saved.work.body==body
     assert saved.editorial_stages[0].status=="approved"
     await editor.execute(saved,Calls(repo,p,saved))
     assert saved.status=="text_ready"
-    assert saved.work.body==prefix+"\n\nQualified attribution.\n\nValid bridge.\n\nQualified number."
-    assert sum("Return strategy and one coordinated set of edits" in system for _,system in p.prompts)==1
+    assert saved.work.body==fixed
+    assert sum("complete corrected work" in system for _,system in p.prompts)==1
 
 
 

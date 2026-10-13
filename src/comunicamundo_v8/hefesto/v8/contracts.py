@@ -206,13 +206,14 @@ class Review(Model):
 
 
 class Patch(Model):
+    """Legacy transport shape retained only for reading old journals."""
     replacement: str
     support: list[SupportReference] = Field(default_factory=list)
 
 
 class Problem(Model):
     problem_id: str = Field(min_length=1)
-    passage_ids: list[str] = Field(min_length=1)
+    passage_ids: list[str] = Field(default_factory=list)
     nature: str = Field(min_length=1)
     description: str = Field(min_length=1)
     cause: str = Field(min_length=1)
@@ -231,13 +232,15 @@ class Diagnosis(Model):
 
 
 class Edit(Model):
+    """Legacy addressed replacement retained only for reading old journals."""
     passage_ids: list[str] = Field(min_length=1)
     replacement: str
 
 
 class Correction(Model):
     strategy: str = Field(min_length=1)
-    edits: list[Edit] = Field(min_length=1)
+    title: str = Field(min_length=1)
+    body: str = Field(min_length=1)
     support: list[SupportReference] = Field(default_factory=list)
 
 

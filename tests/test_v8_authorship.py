@@ -20,8 +20,8 @@ async def test_authorship_reaches_draft_and_writer_without_new_operations():
     assert "195 palavras" in provider.prompts[0][1]
     assert "interpretações que não estejam explicitamente formuladas nas fontes" in AUTHORSHIP
     assert "Não invente fatos, estudos, dados, testemunhos ou evidências" in AUTHORSHIP
-    assert "You may expand relationships, improve explanations" in provider.prompts[2][1]
-    assert "draft classifications, enumerations or sequences are mandatory" in provider.prompts[2][1]
+    assert "PRIORITY OF WORKING MATERIALS" in provider.prompts[2][1]
+    assert "script to reproduce literally" in provider.prompts[2][1]
     assert CONSISTENCY in provider.prompts[4][1]
     assert st.work.body == body and st.status == "text_ready"
     assert [s.stage_id for s in st.editorial_stages] == [
@@ -38,11 +38,11 @@ async def test_authorship_reaches_draft_and_writer_without_new_operations():
     for _, system in provider.prompts[3:]:
         assert AUTHORSHIP not in system  # Full creative authority belongs to the authors.
         assert "Approve directly when there is no concrete defect" in system
-    assert "not conformity to documentary organization" in provider.prompts[5][1]
+    assert "small necessary polish" in provider.prompts[5][1]
     assert "consolidated narrative order" in provider.prompts[6][1]
 
 
-@pytest.mark.parametrize("role", ["diagnose", "correct", "confirm", "reconsider"])
+@pytest.mark.parametrize("role", ["diagnose", "correct", "confirm"])
 def test_consistency_contract_protects_originality_and_factual_review_in_every_role(role):
     contract = stage_contract(2, role)
     assert CONSISTENCY in contract
@@ -59,6 +59,7 @@ def test_consistency_contract_protects_originality_and_factual_review_in_every_r
 async def test_specific_factual_doubt_still_supports_correction_and_confirmation():
     text = "The observation reports correlation, not an established cause.\n\nUnrelated evidence."
     body = complete_body() + "\n\nThe observation establishes causality."
+    fixed = complete_body() + "\n\nThe observation reports correlation; the cause remains an interpretation."
     st, repo, provider, editor = await prepared(text=text)
     reference = dict(source_id=str(st.sources[0].source_id),
                      location_id=st.sources[0].locations[0].location_id)
@@ -67,7 +68,7 @@ async def test_specific_factual_doubt_still_supports_correction_and_confirmation
         dict(evidence_questions=[dict(question="Does this observation establish causality?",
                                       references=[reference])]),
         dict(problems=[problem(passages=["p2"])]),
-        correction("The observation reports correlation; the cause remains an interpretation."),
+        correction(fixed),
         confirmed(), *review_ok()[2:],
     ]
     await editor.execute(st, Calls(repo, provider, st))
@@ -83,16 +84,14 @@ async def test_specific_factual_doubt_still_supports_correction_and_confirmation
 
 
 @pytest.mark.asyncio
-async def test_existing_extent_completion_keeps_authorship_and_approved_conception():
+async def test_extent_shortfall_is_handled_by_completeness_with_authorship_intact():
+    finished = complete_body()
     st, repo, provider, editor = await prepared([
         dict(title="Work", body="Valid opening.\n\nIncomplete explanation."),
-        correction(complete_body()), *review_ok(),
+        dict(problems=[problem(pid="extent", passages=[])]),
+        correction(finished), confirmed(pid="extent"), *review_ok()[1:],
     ])
     await editor.execute(st, Calls(repo, provider, st))
-    completions = [(prompt, system) for prompt, system in provider.prompts if "ACTUAL WORDS:" in prompt]
-    assert len(completions) == 1
-    prompt, system = completions[0]
-    assert AUTHORSHIP in system
-    assert "approved conception, including deeper relationships and explanations" in prompt
-    assert "Do not introduce unrelated themes, invented evidence or padding" in prompt
-    assert st.status == "text_ready" and len(st.writing_checkpoint["attempts"]) == 1
+    assert "writing-completion" not in {v.get("stage") for v in repo.ops.values()}
+    assert AUTHORSHIP in provider.prompts[0][1]
+    assert st.status == "text_ready" and st.work.body == finished

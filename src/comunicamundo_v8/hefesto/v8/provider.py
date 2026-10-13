@@ -1,6 +1,6 @@
 """Provider transport, verified capacities and durable generation journal.
 
-The persistent corpus is reused through explicit, expendable context caches.
+Reusable source and editorial materials use explicit, expendable context caches.
 No SDK response_schema: the SDK must
 not parse a generated response before our durable raw-response journal.
 """
@@ -79,10 +79,15 @@ class Vertex:
     def __init__(self, project: str, location: str, model: str):
         self.model = model
         self.project, self.location = project, location
+        # Inactivity is observed on the stream (60s first event / 30s silence).
+        # Keep only a long transport ceiling aligned with the worker task timeout;
+        # do not use 240s as a total generation wall.
         self.client = genai.Client(vertexai=True, project=project, location=location,
-                                   http_options=types.HttpOptions(timeout=240000,
+                                   http_options=types.HttpOptions(timeout=7_200_000,
                                       retry_options=types.HttpRetryOptions(attempts=1)))
         self._capacity = None
+        self.first_event_timeout_s = 60
+        self.silence_timeout_s = 30
 
     async def capacity(self) -> Capacity:
         if self._capacity:
@@ -172,33 +177,60 @@ class Vertex:
         cap = await self.capacity()
         started = perf_counter()
         # Cached requests cannot set system_instruction. The unchanged operation
-        # contract/schema travels dynamically; only documentary text is cached.
+        # contract/schema travels dynamically; reusable operation inputs are cached.
         if cached_context:
             prompt = "OPERATION INSTRUCTIONS:\n" + system + "\nDYNAMIC INPUT:\n" + prompt
-        r = await self.client.aio.models.generate_content(
-            model=self.model, contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=None if cached_context else system,
-                cached_content=cached_context["resource"] if cached_context else None,
-                response_mime_type="application/json",
-                max_output_tokens=output_tokens, temperature=1.0,
-                thinking_config=types.ThinkingConfig(thinking_budget=cap.thinking_budget_max)))
-        # Accessing response.text does not parse JSON; also keep the complete SDK
-        # response for diagnostics including candidate safety/finish metadata.
-        raw = r.model_dump(mode="json")
-        text = "".join(part.text or "" for candidate in (r.candidates or [])[:1]
-                       for part in (candidate.content.parts if candidate.content else [])
-                       if not part.thought)
-        finish = str(getattr(r.candidates[0].finish_reason, "value", r.candidates[0].finish_reason)) if r.candidates else "NO_CANDIDATES"
-        meta = r.usage_metadata
-        prompt_tokens = int(getattr(meta, "prompt_token_count", 0) or 0)
-        cached = int(getattr(meta, "cached_content_token_count", 0) or 0)
-        output = int(getattr(meta, "candidates_token_count", 0) or 0)
-        reasoning = int(getattr(meta, "thoughts_token_count", 0) or 0)
+        config = types.GenerateContentConfig(
+            system_instruction=None if cached_context else system,
+            cached_content=cached_context["resource"] if cached_context else None,
+            response_mime_type="application/json",
+            max_output_tokens=output_tokens, temperature=1.0,
+            thinking_config=types.ThinkingConfig(
+                thinking_budget=cap.thinking_budget_max, include_thoughts=True))
+        stream = await self.client.aio.models.generate_content_stream(
+            model=self.model, contents=prompt, config=config)
+        texts: list[str] = []
+        raw_chunks: list[dict] = []
+        finish = "NO_CANDIDATES"
+        meta = None
+        deadline = perf_counter() + self.first_event_timeout_s
+        iterator = stream.__aiter__()
+        while True:
+            remaining = deadline - perf_counter()
+            if remaining <= 0:
+                raise Recoverable(
+                    "provider inactivity: no stream event within the approved window")
+            try:
+                chunk = await asyncio.wait_for(anext(iterator), timeout=remaining)
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError as error:
+                raise Recoverable(
+                    "provider inactivity: no stream event within the approved window") from error
+            deadline = perf_counter() + self.silence_timeout_s
+            raw_chunks.append(chunk.model_dump(mode="json"))
+            if chunk.candidates:
+                candidate = chunk.candidates[0]
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        # Thought and answer parts both prove provider activity.
+                        if part.text:
+                            if not getattr(part, "thought", False):
+                                texts.append(part.text)
+                if candidate.finish_reason is not None:
+                    finish = str(getattr(candidate.finish_reason, "value",
+                                         candidate.finish_reason))
+            if chunk.usage_metadata is not None:
+                meta = chunk.usage_metadata
+        text = "".join(texts)
+        prompt_tokens = int(getattr(meta, "prompt_token_count", 0) or 0) if meta else 0
+        cached = int(getattr(meta, "cached_content_token_count", 0) or 0) if meta else 0
+        output = int(getattr(meta, "candidates_token_count", 0) or 0) if meta else 0
+        reasoning = int(getattr(meta, "thoughts_token_count", 0) or 0) if meta else 0
         cost = (Decimal(max(0, prompt_tokens-cached))*Decimal(cap.input_price)
                 + Decimal(cached)*Decimal(cap.cached_price)
                 + Decimal(output+reasoning)*Decimal(cap.output_price))/Decimal(1000000)
-        return dict(text=text, finish=finish, raw=raw,
+        return dict(text=text, finish=finish, raw={"stream": raw_chunks},
                     usage=dict(provider=self.provider, model=self.model,
                         input_tokens=prompt_tokens, cached_tokens=cached,
                         uncached_input_tokens=max(0,prompt_tokens-cached),
@@ -270,50 +302,25 @@ class Calls:
         return value
 
     def validate(self,value):
-        from .contracts import Reading,GeneratedWork,Verification,Patch,Review
+        from .contracts import Reading,GeneratedWork,Verification,Review
         from .corpus import validate_references
         if isinstance(value,Reading):
             validate_references(value.references,self.state.sources)
-        if isinstance(value,(GeneratedWork,Verification,Patch)):
+        if isinstance(value,(GeneratedWork,Verification)):
             for support in value.support:
                 validate_references(support.references,self.state.sources)
         if isinstance(value,(Verification,Review)):
             for issue in value.issues:
                 validate_references(issue.references,self.state.sources)
-        if isinstance(value,Review):
-            from .editorial import linked_planning,passages
-            known={p["passage_id"] for p in passages(self.state.work.body)}
-            if any(k not in known for issue in value.issues for k in issue.passage_ids):
-                raise ValueError("review references an unknown work passage")
-        from .contracts import Diagnosis,Correction,Confirmation,Reconsideration
-        from .editorial import passages,apply_edits
+        from .contracts import Diagnosis,Correction,Confirmation
+        from .editorial import apply_correction
         if isinstance(value,Diagnosis):
-            known={p["passage_id"] for p in passages(self.state.work.body)}
             ids=[p.problem_id for p in value.problems]
-            if len(set(ids))!=len(ids) or any(k not in known for p in value.problems for k in p.passage_ids):
-                raise ValueError("diagnosis requires unique problem IDs and valid work passages")
+            if len(set(ids))!=len(ids):
+                raise ValueError("diagnosis requires unique problem IDs")
             for q in value.evidence_questions:validate_references(q.references,self.state.sources)
         if isinstance(value,Correction):
-            apply_edits(self.state.work,value)
-            for support in value.support:validate_references(support.references,self.state.sources)
-        if isinstance(value,Reconsideration):
-            current=next(s for s in self.state.editorial_stages if s.status=="reconsidering")
-            expected={p.problem_id for p in current.diagnosis.problems}
-            actual=[d.problem_id for d in value.decisions]
-            if len(actual)!=len(expected) or set(actual)!=expected:
-                raise ValueError("responsible reconsideration must close every known problem with a reasoned disposition")
-            authorized={1:{"completed","not_a_defect"},
-                2:{"qualified","reformulated","replaced","removed","not_a_defect"},
-                3:{"narratively_resolved","not_a_defect"},
-                4:{"linguistically_resolved","accepted_minor","not_a_defect"}}
-            if any(d.disposition not in authorized[current.position] for d in value.decisions):
-                raise ValueError("responsible disposition exceeds current stage authority; preserve earlier intellectual/narrative approvals")
-            if not value.edits and any(d.disposition not in {"not_a_defect","accepted_minor"} for d in value.decisions):
-                raise ValueError("a material editorial resolution requires executed edits, not a bare declaration")
-            candidate=apply_edits(self.state.work,value) if value.edits else self.state.work
-            from .editorial import within_extent,linked_planning
-            if not within_extent(candidate,linked_planning(self.state).extent):
-                raise ValueError("reconsideration must preserve completed extent ±10%; adjust expression without losing approved development")
+            apply_correction(self.state.work,value)
             for support in value.support:validate_references(support.references,self.state.sources)
         if isinstance(value,Confirmation):
             current=next(s for s in self.state.editorial_stages if s.status=="confirming")
@@ -322,7 +329,8 @@ class Calls:
             if len(actual)!=len(expected) or set(actual)!=expected:
                 raise ValueError("confirmation may examine only all previously diagnosed problem IDs, no new problems")
 
-    async def structured(self, stage: str, prompt: str, schema, source_ids=(), system="", *, corpus_block=None, repair_context=""):
+    async def structured(self, stage: str, prompt: str, schema, source_ids=(), system="", *, corpus_block=None, repair_context="",
+                         cache_prefix=None, cache_slot=0, cache_kind="editorial"):
         cap = await self.provider.capacity()
         schema_text = json.dumps(schema.model_json_schema(), ensure_ascii=False)
         system = (system + "\nReturn exactly one complete JSON object according to this schema. "
@@ -423,11 +431,12 @@ class Calls:
             # Always execute the original task in full. Failed JSON and fragment
             # contents are never prompts for a patch or suffix-generation operation.
             current = prompt
-            if repair_context:
+            if repair_context and repair_context != prompt:
                 current += "\nOPERATION CONTEXT:\n" + repair_context
             mode = "regenerate" if journal["attempts"] else "initial"
             context, dynamic, cache_usage = await self.contexts.prepare(
-                current, stage, corpus_block)
+                current, stage, corpus_block, cache_prefix=cache_prefix,
+                cache_slot=cache_slot, cache_kind=cache_kind)
             if context:
                 count = context["token_count"] + await self.provider.count(
                     "OPERATION INSTRUCTIONS:\n" + system + "\nDYNAMIC INPUT:\n" + dynamic)

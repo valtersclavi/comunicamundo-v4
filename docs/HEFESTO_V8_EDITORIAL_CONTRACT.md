@@ -3,7 +3,7 @@
 Decisões do usuário consolidadas em 12/10/2026.
 Autoridade editorial única, referenciada pelo README e AGENTS.md.
 
-**Estado: implementação iniciada; consultar o registro de sessões e a branch indicada.**
+**Estado: implementação em etapas, com merge após verificação; consultar o registro de sessões.**
 Este documento define o comportamento exigido. Não afirma que o código atual já o executa.
 Substitui as orientações anteriores deste arquivo que preservavam writing completion,
 correções por patches, continuação de resposta cortada ou restrições contrariadas abaixo.
@@ -21,6 +21,12 @@ Instruções explícitas posteriores do usuário prevalecem.
 - Toda pendência de interpretação deve ser apresentada ao usuário antes de virar regra.
 - Esta rodada autoriza o registro documental. Não confundir esse registro com início da
   implementação, deploy ou autorização para inferências pagas.
+
+Atualização de autorização em 12/10/2026: o usuário autorizou iniciar a implementação,
+depois determinou fazer merge ao concluir cada etapa e começar a seguinte. Não deixar
+etapas concluídas em PR rascunho nem depender de testes intermediários dele.
+Executar os testes técnicos sem inferência paga e os gates de CI antes dos merges.
+O workflow existente da main inicia implantação automática após merge de código.
 
 ## 2. Limpeza radical e preservação do V8
 
@@ -53,18 +59,22 @@ dependências e uso real; funcionalidades de infraestrutura usadas pelo V8 conti
 
 ## 4. Encomenda, duração e capacidade de saída
 
-- Limite comercial aprovado: encomenda de até **100 minutos (1h40)**.
+- Limite comercial aprovado: encomenda de até **90 minutos (1h30)**.
+  Em 12/10/2026 o usuário substituiu o teto anterior de 100 minutos por 90 minutos,
+  por ser o limite que o produto aceita e o que dimensiona a capacidade efetiva.
 - Conversão de referência mantida: **150 palavras por minuto**.
-- Assim, 100 minutos correspondem a **15.000 palavras de referência**.
-- O adicional permitido de 10% leva a **16.500 palavras de texto final**.
-  O usuário confirmou expressamente que esse é o significado das 16.500 palavras.
+- Assim, 90 minutos correspondem a **13.500 palavras de referência**.
+- O adicional permitido de 10% leva a **14.850 palavras de texto final**.
 - A obra deve cumprir a extensão encomendada, com liberdade de desenvolvimento até o
   adicional de 10%. Não tratar texto 10% menor como automaticamente aceitável:
   a regra combinada não é uma tolerância simétrica de ±10%.
 - Exibir e validar o limite na encomenda, antes de começar a produção intelectual.
-  Não aceitar silenciosamente a encomenda e só rejeitá-la depois do PE.
+  Não aceitar encomenda acima de 90 minutos. Não aceitar silenciosamente uma encomenda
+  válida e só rejeitá-la depois do PE.
 - Remover a proibição de escrita baseada em target_words × 4 comparado à saída máxima.
   Quatro tokens por palavra é uma estimativa, não prova de impossibilidade.
+  O teto comercial de 90 minutos é o mecanismo de produto que cabe na capacidade;
+  não reintroduzir um bloqueio por fórmula de tokens.
 - Fontes grandes são entrada/contexto. Não aplicar a elas o limite de palavras da obra.
 - O limite físico de saída do provedor continua real. A implementação deve conferir
   capacidade para texto, envelope e rascunho excedente sem fingir que a remoção da fórmula
@@ -74,11 +84,12 @@ dependências e uso real; funcionalidades de infraestrutura usadas pelo V8 conti
   a autoria silenciosamente.
 
 **Exemplos:** 20 min → referência 3.000; final até 3.300; rascunho 3.900.
-100 min → referência 15.000; final até 16.500; rascunho 19.500.
+90 min → referência 13.500; final até 14.850; rascunho 17.550.
 Os 30% do rascunho incidem na referência, não no teto final já acrescido de 10%.
 
-**Verificação:** encomenda máxima aceita na entrada não é bloqueada depois pela fórmula
-de quatro tokens; extensão é conhecida desde o planejamento e conferida na completude.
+**Verificação:** encomenda acima de 90 minutos é recusada na entrada; encomenda máxima
+aceita não é bloqueada depois pela fórmula de quatro tokens; extensão é conhecida desde
+o planejamento e conferida na completude.
 
 ## 5. Planejador: matéria intelectual antes do PE
 
@@ -95,17 +106,21 @@ Não produzir apenas um roteiro de tópicos no lugar do rascunho desenvolvido.
 
 Preservar autoria intelectual: briefing orienta a encomenda; fontes lastreiam fatos;
 conhecimento confiável e elaboração intelectual são permitidos.
+O planejador tem liberdade de completar intelectualmente o rascunho com conhecimento
+próprio inequívoco, mesmo que esse desenvolvimento não exista literalmente nas fontes.
 Não inventar estudos, dados, depoimentos, acontecimentos ou bibliografia.
 Uma fonte não ganha peso editorial proporcional ao seu tamanho.
 
 O rascunho é uma unidade intelectual integral. Não criar uma chamada por assunto,
 nem substituir o trabalho por relatório de suficiência ou conversa do modelo consigo.
+Rascunho abaixo dos 130% **não é um desfecho aceitável** do planejamento: o planejador
+deve atingir a matéria exigida pela encomenda, usando a liberdade intelectual acima.
 Registrar alvo e extensão observada sem transformar diferença de contagem em um novo
 revisor ou loop de complementação não aprovado.
 
-**Verificação:** rascunho integral vem antes do PE, usa o alvo de 130%, é persistido e
+**Verificação:** rascunho integral vem antes do PE, atinge o alvo de 130%, é persistido e
 entregue integralmente ao escritor. Um alvo no prompt, sozinho, não prova atendimento
-do dimensionamento; divergências devem ser explicitadas, não consideradas sucesso por conveniência.
+do dimensionamento; rascunho curto não pode ser tratado como sucesso por conveniência.
 
 ## 6. PE, remoque e aprovação
 
@@ -167,12 +182,16 @@ Não exigir que tudo no texto tenha sido previamente enumerado no PE.
 Não exigir todos os detalhes do rascunho excedente.
 Material adicional pertinente, dentro da encomenda, não é defeito por ser adicional.
 Tamanho não pode ficar escondido em validação final do JSON.
+O prompt desta etapa deve ser estrito o bastante para não caçar divergências cosméticas
+entre PE e texto: espera-se poucas correções necessárias, não uma caça a detalhe.
 
 ### 8.2 Consistência
 
 Referências: fontes e conhecimento confiável/bom senso do LLM, incorporado à elaboração
 intelectual. O critério central é **contradição**, e não equivalência literal.
 Apontar erros factuais, contradições efetivas, invenções e inferências tratadas como fatos.
+Exemplo do critério: se o texto afirma que a Terra é plana e a fonte afirma que é redonda,
+isso é defeito a corrigir. Detalhe sem contradição real não é defeito.
 Não exigir uma passagem documental para cada ideia, analogia, interpretação ou conexão.
 Não tratar divergências entre fontes como se todas dissessem a mesma coisa.
 Distinguir erro factual de discussão explícita e fundamentada de uma posição.
@@ -181,13 +200,17 @@ Distinguir erro factual de discussão explícita e fundamentada de uma posição
 
 Aplicar boas práticas do produto solicitado: progressão das ideias, relações,
 transições, ritmo, clareza e unidade. Combater a lista de assuntos apenas disfarçada
-de prosa. Trata-se de polimento de uma obra que o escritor já deveria conceber bem.
+de prosa. Trata-se de polimento de uma obra que o escritor já deveria conceber bem;
+as premissas narrativas devem constar do prompt do escritor. Esperam-se ajustes
+pequenos e necessários, não reescrita por preferência.
 
 ### 8.4 Estilo
 
 Aplicar boas práticas de redação adequadas a público, formato, idioma e tom:
 clareza, fluidez, precisão, oralidade quando aplicável e retirada de redundância.
 Preservar a matéria intelectual e a narrativa válida.
+As premissas de estilo devem constar do prompt do escritor; a revisão espera mudanças
+pequenas e necessárias.
 
 Narrativa e estilo não são uma segunda autoria independente nem licença para trocar
 a tese por preferência do revisor. Não inventar defeitos para justificar uma chamada.
@@ -214,16 +237,19 @@ Não fazer uma chamada por defeito ou parágrafo. Não montar a obra a partir de
 A verificação não reabre automaticamente toda a pauta como uma nova auditoria irrestrita.
 
 Remover a regra de desistir/reconsiderar automaticamente após duas correções malsucedidas.
-Completude e consistência podem precisar de mais de duas chamadas de correção.
+Não se espera um grande volume de divergências PE↔texto nem caça a defeito inventado:
+os prompts de revisão devem ser escritos para apontar falhas reais e pontuais.
+Se, mesmo assim, forem necessárias mais de duas correções, podem ocorrer.
 Nova correção recebe a versão integral vigente e as pendências concretas.
 Narrativa e estilo são polimento; não transformar preferência repetida em ciclo sem fim.
 
 Não inventar outro número fixo de tentativas para substituir o dois.
-Se houver falha técnica, aplicar recuperação técnica. Critério novo de encerramento
-editorial por falta de progresso exige discussão; não está autorizado neste registro.
+O freio editorial é a qualidade do prompt e a restrição a defeitos reais, não um teto
+artificial de tentativas. Falha técnica usa recuperação técnica.
 
-**Verificação:** simular mais de duas correções necessárias; verificar texto integral
-em todas as chamadas e ausência de aplicação de patches por endereços.
+**Verificação:** permitir mais de duas correções quando houver defeito real; verificar
+texto integral em todas as chamadas, ausência de patches por endereço e prompts que
+não fabriquem pauta.
 
 ## 10. JSON é transporte
 
@@ -277,12 +303,17 @@ Falha técnica deve permitir a retomada descrita acima.
 Prazos impostos pelo provedor/infraestrutura precisam ser identificados separadamente;
 mudar o temporizador local não garante removê-los.
 
-**Pendente de definição técnica:** duração da janela de inatividade e tratamento temporal
-da primeira resposta. Nenhum novo número foi aprovado. Verificar semântica real do SDK
-e do provedor antes de codificar; não renomear 240 segundos e manter o mesmo problema.
+**Definição técnica aprovada em 12/10/2026:** a geração usa streaming. Qualquer
+evento/trecho recebido do provedor (incluindo partes de pensamento, quando
+existirem) renova a observação de atividade. Esperar no máximo **60 segundos**
+pelo primeiro evento. Depois do primeiro evento, **30 segundos** sem novo evento
+contam como inatividade. Não fabricar progresso local. Não manter os 240 segundos
+como teto total da chamada no cliente; prazos reais do provedor/infraestrutura
+continuam distintos e devem ser tratados como tal.
 
-**Verificação:** chamada com atividade além de 240 segundos não é cancelada por duração
-total local; silêncio real, espera inicial e erro do provedor são distinguíveis.
+**Verificação:** chamada com atividade além de 240 segundos não é cancelada por
+duração total local; silêncio de 30 segundos após atividade, ausência do primeiro
+evento em 60 segundos e erro do provedor são distinguíveis.
 
 ## 13. Cache obrigatório NO LLM
 
@@ -332,9 +363,10 @@ Ordem de trabalho proposta por dependência técnica; não muda a arquitetura ap
 - [ ] B. Corrigir estado, checkpoints e retomada; separar falha de transporte de sucesso;
   retirar reaproveitamento de tentativas inválidas e continuação de resposta cortada.
 - [ ] C. Implementar cache no LLM e tratamento de inatividade, preservando configuração.
-  Resolver explicitamente as definições técnicas pendentes do item 12.
+  Definições do item 12 aprovadas (60s/30s); falta implementar streaming/inatividade
+  e mergear/verificar o cache por versão.
 - [ ] D. Ajustar encomenda, capacidade, planejador, PE, remoque e escritor:
-  100 minutos, referência/10%, rascunho 130%, prioridades e autoria integral;
+  90 minutos, referência/10%, rascunho 130% efetivo, prioridades e autoria integral;
   retirar writing completion e bloqueio por quatro tokens.
 - [ ] E. Ajustar os quatro revisores e o ciclo diagnóstico/correção/verificação;
   remover patches endereçados e limite de duas correções.
@@ -413,3 +445,81 @@ Próxima retomada: conferir a branch fix/v8-recovery-contract e sua revisão rem
 prosseguir pelo bloco C (cache dos materiais por versão) sem alterar modelo ou
 temperatura. Prazo de inatividade e espera inicial continuam sem número aprovado.
 Os blocos D/E devem seguir este contrato integralmente. Hermes permanece posterior.
+
+12/10/2026 — PR #145 incorporado à main em
+122106449dcdcf92abafe9467e9d99b4fc16ed70. CI 38312817672 aprovado integralmente:
+testes com PostgreSQL isolado, migrações, navegador offline e imagem de produção.
+Assim, os dois testes de banco anteriormente ignorados localmente também foram
+executados no ambiente de CI. Deploy automático 38313445514 disparado pelo merge.
+
+Foi revisado e incorporado também o PR #144, já existente, com CI 38085620058
+aprovado: comando explícito comunicamundo-v8-worker no Cloud Run Job e diagnóstico
+de falha de migração. Merge d42dcff20c34db3e1eb88682e6a5e3bb375f67cf.
+Esse ajuste elimina a possibilidade de conservar o comando V4 no recurso remoto;
+não altera arquitetura editorial ou Hermes. Conferir o resultado do deploy.
+
+12/10/2026 — segunda etapa, branch fix/v8-editorial-cache: cache NO LLM.
+
+- Chamadas editoriais declaram o prefixo reutilizável com os insumos de sua etapa.
+  Fontes/corpus, briefing, rascunho e PE passam a participar efetivamente do cache,
+  sem cópia desses prefixos na parte dinâmica da mesma chamada.
+- Revisões compartilham material estável conforme sua competência; esta mudança
+  não altera seus critérios, que continuam pendentes no bloco E.
+- Identidade do cache inclui conteúdo exato e versão dos materiais. Remoque e PE
+  novos não reutilizam um conjunto anterior por engano.
+- Cache perdido ou expirado é reconstruído sem nova geração intelectual. Perda
+  entre consulta e renovação é recuperada na mesma preparação.
+- Recursos substituídos são retirados antes de criar seus sucessores. Após duas
+  leituras, o contexto editorial combinado recebe cache e os anteriores são
+  retirados, sem terceiro contexto ativo nem mudança da leitura editorial.
+- Prefixos pequenos são agrupados com o restante dos insumos daquela chamada.
+  Se o conjunto inteiro não atingir o mínimo real do provedor (2.048 tokens no
+  perfil vigente), informar a limitação. Não preencher com material inventado,
+  acrescentar fontes irrelevantes ou executar sem cache silenciosamente.
+- Verificação local após incorporar #144: 170 testes aprovados; os 2 de PostgreSQL real dependem do CI.
+  Inclui versão alterada, perda, expiração, renovação, reconstrução sem regeneração,
+  agrupamento e máximo de dois recursos ativos. Sem inferência paga.
+
+Próximos trabalhos: obter aprovação de CI e fazer merge desta etapa; prosseguir
+com D/E (encomenda, dimensão, prompts e correção integral). A definição numérica
+do timeout por inatividade foi aprovada (60s primeiro evento / 30s silêncio) e
+ainda precisa ser implementada em código com streaming; não confundir registro
+com implementação.
+
+12/10/2026 — definição aprovada pelo usuário para o item 12: streaming observável;
+60 segundos até o primeiro evento (“psiu”); 30 segundos de silêncio após atividade;
+qualquer evento do provedor renova os 30s; sem heartbeat local; retirar o teto
+total de 240 segundos no cliente. Somente registro documental nesta entrada;
+implementação do streaming/inatividade permanece pendente.
+
+12/10/2026 — clarificações editoriais do usuário, registradas sem implementação:
+
+1. Correções: não se espera volume grande de divergências PE↔texto. Completude
+   cobre promessa/entrega; consistência cobre contradição real (ex.: texto plana /
+   fonte redonda). Narrativa e estilo são polimentos pequenos, com premissas já no
+   prompt do escritor. Pode haver mais de duas correções se necessário; o freio é
+   prompt bem escrito, não teto artificial de tentativas.
+2. Encomenda máxima: **90 minutos (1h30)**, não 100. Referência 13.500; final até
+   14.850; rascunho 17.550. O teto comercial dimensiona a capacidade; remover o
+   bloqueio por target_words×4.
+3. Rascunho abaixo de 130% não é desfecho aceitável. O planejador completa a
+   matéria com conhecimento próprio inequívoco, mesmo sem constar literalmente
+   das fontes, sem inventar estudo/dado/depoimento/acontecimento/bibliografia.
+
+12/10/2026 — terceira etapa, branch cursor/v8-editorial-de-stream-2484:
+implementação de C (streaming/inatividade), D e E sobre a base do cache.
+
+- Streaming com include_thoughts; 60s até o primeiro evento; 30s de silêncio;
+  teto HTTP local de 240s retirado (substituído por teto longo de transporte).
+- Encomenda máxima 90 minutos na entrada (API/UI); removidos writing-completion
+  e bloqueio target_words×4; prioridade rascunho>briefing>fontes no escritor;
+  within_extent exige cumprir a referência ( +10% só no teto).
+- Correção integral (title+body); removidos patches por passage_id na esteira
+  ativa e o encerramento automático após duas correções/reconsider.
+- Prompts de completude/consistência/narrativa/estilo alinhados ao contrato.
+- Inclui o fix de migrate 1010 (restos da matriz) para desbloquear deploy.
+- Verificação local: pytest completo sem inferência paga; verify_v8_migrations.
+  CI/deploy e avaliação editorial real do usuário permanecem pendentes.
+
+Próximo: merge após CI; conferir deploy; marcar A/B/C/D/E no checklist só com
+evidência de merge/deploy; F/G depois.

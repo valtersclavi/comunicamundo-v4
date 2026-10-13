@@ -20,17 +20,8 @@ async def prepared(outputs=(), text="Original corpus exclusively for conception 
     return st,repo,p,editor
 
 
-def correction(replacement, strategy="Use a qualified formulation rather than the original assertion."):
-    return dict(strategy=strategy,edits=[dict(passage_ids=["p2"],replacement=replacement)])
-
-
-def decision(disposition, replacement=None):
-    return dict(strategy="Reconsider the failed assumptions and settle the known objection responsibly.",
-        decisions=[dict(problem_id="p",disposition=disposition,
-            reasoning=("The original factual certainty is unwarranted; explicitly qualify it and retain the valid explanation."
-                       if replacement else "This minor linguistic preference is not a substantive defect; further edits would impair the established cadence."))],
-        edits=[dict(passage_ids=["p2"],replacement=replacement)] if replacement else [],
-        preservation_evidence="All other developments, intellectual relationships, narrative order and commissioned extent remain intact.")
+def correction(body, strategy="Use a qualified formulation rather than the original assertion.", title="Work"):
+    return dict(strategy=strategy, title=title, body=body)
 
 
 @pytest.mark.asyncio
@@ -58,8 +49,9 @@ async def test_draft_precedes_pe_without_sufficiency_or_regeneration(approach):
     await editor.execute(st,Calls(repo,p,st))
     writer,contract=next((prompt,system) for prompt,system in p.prompts if "QUANTITATIVE TARGET" in prompt)
     assert outputs[0]["body"] in writer
-    assert "select, reorganize, condense and rewrite" in contract
-    assert all("does not complete duration" in system for _,system in p.prompts if "STAGE " in system)
+    assert "PRIORITY OF WORKING MATERIALS" in contract
+    assert "WORKING MATERIAL PRIORITY: 1) intellectual draft" in writer
+    assert all("Approve directly when there is no concrete defect" in system for _,system in p.prompts if "STAGE " in system)
 
 
 @pytest.mark.asyncio
@@ -83,53 +75,42 @@ async def test_draft_restart_regenerates_integral_draft_after_truncation_and_tim
 
 
 @pytest.mark.asyncio
-async def test_two_failed_style_interventions_end_strategy_not_production():
+async def test_more_than_two_style_corrections_continue_without_reconsider():
     body=complete_body()+"\n\nA minor expressive preference."
+    fixed=complete_body()+"\n\nA settled expressive preference."
     diagnosis=dict(problems=[problem(passages=["p2"])])
     st,repo,p,editor=await prepared([dict(title="Work",body=body),*review_ok()[:3],diagnosis,
-        correction("Another minor expressive preference.","First phrasing adjustment."),confirmed(resolved=False),
-        correction("A further minor expressive preference.","Second phrasing with a different cadence."),confirmed(resolved=False),decision("accepted_minor")])
+        correction(body+" first."),confirmed(resolved=False),
+        correction(body+" second."),confirmed(resolved=False),
+        correction(fixed,"Third integral phrasing that settles the preference."),confirmed(),
+    ])
     await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready" and all(s.status=="approved" for s in st.editorial_stages)
     stage=st.editorial_stages[3]
-    assert len(stage.attempts)==2 and stage.reconsideration["decision"]["decisions"][0]["disposition"]=="accepted_minor"
-    assert stage.approval["editorial_decision"]==stage.reconsideration["decision"]
-    assert sum("STAGE 4:" in system for _,system in p.prompts)==6
-    before=deepcopy(st.model_dump(mode="json"));count=len(p.prompts)
-    await editor.execute(st,Calls(repo,p,st))
-    assert len(p.prompts)==count and st.model_dump(mode="json")==before
-    assert "planning_checkpoint" not in public(st) and "attempts" not in public(st)["editorial_stages"][3]
+    assert len(stage.attempts)==3 and not stage.reconsideration
+    assert "settled expressive preference" in st.work.body
+    assert all("Two failed interventions" not in system for _,system in p.prompts)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("interrupt",[False,True])
-async def test_grave_fact_reconsidered_responsibly_and_prior_approvals_preserved(interrupt):
-    body=complete_body()+"\n\nThe uncertain cause is conclusively proven."
-    outputs=[dict(title="Work",body=body),review_ok()[0],dict(problems=[problem(passages=["p2"])]),
-        correction("The cause is certainly demonstrated.","Reword the original certainty."),confirmed(resolved=False),
-        correction("The cause is undoubtedly established.","Try emphasizing the proposed relation."),confirmed(resolved=False)]
-    if interrupt:outputs.append(TimeoutError("reconsideration service"))
-    outputs.extend([decision("qualified","The proposed cause remains uncertain; this is an interpretation, not established causality."),*review_ok()[2:]])
+async def test_consistency_integral_correction_after_failed_attempts():
+    body=complete_body().replace("observation153","proven_claim")
+    fixed=complete_body().replace("observation153","qualified_claim")
+    outputs=[dict(title="Work",body=body),review_ok()[0],dict(problems=[problem(passages=["p1"])]),
+        correction(body.replace("proven_claim","certain_claim")),confirmed(resolved=False),
+        correction(body.replace("proven_claim","undoubted_claim")),confirmed(resolved=False),
+        correction(fixed,"Qualify the causal claim integrally."),confirmed(),*review_ok()[2:]]
     st,repo,p,editor=await prepared(outputs)
-    if interrupt:
-        with pytest.raises(Recoverable):await editor.execute(st,Calls(repo,p,st))
-        st=await repo.get(st.execution_id);assert st.editorial_stages[1].status=="reconsidering"
-        assert public(st)["work"] is None and public(st)["work_versions"]==[]
-        approved=deepcopy(st.editorial_stages[0].approval)
-        await editor.execute(st,Calls(repo,p,st))
-        assert st.editorial_stages[0].approval==approved
-    else:await editor.execute(st,Calls(repo,p,st))
-    assert st.status=="text_ready" and "not established causality" in st.work.body
-    assert len(st.editorial_stages[1].attempts)==2
+    await editor.execute(st,Calls(repo,p,st))
+    assert st.status=="text_ready" and "qualified_claim" in st.work.body
+    assert len(st.editorial_stages[1].attempts)==3
     assert sum("STAGE 1:" in system for _,system in p.prompts)==1
-    assert sum("Return strategy and one coordinated set of edits" in system for _,system in p.prompts)==2
+    assert sum("complete corrected work" in system for _,system in p.prompts)==3
     statuses=[s.stage_id for s in st.editorial_stages]
     assert statuses==["completeness","consistency","narrative","style"]
     quality=[(prompt,system) for prompt,system in p.prompts if "STAGE " in system]
     assert all(st.corpus.blocks[0] not in prompt for prompt,_ in quality)
-    reconsider=next(prompt for prompt,system in quality if "Two failed interventions" in system)
-    assert "FAILED INTERVENTIONS AND EXPLANATIONS" in reconsider and "certainly demonstrated" in reconsider
-    assert "APPROVED PLANNING AND PE" in reconsider
+    assert all("approved_planning" not in prompt for prompt,system in quality if "STAGE 4:" in system)
 
 
 @pytest.mark.asyncio
@@ -148,47 +129,31 @@ async def test_consistency_fetches_only_addressed_evidence_for_recorded_doubt():
     assert "An unrelated documentary passage" not in consultation
     assert all(text not in prompt for prompt,_ in quality)
     assert all("A specific original observation." not in prompt for prompt,system in quality if "STAGE 2:" not in system)
-    assert all("approved_planning" not in prompt for prompt,system in quality if "STAGE 4:" in system)
 
 
 @pytest.mark.asyncio
-async def test_writer_reconsiders_no_progress_without_reviewing_partial_work():
+async def test_short_writing_is_fixed_by_completeness_not_writing_completion():
     short="Valid opening.\n\nThe planned explanation is technically incomplete.\n\nValid conclusion."
     finished=complete_body("The approved mechanism and objection are now developed.")
     st,repo,p,editor=await prepared([dict(title="Work",body=short),
-        correction("The planned explanation is technically incomplete.","An ineffective expression adjustment."),
-        correction(finished,"Realize the already planned explanation and objection, retaining the valid ends."),*review_ok()])
-    await editor.execute(st,Calls(repo,p,st))
-    assert st.status=="text_ready" and len(st.writing_checkpoint["attempts"])==2
-    assert st.work.body.startswith("Valid opening.") and st.work.body.endswith("Valid conclusion.")
-    first_review=next(prompt for prompt,system in p.prompts if "STAGE 1:" in system)
-    assert finished in first_review and "technically incomplete" not in first_review
-    completions=[prompt for prompt,_ in p.prompts if "ACTUAL WORDS:" in prompt]
-    assert "ineffective expression adjustment" in completions[1]
-
-
-@pytest.mark.asyncio
-async def test_reconsideration_cannot_accept_grave_fact_as_minor_or_only_declare_fix():
-    body=complete_body()+"\n\nAn uncertain fact is asserted without qualification."
-    st,repo,p,editor=await prepared([dict(title="Work",body=body),review_ok()[0],dict(problems=[problem(passages=["p2"])]),
-        correction("An uncertain fact is asserted with certainty."),confirmed(resolved=False),
-        correction("An uncertain fact remains asserted with certainty."),confirmed(resolved=False),
-        decision("accepted_minor"),decision("qualified"),
-        decision("qualified","The specific fact is uncertain and must be treated as a qualified possibility."),*review_ok()[2:]])
+        dict(problems=[problem(pid="extent",passages=[])]),
+        correction(finished,"Realize the commissioned extent integrally."),confirmed(pid="extent"),
+        *review_ok()[1:]])
     await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready"
-    raw=[v for v in repo.ops.values() if v.get("stage")=="consistency-reconsider"][0]
-    assert len(raw["attempts"])==3
-    assert all(a["raw"] for a in raw["attempts"])
-    assert "qualified possibility" in st.work.body
+    assert "writing-completion" not in {v.get("stage") for v in repo.ops.values()}
+    assert not st.writing_checkpoint.get("attempts")
+    assert st.work.body==finished
+    assert "technically incomplete" not in st.work.body
 
 
 @pytest.mark.asyncio
 async def test_confirmation_repairs_new_problem_id_without_reopening_diagnosis():
     body=complete_body()+"\n\nAn imprecise transition."
+    fixed=complete_body()+"\n\nA clearer transition."
     st,repo,p,editor=await prepared([dict(title="Work",body=body),*review_ok()[:2],
         dict(problems=[problem(passages=["p2"])]),
-        correction("A clearer transition.","Connect the two already consolidated ideas without changing either."),
+        correction(fixed,"Connect the two already consolidated ideas without changing either."),
         confirmed("unexpected_new_problem"),confirmed(),review_ok()[3]])
     await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready" and len(st.editorial_stages[2].attempts)==1
@@ -204,17 +169,17 @@ async def test_confirmation_repairs_new_problem_id_without_reopening_diagnosis()
 
 
 @pytest.mark.asyncio
-async def test_reconsideration_can_reject_excessive_objection_without_fabricating_edits():
+async def test_excessive_objection_can_be_resolved_by_later_integral_correction():
     body=complete_body()+"\n\nThis is explicitly an interpretation, not an established factual claim."
-    closure=decision("not_a_defect")
-    closure["decisions"][0]["reasoning"]="The actual text explicitly distinguishes interpretation from established fact; the verifier's demand for a literal documentary sentence is excessive."
     st,repo,p,editor=await prepared([dict(title="Work",body=body),review_ok()[0],dict(problems=[problem(passages=["p2"])]),
-        correction("This remains explicitly an interpretation, not an established factual claim."),confirmed(resolved=False),
-        correction("The passage explicitly offers an interpretation, not an established factual claim."),confirmed(resolved=False),closure,*review_ok()[2:]])
+        correction(body),confirmed(resolved=False),
+        correction(body),confirmed(resolved=False),
+        correction(body,"Keep the explicit interpretation; the objection is not a real defect."),
+        confirmed(),*review_ok()[2:]])
     await editor.execute(st,Calls(repo,p,st))
     assert st.status=="text_ready"
-    assert st.editorial_stages[1].approval["editorial_decision"]["decisions"][0]["disposition"]=="not_a_defect"
-    assert len(st.editorial_stages[1].attempts)==2 and not st.error
+    assert len(st.editorial_stages[1].attempts)==3 and not st.error
+    assert "explicitly an interpretation" in st.work.body
 
 
 def test_legacy_planning_is_preserved_without_being_relabelled_as_a_draft():
@@ -245,4 +210,3 @@ async def test_final_save_failure_recovers_delivery_without_repeating_approved_o
     assert saved.status=="text_ready" and saved.error is None
     assert [stage.approval for stage in saved.editorial_stages]==approved
     assert len(p.prompts)==before and public(saved)["work"]["body"]==complete_body()
-
