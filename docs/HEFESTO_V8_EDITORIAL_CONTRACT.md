@@ -288,32 +288,21 @@ caminho normal do produto, sem intervenção manual no banco.
 confirmar nova tentativa integral, preservação dos resultados anteriores e avanço.
 Cobrir falha antes/depois da persistência e repetição de acionamento sem produção duplicada.
 
-## 12. Timeout por inatividade observável
+## 12. Timeout total de 240 segundos por chamada
 
-Retirar os 240 segundos como regra geral de desistência de uma chamada longa.
-Usar a atividade recebida por streaming para distinguir resposta em andamento de silêncio.
-Recebimento de novos eventos/trechos renova a observação de atividade.
+**Definição vigente aprovada em 13/10/2026:** restaurar o prazo total de
+**240 segundos por chamada ao modelo**, independentemente de eventos recebidos.
+Retirar a espera inicial de 60 segundos e o limite de silêncio de 30 segundos.
+Streaming permanece como transporte; seus eventos não renovam o prazo total.
+O prazo cobre a abertura e o consumo integral da resposta. O timeout HTTP
+do cliente também volta a 240.000 milissegundos.
 
-Distinguir espera inicial de interrupção depois que a resposta começou.
-Silêncio de rede não prova inatividade interna do pensamento do modelo.
-Não fabricar progresso por heartbeat local e tratá-lo como atividade do LLM.
-Streaming continua sendo transporte de uma única geração integral.
+Esta decisão substitui a definição de inatividade de 12/10/2026.
+Falhas continuam recuperáveis pelo fluxo normal; não retomar nem reparar o projeto
+f591ef10-c7f7-55fa-a8e9-26cf950a4655 nesta alteração. O usuário fará outro teste.
 
-Falha técnica deve permitir a retomada descrita acima.
-Prazos impostos pelo provedor/infraestrutura precisam ser identificados separadamente;
-mudar o temporizador local não garante removê-los.
-
-**Definição técnica aprovada em 12/10/2026:** a geração usa streaming. Qualquer
-evento/trecho recebido do provedor (incluindo partes de pensamento, quando
-existirem) renova a observação de atividade. Esperar no máximo **60 segundos**
-pelo primeiro evento. Depois do primeiro evento, **30 segundos** sem novo evento
-contam como inatividade. Não fabricar progresso local. Não manter os 240 segundos
-como teto total da chamada no cliente; prazos reais do provedor/infraestrutura
-continuam distintos e devem ser tratados como tal.
-
-**Verificação:** chamada com atividade além de 240 segundos não é cancelada por
-duração total local; silêncio de 30 segundos após atividade, ausência do primeiro
-evento em 60 segundos e erro do provedor são distinguíveis.
+**Verificação:** ausência de resposta e abertura travada atingem o prazo total;
+eventos contínuos não prorrogam a chamada. Sem inferência paga.
 
 ## 13. Cache obrigatório NO LLM
 
@@ -523,3 +512,8 @@ implementação de C (streaming/inatividade), D e E sobre a base do cache.
 
 Próximo: merge após CI; conferir deploy; marcar A/B/C/D/E no checklist só com
 evidência de merge/deploy; F/G depois.
+
+13/10/2026 — usuário revogou o timeout de inatividade 60/30 e autorizou restaurar
+240 segundos totais por chamada. Alteração limitada ao transporte e seus testes;
+streaming, modelo, temperatura, cache e regras editoriais preservados. Projeto
+f591ef10-c7f7-55fa-a8e9-26cf950a4655 não foi retomado nem modificado.
