@@ -548,7 +548,7 @@ def vertex_fixture(model="gemini-2.5-flash"):
         count_tokens=AsyncMock(return_value=types.CountTokensResponse(total_tokens=1000)))
     provider=object.__new__(Vertex)
     provider.model=model;provider._capacity=None
-    provider.first_event_timeout_s=60;provider.silence_timeout_s=30
+    provider.generation_timeout_s=240
     provider.client=SimpleNamespace(aio=SimpleNamespace(models=models))
     return provider,models
 
@@ -612,7 +612,7 @@ async def test_vertex_actual_thought_tokens_are_journaled_and_priced(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_stream_inactivity_before_first_event_is_recoverable():
+async def test_stream_total_timeout_before_first_event_is_recoverable():
     import asyncio
     from unittest.mock import AsyncMock
     from types import SimpleNamespace
@@ -624,10 +624,10 @@ async def test_stream_inactivity_before_first_event_is_recoverable():
         return chunks()
     provider=object.__new__(Vertex)
     provider.model="gemini-2.5-flash";provider._capacity=None
-    provider.first_event_timeout_s=0.01;provider.silence_timeout_s=30
+    provider.generation_timeout_s=0.01
     provider.client=SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(
         generate_content_stream=AsyncMock(side_effect=hang))))
-    with pytest.raises(Recoverable,match="inactivity"):
+    with pytest.raises(Recoverable,match="provider timeout"):
         await provider.generate("corpus","contract",100)
 
 
@@ -638,3 +638,36 @@ def test_commission_rejects_duration_above_ninety_minutes():
     with pytest.raises(ValidationError):
         EditorialBrief(theme="t",approach="a",duration_minutes=91,output_language="pt",audience="a",product="podcast")
 
+
+@pytest.mark.asyncio
+async def test_stream_events_do_not_extend_total_generation_deadline():
+    import asyncio
+    from unittest.mock import AsyncMock
+    from google.genai import types
+    provider, models = vertex_fixture()
+    provider.generation_timeout_s = 0.04
+    emitted = []
+    async def stream(**kwargs):
+        async def chunks():
+            while True:
+                await asyncio.sleep(0.005)
+                emitted.append(True)
+                yield types.GenerateContentResponse()
+        return chunks()
+    models.generate_content_stream = AsyncMock(side_effect=stream)
+    with pytest.raises(Recoverable, match="provider timeout"):
+        await provider.generate("corpus", "contract", 100)
+    assert emitted
+
+
+@pytest.mark.asyncio
+async def test_stream_setup_is_covered_by_total_generation_deadline():
+    import asyncio
+    from unittest.mock import AsyncMock
+    provider, models = vertex_fixture()
+    provider.generation_timeout_s = 0.01
+    async def hang(**kwargs):
+        await asyncio.sleep(10)
+    models.generate_content_stream = AsyncMock(side_effect=hang)
+    with pytest.raises(Recoverable, match="provider timeout"):
+        await provider.generate("corpus", "contract", 100)
