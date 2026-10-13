@@ -79,15 +79,13 @@ class Vertex:
     def __init__(self, project: str, location: str, model: str):
         self.model = model
         self.project, self.location = project, location
-        # Inactivity is observed on the stream (60s first event / 30s silence).
-        # Keep only a long transport ceiling aligned with the worker task timeout;
-        # do not use 240s as a total generation wall.
+        # Fixed total deadline per generation, explicitly restored on 2026-10-13.
+        # Stream events do not renew the deadline.
         self.client = genai.Client(vertexai=True, project=project, location=location,
-                                   http_options=types.HttpOptions(timeout=7_200_000,
+                                   http_options=types.HttpOptions(timeout=240_000,
                                       retry_options=types.HttpRetryOptions(attempts=1)))
         self._capacity = None
-        self.first_event_timeout_s = 60
-        self.silence_timeout_s = 30
+        self.generation_timeout_s = 240
 
     async def capacity(self) -> Capacity:
         if self._capacity:
@@ -174,6 +172,15 @@ class Vertex:
         return None
 
     async def generate(self, prompt: str, system: str, output_tokens: int, *, cached_context=None) -> dict:
+        try:
+            async with asyncio.timeout(self.generation_timeout_s):
+                return await self._generate(prompt, system, output_tokens,
+                                            cached_context=cached_context)
+        except asyncio.TimeoutError as error:
+            raise Recoverable(
+                f"provider timeout: generation exceeded {self.generation_timeout_s:g} seconds") from error
+
+    async def _generate(self, prompt: str, system: str, output_tokens: int, *, cached_context=None) -> dict:
         cap = await self.capacity()
         started = perf_counter()
         # Cached requests cannot set system_instruction. The unchanged operation
@@ -193,21 +200,7 @@ class Vertex:
         raw_chunks: list[dict] = []
         finish = "NO_CANDIDATES"
         meta = None
-        deadline = perf_counter() + self.first_event_timeout_s
-        iterator = stream.__aiter__()
-        while True:
-            remaining = deadline - perf_counter()
-            if remaining <= 0:
-                raise Recoverable(
-                    "provider inactivity: no stream event within the approved window")
-            try:
-                chunk = await asyncio.wait_for(anext(iterator), timeout=remaining)
-            except StopAsyncIteration:
-                break
-            except asyncio.TimeoutError as error:
-                raise Recoverable(
-                    "provider inactivity: no stream event within the approved window") from error
-            deadline = perf_counter() + self.silence_timeout_s
+        async for chunk in stream:
             raw_chunks.append(chunk.model_dump(mode="json"))
             if chunk.candidates:
                 candidate = chunk.candidates[0]
